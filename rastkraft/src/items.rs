@@ -460,14 +460,17 @@ impl Item {
         }
     }
 
-    /// Пауза между ударами.
+    /// Время полной зарядки удара (как в новых версиях классических блочных игр).
     pub fn cooldown(self) -> f32 {
         match self {
-            Item::Tool(ToolKind::Dagger, _) => 0.22,
-            Item::Tool(ToolKind::Mace, _) => 0.8,
-            Item::Tool(ToolKind::Spear, _) => 0.55,
-            Item::Tool(ToolKind::Axe, _) => 0.6,
-            _ => 0.4,
+            Item::Tool(ToolKind::Dagger, _) => 0.4,
+            Item::Tool(ToolKind::Sword, _) => 0.625,
+            Item::Tool(ToolKind::Spear, _) => 0.8,
+            Item::Tool(ToolKind::Pickaxe, _) => 0.83,
+            Item::Tool(ToolKind::Axe, _) => 1.0,
+            Item::Tool(ToolKind::Shovel, _) => 1.0,
+            Item::Tool(ToolKind::Mace, _) => 1.25,
+            _ => 0.25,
         }
     }
 
@@ -523,7 +526,7 @@ impl Item {
         match self {
             Item::Tool(k, m) => Some(match k {
                 ToolKind::Sword | ToolKind::Dagger | ToolKind::Spear | ToolKind::Mace => {
-                    format!("Урон: {:.0} · удар раз в {:.2} с · дальность {:.1}", self.damage(), self.cooldown(), self.reach())
+                    format!("Урон: {:.0} · полная зарядка {:.2} с · дальность {:.1}", self.damage(), self.cooldown(), self.reach())
                 }
                 _ => format!("Урон: {:.0} · скорость добычи ×{:.1}", self.damage(), m.speed()),
             }),

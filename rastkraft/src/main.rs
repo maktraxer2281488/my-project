@@ -98,6 +98,8 @@ struct Game {
     break_progress: f32,
     use_cd: f32,
     attack_cd: f32,
+    attack_max: f32,
+    crit_t: f32,
     swing_t: f32,
     /// Прогресс взмаха руки 0..1 (1 — покой).
     swing_p: f32,
@@ -145,6 +147,8 @@ impl Game {
             break_progress: 0.0,
             use_cd: 0.0,
             attack_cd: 0.0,
+            attack_max: 0.25,
+            crit_t: 0.0,
             swing_t: 0.0,
             swing_p: 1.0,
             equip: 0.0,
@@ -981,13 +985,17 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
         g.chat.retain(|c| c.1 > 0.0);
         g.label_t -= dt;
         g.use_cd -= dt;
-        g.attack_cd -= dt;
+        g.attack_cd = (g.attack_cd - dt).max(0.0);
+        g.crit_t = (g.crit_t - dt).max(0.0);
         // взмах длится 0.3 с; смена предмета — рука опускается и поднимается
         g.swing_p = (g.swing_p + dt / 0.3).min(1.0);
         let held_now = g.player.held();
         if held_now != g.last_held {
             g.last_held = held_now;
             g.equip = 0.8;
+            // смена предмета сбрасывает зарядку удара
+            g.attack_max = held_now.cooldown();
+            g.attack_cd = g.attack_max;
         }
         g.equip = (g.equip - dt * 4.0).max(0.0);
         let look = vec2(g.player.yaw, g.player.pitch);
@@ -1085,14 +1093,26 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
             if lmb_p && (g.swing_p >= 0.5) {
                 g.swing_p = 0.0;
             }
+            // зарядка удара: 0 сразу после взмаха, 1 — полный удар
+            let charge = 1.0 - g.attack_cd / g.attack_max.max(0.01);
+            let charge_mul = 0.2 + 0.8 * charge * charge;
+            let crit = charge > 0.9 && !g.player.body.on_ground && g.player.body.vel.y < -0.5 && !g.player.flying;
+            let atk_mul = charge_mul * if crit { 1.5 } else { 1.0 };
+            let attacking = lmb_p && (player_hit.is_some() || mob_hit.is_some() || block_hit.is_none());
+            if attacking {
+                g.attack_max = held.cooldown();
+                g.attack_cd = g.attack_max;
+            }
 
             if let Some((rid, _)) = player_hit {
                 g.break_target = None;
-                if lmb_p && g.attack_cd <= 0.0 {
-                    g.attack_cd = held.cooldown();
+                if lmb_p {
+                    if crit {
+                        g.crit_t = 0.4;
+                    }
                     if pvp {
-                        let dmg = held.damage() * g.player.damage_bonus();
-                        let knock = (dir.with_y(0.0).normalize_or_zero() * 6.0 + vec3(0.0, 4.0, 0.0)).to_array();
+                        let dmg = held.damage() * g.player.damage_bonus() * atk_mul;
+                        let knock = ((dir.with_y(0.0).normalize_or_zero() * 6.0 + vec3(0.0, 4.0, 0.0)) * (0.3 + 0.7 * charge)).to_array();
                         if let Some(n) = &g.net {
                             let m = Msg::Hit { target: rid, from: n.my_id, dmg, knock };
                             if n.host { n.send_to(rid, &m) } else { n.broadcast(&m, None) }
@@ -1106,9 +1126,9 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                 }
             } else if let Some((mi, _)) = mob_hit {
                 g.break_target = None;
-                if lmb_p && g.attack_cd <= 0.0 {
+                if lmb_p {
                     let from = g.player.body.pos;
-                    let dmg = held.damage() * g.player.damage_bonus();
+                    let dmg = held.damage() * g.player.damage_bonus() * atk_mul;
                     let host_dim = g.remotes.get(&0).map(|r| r.st.dim);
                     let client_mode = g.net.as_ref().is_some_and(|n| !n.host) && host_dim == Some(dim_code(dim));
                     if client_mode {
@@ -1124,8 +1144,13 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                     let d = m.d();
                     let at = m.body.pos + vec3(0.0, m.body.h * 0.6, 0.0);
                     let cols = [Color::from_rgba(d.c1.0, d.c1.1, d.c1.2, 255), Color::from_rgba(200, 30, 30, 255), Color::from_rgba(d.c2.0, d.c2.1, d.c2.2, 255)];
-                    g.ents.burst(at, if m.alive() { 8 } else { 22 }, 0.5, &cols, 0.09, 3.5);
-                    g.attack_cd = held.cooldown();
+                    g.ents.burst(at, if !m.alive() { 22 } else if charge > 0.9 { 8 } else { 3 }, 0.5, &cols, 0.09, 3.5);
+                    if crit {
+                        // критический удар: россыпь искр
+                        let sparks = [Color::from_rgba(255, 240, 160, 255), Color::from_rgba(255, 200, 60, 255), WHITE];
+                        g.ents.burst(at, 14, 0.6, &sparks, 0.06, 5.0);
+                        g.crit_t = 0.4;
+                    }
                     g.player.exhaustion += 0.1;
                 }
             } else if let Some((hit, _, _)) = block_hit {
@@ -2181,6 +2206,18 @@ fn draw_hud(app: &mut App) {
         let c = Color::new(1.0, 1.0, 1.0, 0.85);
         draw_rectangle(w / 2.0 - 10.0 * s, h / 2.0 - 1.0 * s, 20.0 * s, 2.0 * s, c);
         draw_rectangle(w / 2.0 - 1.0 * s, h / 2.0 - 10.0 * s, 2.0 * s, 20.0 * s, c);
+        // индикатор зарядки удара под прицелом
+        let charge = 1.0 - g.attack_cd / g.attack_max.max(0.01);
+        if charge < 1.0 {
+            let (bw, bh) = (32.0 * s, 4.0 * s);
+            let (bx, by) = (w / 2.0 - bw / 2.0, h / 2.0 + 16.0 * s);
+            draw_rectangle(bx - s, by - s, bw + 2.0 * s, bh + 2.0 * s, Color::new(0.0, 0.0, 0.0, 0.55));
+            draw_rectangle(bx, by, bw * charge, bh, Color::new(1.0, 1.0, 1.0, 0.9));
+        }
+        if g.crit_t > 0.0 {
+            let a = (g.crit_t / 0.4).min(1.0);
+            app.ui.text("Крит!", w / 2.0 - app.ui.measure("Крит!", 16.0) / 2.0, h / 2.0 - 18.0 * s, 16.0, Color::new(1.0, 0.85, 0.3, a));
+        }
     }
 
     let slot = 46.0 * s;
@@ -2427,7 +2464,9 @@ fn render_world(app: &mut App) {
         set_camera(&hand_cam);
         let lag = vec2(g.player.yaw, g.player.pitch) - g.lag_look;
         let swing = std::env::var("RK_SWING").ok().and_then(|v| v.parse().ok()).unwrap_or(g.swing_p);
-        let anim = model::HandAnim { swing, equip: g.equip, eat: p.eat_t, lag: lag.clamp(Vec2::splat(-0.5), Vec2::splat(0.5)), walk: wp, bob: walk_amp };
+        let recharge = 1.0 - (1.0 - g.attack_cd / g.attack_max.max(0.01));
+        // пока удар заряжается, предмет чуть опущен
+        let anim = model::HandAnim { swing, equip: g.equip.max(recharge * recharge * 0.3), eat: p.eat_t, lag: lag.clamp(Vec2::splat(-0.5), Vec2::splat(0.5)), walk: wp, bob: walk_amp };
         let hr = dir.cross(cam_up).normalize_or_zero();
         let hu = hr.cross(dir).normalize_or_zero();
         model::draw_first_person(&app.ui.atlas, hand_eye, dir, hr, hu, p.held(), &anim, sleeve, look.skin, light);
