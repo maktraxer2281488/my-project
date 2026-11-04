@@ -34,7 +34,27 @@ pub enum Msg {
     Hit { target: u8, from: u8, dmg: f32, knock: [f32; 3] },
     Chat { text: String },
     Leave { id: u8 },
+    /// Снимок существ вокруг игрока + время суток (хост → клиент).
+    Mobs { time: f32, list: Vec<MobSnap> },
+    /// Клиент ударил существо.
+    MobHit { uid: u32, dmg: f32 },
+    /// Выдать предметы (трофей убитого клиентом существа).
+    Give { item: u32, count: u16 },
 }
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MobSnap {
+    pub uid: u32,
+    pub def: u16,
+    pub pos: [f32; 3],
+    pub yaw: f32,
+    pub hurt: bool,
+    pub attack: u8,
+    pub dying: u8,
+}
+
+/// Отправитель удара «существо» в сообщении Hit.
+pub const FROM_MOB: u8 = 254;
 
 // ---------- кодирование ----------
 struct W(Vec<u8>);
@@ -156,6 +176,32 @@ pub fn encode(m: &Msg) -> Vec<u8> {
             w.u8(7);
             w.u8(*id);
         }
+        Msg::Mobs { time, list } => {
+            w.u8(8);
+            w.f32(*time);
+            w.u32(list.len() as u32);
+            for m in list {
+                w.u32(m.uid);
+                w.u32(m.def as u32);
+                for v in m.pos {
+                    w.f32(v);
+                }
+                w.f32(m.yaw);
+                w.u8(m.hurt as u8);
+                w.u8(m.attack);
+                w.u8(m.dying);
+            }
+        }
+        Msg::MobHit { uid, dmg } => {
+            w.u8(9);
+            w.u32(*uid);
+            w.f32(*dmg);
+        }
+        Msg::Give { item, count } => {
+            w.u8(10);
+            w.u32(*item);
+            w.u32(*count as u32);
+        }
     }
     let mut out = (w.0.len() as u32).to_le_bytes().to_vec();
     out.extend(w.0);
@@ -193,6 +239,25 @@ pub fn decode(b: &[u8]) -> Option<Msg> {
         5 => Msg::Hit { target: r.u8()?, from: r.u8()?, dmg: r.f32()?, knock: [r.f32()?, r.f32()?, r.f32()?] },
         6 => Msg::Chat { text: r.str()? },
         7 => Msg::Leave { id: r.u8()? },
+        8 => {
+            let time = r.f32()?;
+            let n = r.u32()? as usize;
+            let mut list = Vec::with_capacity(n.min(512));
+            for _ in 0..n {
+                list.push(MobSnap {
+                    uid: r.u32()?,
+                    def: r.u32()? as u16,
+                    pos: [r.f32()?, r.f32()?, r.f32()?],
+                    yaw: r.f32()?,
+                    hurt: r.u8()? == 1,
+                    attack: r.u8()?,
+                    dying: r.u8()?,
+                });
+            }
+            Msg::Mobs { time, list }
+        }
+        9 => Msg::MobHit { uid: r.u32()?, dmg: r.f32()? },
+        10 => Msg::Give { item: r.u32()?, count: r.u32()? as u16 },
         _ => return None,
     })
 }
@@ -223,6 +288,8 @@ fn reader(mut s: TcpStream, id: u8, tx: Sender<(u8, Option<Msg>)>) {
 type Peers = Arc<Mutex<Vec<(u8, TcpStream)>>>;
 
 pub struct Net {
+    /// Строка для маяка в локальной сети (имя хоста, мир, игроки).
+    pub beacon: Option<std::sync::Arc<std::sync::Mutex<String>>>,
     pub host: bool,
     pub my_id: u8,
     pub name: String,
@@ -251,7 +318,9 @@ impl Net {
                 }
             }
         });
-        Ok(Net { host: true, my_id: 0, name: name.to_string(), rx, peers, info: format!("Сервер открыт: {}:{}", local_ip(), PORT) })
+        let beacon = std::sync::Arc::new(std::sync::Mutex::new(format!("{name}|игроков: 1")));
+        start_beacon(beacon.clone());
+        Ok(Net { beacon: Some(beacon), host: true, my_id: 0, name: name.to_string(), rx, peers, info: format!("Сервер открыт: {}:{}", local_ip(), PORT) })
     }
 
     /// Подключиться к хосту.
@@ -263,7 +332,7 @@ impl Net {
         let r = s.try_clone()?;
         std::thread::spawn(move || reader(r, 0, tx));
         let peers: Peers = Arc::new(Mutex::new(vec![(0, s)]));
-        let n = Net { host: false, my_id: 255, name: name.to_string(), rx, peers, info: format!("Подключено к {addr}") };
+        let n = Net { beacon: None, host: false, my_id: 255, name: name.to_string(), rx, peers, info: format!("Подключено к {addr}") };
         n.send_to(0, &Msg::Hello { name: name.to_string() });
         Ok(n)
     }
@@ -287,6 +356,72 @@ impl Net {
 
     pub fn peer_count(&self) -> usize {
         self.peers.lock().unwrap().len()
+    }
+}
+
+pub const BEACON_PORT: u16 = 7778;
+
+/// Хост раз в секунду сообщает в локальную сеть: «здесь идёт игра».
+pub fn start_beacon(info: std::sync::Arc<std::sync::Mutex<String>>) {
+    std::thread::spawn(move || {
+        let Ok(sock) = std::net::UdpSocket::bind("0.0.0.0:0") else { return };
+        let _ = sock.set_broadcast(true);
+        loop {
+            let msg = format!("RASTKRAFT1|{}", info.lock().unwrap());
+            let _ = sock.send_to(msg.as_bytes(), ("255.255.255.255", BEACON_PORT));
+            let _ = sock.send_to(msg.as_bytes(), ("127.0.0.1", BEACON_PORT));
+            std::thread::sleep(std::time::Duration::from_millis(1000));
+        }
+    });
+}
+
+/// Найденная игра в локальной сети.
+#[derive(Clone, Debug)]
+pub struct Found {
+    pub addr: String,
+    pub info: String,
+    pub seen: std::time::Instant,
+}
+
+/// Слушает маяки хостов в локальной сети.
+pub struct Finder {
+    pub found: std::sync::Arc<std::sync::Mutex<Vec<Found>>>,
+}
+
+impl Finder {
+    pub fn start() -> Option<Finder> {
+        let sock = std::net::UdpSocket::bind(("0.0.0.0", BEACON_PORT)).ok()?;
+        let found = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Found>::new()));
+        let f2 = found.clone();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 512];
+            while let Ok((n, from)) = sock.recv_from(&mut buf) {
+                let text = String::from_utf8_lossy(&buf[..n]).to_string();
+                let Some(info) = text.strip_prefix("RASTKRAFT1|") else { continue };
+                let addr = from.ip().to_string();
+                let mut list = f2.lock().unwrap();
+                list.retain(|f| f.addr != addr);
+                list.push(Found { addr, info: info.to_string(), seen: std::time::Instant::now() });
+            }
+        });
+        Some(Finder { found })
+    }
+
+    pub fn list(&self) -> Vec<Found> {
+        let mut l = self.found.lock().unwrap();
+        l.retain(|f| f.seen.elapsed().as_secs() < 5);
+        // одна и та же игра может прийти по двум адресам — оставляем один (не 127.0.0.1)
+        let mut out: Vec<Found> = Vec::new();
+        for f in l.iter() {
+            if let Some(o) = out.iter_mut().find(|o| o.info == f.info) {
+                if o.addr.starts_with("127.") {
+                    *o = f.clone();
+                }
+            } else {
+                out.push(f.clone());
+            }
+        }
+        out
     }
 }
 
@@ -323,6 +458,9 @@ mod tests {
             Msg::Hit { target: 2, from: 0, dmg: 7.5, knock: [1.0, 0.5, 0.0] },
             Msg::Chat { text: "привет".into() },
             Msg::Leave { id: 2 },
+            Msg::Mobs { time: 0.3, list: vec![MobSnap { uid: 7, def: 12, pos: [1.0, 2.0, 3.0], yaw: 0.4, hurt: true, attack: 128, dying: 0 }] },
+            Msg::MobHit { uid: 9, dmg: 3.5 },
+            Msg::Give { item: 0x0400_0010, count: 3 },
         ];
         for m in msgs {
             let e = encode(&m);
@@ -358,5 +496,26 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert!(ok);
+    }
+}
+
+#[cfg(test)]
+mod lan_tests {
+    use super::*;
+
+    #[test]
+    fn beacon_is_found() {
+        let f = Finder::start().expect("порт 7778 свободен");
+        let info = std::sync::Arc::new(std::sync::Mutex::new("Хост · мир · игроков: 1".to_string()));
+        start_beacon(info);
+        let mut ok = false;
+        for _ in 0..40 {
+            if !f.list().is_empty() {
+                ok = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert!(ok, "маяк не найден");
     }
 }

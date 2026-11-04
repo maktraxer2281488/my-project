@@ -68,6 +68,7 @@ enum Screen {
     Settings,
     Inventory,
     Dead,
+    Chat,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -108,6 +109,7 @@ struct Game {
     remotes: Remotes,
     chat: Vec<(String, f32)>,
     state_t: f32,
+    mob_t: f32,
     third_person: bool,
     rng: u32,
 }
@@ -147,6 +149,7 @@ impl Game {
             remotes: Remotes::new(),
             chat: Vec::new(),
             state_t: 0.0,
+            mob_t: 0.0,
             third_person: false,
             rng: seed | 1,
         }
@@ -224,6 +227,8 @@ struct App {
     worlds_list: Vec<save::WorldInfo>,
     /// Экран открыт в этом кадре — не закрывать его той же клавишей.
     just_opened: bool,
+    finder: Option<net::Finder>,
+    chat_input: String,
 }
 
 fn set_grab(app: &mut App, grab: bool) {
@@ -542,7 +547,11 @@ fn process_net(app: &mut App) {
                 edits.push((if dim == 1 { Dim::Heaven } else { Dim::Overworld }, ivec3(x, y, z), b));
             }
             Some(Msg::Hit { target, from: attacker, dmg, knock }) => {
-                if target == n.my_id {
+                if target == n.my_id && attacker == net::FROM_MOB {
+                    if !g.creative && g.player.health > 0.0 {
+                        g.player.hurt(dmg, Vec3::from(knock), false);
+                    }
+                } else if target == n.my_id {
                     if app.settings.pvp && !g.creative && g.player.health > 0.0 {
                         g.player.hurt(dmg, Vec3::from(knock), false);
                         if g.player.health <= 0.0 {
@@ -565,6 +574,33 @@ fn process_net(app: &mut App) {
                 }
                 g.say(text);
             }
+            Some(Msg::MobHit { uid, dmg }) if n.host => {
+                let from_pos = g.remotes.get(&from).map_or(Vec3::ZERO, |r| Vec3::from(r.st.pos));
+                if let Some(m) = g.mobs.list.iter_mut().find(|m| m.uid == uid) {
+                    m.damage(dmg, from_pos);
+                    if !m.alive() {
+                        m.killer = Some(from);
+                    }
+                }
+            }
+            Some(Msg::Mobs { time, list }) if !n.host => {
+                g.time = time;
+                let host_dim = g.remotes.get(&0).map(|r| r.st.dim);
+                if host_dim == Some(dim_code(g.dim)) {
+                    g.mobs.apply_snapshot(&list);
+                    if std::env::var("RK_NETLOG").is_ok() {
+                        eprintln!("NETLOG mobs_from_host={} host_dim={:?}", list.len(), host_dim);
+                    }
+                }
+            }
+            Some(Msg::Give { item, count }) => {
+                let it = Item::from_code(item);
+                let left = g.player.inv.add(it, count);
+                if left > 0 {
+                    let p = g.player.body.pos + vec3(0.0, 1.0, 0.0);
+                    g.ents.spawn_drop(it, left, p, 0.4);
+                }
+            }
             Some(Msg::Leave { id }) => {
                 if let Some(r) = g.remotes.remove(&id) {
                     g.say(format!("{} покинул игру", r.st.name));
@@ -581,6 +617,21 @@ fn process_net(app: &mut App) {
                 }
             }
             _ => {}
+        }
+    }
+    // хост: существа и время для каждого клиента ~10 раз в секунду
+    if n.host {
+        g.mob_t -= get_frame_time();
+        if g.mob_t <= 0.0 {
+            g.mob_t = 0.1;
+            for (id, r) in g.remotes.iter() {
+                let list = if r.st.dim == dim_code(g.dim) { g.mobs.snapshot(Vec3::from(r.st.pos), 96.0) } else { Vec::new() };
+                n.send_to(*id, &Msg::Mobs { time: g.time, list });
+            }
+            if let Some(b) = &n.beacon {
+                let world = if g.name.is_empty() { "мир".to_string() } else { g.name.clone() };
+                *b.lock().unwrap() = format!("{} · {} · игроков: {}", n.name, world, g.remotes.len() + 1);
+            }
         }
     }
     // своё состояние ~20 раз в секунду
@@ -864,7 +915,28 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
         {
             let world = &g.worlds[dim as usize];
             g.player.update(world, dt, creative, playing, difficulty);
-            g.mobs.update(world, &mut g.player, &mut g.ents, dt, daylight, difficulty, creative);
+            // кто управляет существами: хост (или одиночная игра) — симулирует; клиент — показывает снимки хоста
+            let host_dim = g.remotes.get(&0).map(|r| r.st.dim);
+            let client_mode = g.net.as_ref().is_some_and(|n| !n.host) && host_dim == Some(dim_code(dim));
+            if client_mode {
+                g.mobs.client_tick(world, dt, g.player.body.pos);
+            } else {
+                let is_host = g.net.as_ref().is_some_and(|n| n.host);
+                let others: Vec<(u8, Vec3)> = if is_host {
+                    g.remotes.iter().filter(|(_, r)| r.st.dim == dim_code(dim) && r.st.health > 0.0).map(|(id, r)| (*id, Vec3::from(r.st.pos))).collect()
+                } else {
+                    Vec::new()
+                };
+                let ev = g.mobs.update(world, &mut g.player, &mut g.ents, dt, daylight, difficulty, creative, &others);
+                if let Some(n) = &g.net {
+                    for (id, dmg, knock) in ev.hurts {
+                        n.send_to(id, &Msg::Hit { target: id, from: net::FROM_MOB, dmg, knock: knock.to_array() });
+                    }
+                    for (id, it, cnt) in ev.gives {
+                        n.send_to(id, &Msg::Give { item: it.code(), count: cnt });
+                    }
+                }
+            }
             let picked = g.ents.update(world, g.player.body.pos, dt, g.player.health > 0.0);
             for (it, n) in picked {
                 let left = g.player.inv.add(it, n);
@@ -1009,7 +1081,17 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                 if lmb_p && g.attack_cd <= 0.0 {
                     let from = g.player.body.pos;
                     let dmg = held.damage() * g.player.damage_bonus();
-                    g.mobs.list[mi].damage(dmg, from);
+                    let host_dim = g.remotes.get(&0).map(|r| r.st.dim);
+                    let client_mode = g.net.as_ref().is_some_and(|n| !n.host) && host_dim == Some(dim_code(dim));
+                    if client_mode {
+                        // удар решает хост; у себя только вспышка
+                        if let Some(n) = &g.net {
+                            n.broadcast(&Msg::MobHit { uid: g.mobs.list[mi].uid, dmg }, None);
+                        }
+                        g.mobs.list[mi].hurt_t = 0.3;
+                    } else {
+                        g.mobs.list[mi].damage(dmg, from);
+                    }
                     let m = &g.mobs.list[mi];
                     let d = m.d();
                     let at = m.body.pos + vec3(0.0, m.body.h * 0.6, 0.0);
@@ -1404,48 +1486,215 @@ fn draw_new_world(app: &mut App) -> Option<Screen> {
     next
 }
 
+fn servers_path() -> std::path::PathBuf {
+    save::saves_dir().parent().map(|p| p.join("servers.txt")).unwrap_or_else(|| "servers.txt".into())
+}
+
+fn load_servers() -> Vec<(String, String)> {
+    std::fs::read_to_string(servers_path())
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| l.split_once('|').map(|(a, b)| (a.to_string(), b.to_string())))
+        .collect()
+}
+
+fn save_servers(list: &[(String, String)]) {
+    let text: String = list.iter().map(|(n, a)| format!("{n}|{a}\n")).collect();
+    let _ = std::fs::write(servers_path(), text);
+}
+
+fn try_join(app: &mut App, addr: &str) {
+    app.settings.save();
+    match Net::join(addr.trim(), &app.settings.name) {
+        Ok(n) => {
+            app.pending_net = Some(n);
+            app.focus = Field::None;
+        }
+        Err(e) => app.status = Some((format!("Не удалось подключиться к {addr}: {e}"), 4.0)),
+    }
+}
+
 fn multiplayer_screen(app: &mut App) -> Option<Screen> {
     let (w, h) = (screen_width(), screen_height());
     let s = app.ui.s;
     draw_rectangle(0.0, 0.0, w, h, Color::new(0.08, 0.09, 0.12, 1.0));
-    app.ui.text_center("Сетевая игра (локальная сеть)", w / 2.0, h * 0.13, 32.0, WHITE);
-    let bw = 460.0 * s;
-    let bh = 46.0 * s;
-    let bx = (w - bw) / 2.0;
-    let mut y = h * 0.24;
-    text_field(app, Field::Nick, bx, y, bw, bh, "Ваше имя:");
-    y += bh + 34.0 * s;
-    text_field(app, Field::Ip, bx, y, bw, bh, "Адрес сервера (например 192.168.1.5):");
-    y += bh + 16.0 * s;
-    let mut next = None;
-    if app.pending_net.is_some() {
-        app.ui.text_center("Подключение…", w / 2.0, y + 20.0 * s, 18.0, ACCENT);
-    } else if app.ui.button(bx, y, bw, bh, "Подключиться") || (is_key_pressed(KeyCode::Enter) && app.focus == Field::Ip) {
-        app.settings.save();
-        match Net::join(app.ip_input.trim(), &app.settings.name) {
-            Ok(n) => {
-                app.pending_net = Some(n);
-                app.focus = Field::None;
-            }
-            Err(e) => app.status = Some((format!("Не удалось подключиться: {e}"), 4.0)),
+    app.ui.text_center("Сетевая игра", w / 2.0, h * 0.08, 32.0, WHITE);
+    if app.finder.is_none() {
+        app.finder = net::Finder::start();
+    }
+    let col_w = (w * 0.42).min(520.0 * s);
+    let gap = 24.0 * s;
+    let lx = w / 2.0 - col_w - gap / 2.0;
+    let rx = w / 2.0 + gap / 2.0;
+    let bh = 42.0 * s;
+    let top = h * 0.14;
+    let mut join: Option<String> = None;
+
+    // левая колонка: имя, найденные игры
+    let mut y = top + 18.0 * s;
+    text_field(app, Field::Nick, lx, y, col_w, bh, "Ваше имя:");
+    y += bh + 30.0 * s;
+    app.ui.text("Игры в вашей сети (находятся сами):", lx, y, 16.0, ACCENT);
+    y += 12.0 * s;
+    let found = app.finder.as_ref().map(|f| f.list()).unwrap_or_default();
+    if found.is_empty() {
+        app.ui.text("Пока никого… Друг должен нажать Esc → «Открыть для сети».", lx, y + 26.0 * s, 13.0, GRAY);
+    }
+    for f in found.iter().take(5) {
+        draw_rectangle(lx, y + 6.0 * s, col_w, bh + 8.0 * s, Color::new(0.13, 0.16, 0.14, 0.95));
+        app.ui.text(&f.info, lx + 10.0 * s, y + 26.0 * s, 14.0, WHITE);
+        app.ui.text(&f.addr, lx + 10.0 * s, y + 44.0 * s, 12.0, GRAY);
+        if app.pending_net.is_none() && app.ui.button(lx + col_w - 110.0 * s, y + 12.0 * s, 100.0 * s, bh - 4.0 * s, "Войти") {
+            join = Some(f.addr.clone());
+        }
+        y += bh + 14.0 * s;
+    }
+
+    // правая колонка: свои серверы и прямое подключение
+    let mut y = top + 18.0 * s;
+    text_field(app, Field::Ip, rx, y, col_w, bh, "Адрес (IP или имя:порт):");
+    y += bh + 8.0 * s;
+    let half = (col_w - 8.0 * s) / 2.0;
+    if app.pending_net.is_none() && (app.ui.button(rx, y, half, bh, "Подключиться") || (is_key_pressed(KeyCode::Enter) && app.focus == Field::Ip)) {
+        join = Some(app.ip_input.clone());
+    }
+    if app.ui.button(rx + half + 8.0 * s, y, half, bh, "Сохранить в список") && !app.ip_input.trim().is_empty() {
+        let mut list = load_servers();
+        let addr = app.ip_input.trim().to_string();
+        if !list.iter().any(|(_, a)| *a == addr) {
+            list.push((format!("Сервер {}", list.len() + 1), addr));
+            save_servers(&list);
         }
     }
-    y += bh + 24.0 * s;
-    let lines = [
-        "Чтобы открыть свой мир для друзей: зайдите в мир,",
-        "нажмите Esc → «Открыть для сети». Друзья вводят ваш адрес.",
-        "PvP включается в настройках (по умолчанию включено).",
-    ];
-    for l in lines {
-        app.ui.text_center(l, w / 2.0, y, 14.0, Color::new(0.75, 0.78, 0.85, 1.0));
-        y += 22.0 * s;
+    y += bh + 26.0 * s;
+    app.ui.text("Мои серверы:", rx, y, 16.0, ACCENT);
+    y += 12.0 * s;
+    let mut list = load_servers();
+    let mut remove: Option<usize> = None;
+    if list.is_empty() {
+        app.ui.text("Список пуст — введите адрес и нажмите «Сохранить».", rx, y + 26.0 * s, 13.0, GRAY);
     }
-    if app.ui.button(bx, h * 0.82, bw, bh, "Назад") || is_key_pressed(KeyCode::Escape) {
+    for (i, (name, addr)) in list.iter().enumerate().take(5) {
+        draw_rectangle(rx, y + 6.0 * s, col_w, bh + 8.0 * s, Color::new(0.13, 0.14, 0.18, 0.95));
+        app.ui.text(name, rx + 10.0 * s, y + 26.0 * s, 14.0, WHITE);
+        app.ui.text(addr, rx + 10.0 * s, y + 44.0 * s, 12.0, GRAY);
+        if app.pending_net.is_none() && app.ui.button(rx + col_w - 200.0 * s, y + 12.0 * s, 92.0 * s, bh - 4.0 * s, "Войти") {
+            join = Some(addr.clone());
+        }
+        if app.ui.button(rx + col_w - 100.0 * s, y + 12.0 * s, 90.0 * s, bh - 4.0 * s, "Удалить") {
+            remove = Some(i);
+        }
+        y += bh + 14.0 * s;
+    }
+    if let Some(i) = remove {
+        list.remove(i);
+        save_servers(&list);
+    }
+
+    let hy = h * 0.74;
+    let hints = [
+        "В одной сети (Wi-Fi дома): друг открывает мир (Esc → «Открыть для сети»), игра появится слева сама.",
+        "Через интернет: хосту нужен проброс порта 7777 на роутере, либо бесплатный туннель playit.gg,",
+        "либо оба ставят Radmin VPN / ZeroTier — тогда это как одна сеть. Мир, существа и время общие.",
+    ];
+    for (i, l) in hints.iter().enumerate() {
+        app.ui.text_center(l, w / 2.0, hy + i as f32 * 20.0 * s, 13.0, Color::new(0.75, 0.78, 0.85, 1.0));
+    }
+    if app.pending_net.is_some() {
+        app.ui.text_center("Подключение…", w / 2.0, h * 0.86, 18.0, ACCENT);
+    }
+    let mut next = None;
+    if let Some(addr) = join {
+        try_join(app, &addr);
+    }
+    if app.ui.button((w - 300.0 * s) / 2.0, h * 0.89, 300.0 * s, bh, "Назад") || (is_key_pressed(KeyCode::Escape) && app.focus != Field::Ip) {
         app.pending_net = None;
         app.focus = Field::None;
         next = Some(Screen::Title);
     }
     next
+}
+
+/// Строка чата (T): ввод сообщения.
+fn chat_screen(app: &mut App) -> Option<Screen> {
+    let (w, h) = (screen_width(), screen_height());
+    let s = app.ui.s;
+    if app.just_opened {
+        while get_char_pressed().is_some() {}
+    } else {
+        while let Some(c) = get_char_pressed() {
+            if !c.is_control() && app.chat_input.chars().count() < 100 {
+                app.chat_input.push(c);
+            }
+        }
+    }
+    if is_key_pressed(KeyCode::Backspace) {
+        app.chat_input.pop();
+    }
+    let bh = 34.0 * s;
+    let y = h - 110.0 * s;
+    draw_rectangle(8.0 * s, y, w - 16.0 * s, bh, Color::new(0.0, 0.0, 0.0, 0.6));
+    let caret = if (app.time * 2.0).fract() < 0.5 { "|" } else { "" };
+    app.ui.text(&format!("> {}{}", app.chat_input, caret), 18.0 * s, y + bh * 0.68, 16.0, WHITE);
+    if let Some(g) = app.game.as_ref() {
+        // вся недавняя история
+        for (i, (t, _)) in g.chat.iter().rev().enumerate() {
+            let ly = y - 12.0 * s - i as f32 * 20.0 * s;
+            draw_rectangle(8.0 * s, ly - 15.0 * s, app.ui.measure(t, 14.0) + 12.0 * s, 20.0 * s, Color::new(0.0, 0.0, 0.0, 0.45));
+            app.ui.text(t, 14.0 * s, ly, 14.0, WHITE);
+        }
+    }
+    if app.just_opened {
+        return None;
+    }
+    if is_key_pressed(KeyCode::Enter) {
+        let text = app.chat_input.trim().to_string();
+        app.chat_input.clear();
+        if !text.is_empty() {
+            let name = app.settings.name.clone();
+            if let Some(g) = app.game.as_mut() {
+                let line = format!("<{name}> {text}");
+                if let Some(n) = &g.net {
+                    n.broadcast(&Msg::Chat { text: line.clone() }, None);
+                }
+                g.say(line);
+            }
+        }
+        return Some(Screen::Playing);
+    }
+    if is_key_pressed(KeyCode::Escape) {
+        app.chat_input.clear();
+        return Some(Screen::Playing);
+    }
+    None
+}
+
+/// Список игроков (пока зажат Tab).
+fn draw_player_list(app: &mut App) {
+    let Some(g) = app.game.as_ref() else { return };
+    let (w, _) = (screen_width(), screen_height());
+    let s = app.ui.s;
+    let mut rows = vec![(format!("{} (вы)", app.settings.name), g.player.health)];
+    for r in g.remotes.values() {
+        rows.push((r.st.name.clone(), r.st.health));
+    }
+    let pw = 360.0 * s;
+    let ph = (40.0 + rows.len() as f32 * 26.0) * s;
+    let x = (w - pw) / 2.0;
+    let y = 60.0 * s;
+    app.ui.panel(x, y, pw, ph);
+    let title = match &g.net {
+        Some(n) if n.host => format!("Игроки — вы хост · {}", n.info),
+        Some(_) => "Игроки на сервере".to_string(),
+        None => "Одиночная игра".to_string(),
+    };
+    app.ui.text_center(&title, w / 2.0, y + 24.0 * s, 14.0, ACCENT);
+    for (i, (name, hp)) in rows.iter().enumerate() {
+        let ry = y + (48.0 + i as f32 * 26.0) * s;
+        app.ui.text(name, x + 16.0 * s, ry, 15.0, WHITE);
+        let t = format!("{:.0} ♥", hp.max(0.0));
+        app.ui.text(&t, x + pw - app.ui.measure(&t, 14.0) - 16.0 * s, ry, 14.0, Color::new(1.0, 0.5, 0.5, 1.0));
+    }
 }
 
 fn settings_screen(app: &mut App) -> Option<Screen> {
@@ -2197,6 +2446,8 @@ async fn main() {
         status: None,
         worlds_list: Vec::new(),
         just_opened: false,
+        finder: None,
+        chat_input: String::new(),
     };
 
     // режим для автоматических скриншотов и проверок
@@ -2265,6 +2516,10 @@ async fn main() {
                     app.just_opened = true;
                 } else if is_key_pressed(KeyCode::E) {
                     app.screen = Screen::Inventory;
+                    app.just_opened = true;
+                }
+                if is_key_pressed(KeyCode::T) || is_key_pressed(KeyCode::Enter) {
+                    app.screen = Screen::Chat;
                     app.just_opened = true;
                 }
                 if is_key_pressed(KeyCode::F3) {
@@ -2374,7 +2629,7 @@ async fn main() {
                     }
                 }
             }
-            if matches!(app.screen, Screen::Playing | Screen::Inventory) {
+            if matches!(app.screen, Screen::Playing | Screen::Inventory | Screen::Chat) {
                 let t0 = std::time::Instant::now();
                 update_game(&mut app, dt, md);
                 prof.0 += t0.elapsed().as_secs_f64();
@@ -2387,8 +2642,11 @@ async fn main() {
         let t_render = std::time::Instant::now();
         if app.game.is_some() && app.screen != Screen::Loading {
             render_world(&mut app);
-            if !app.hide_hud && matches!(app.screen, Screen::Playing | Screen::Paused | Screen::Inventory) {
+            if !app.hide_hud && matches!(app.screen, Screen::Playing | Screen::Paused | Screen::Inventory | Screen::Chat) {
                 draw_hud(&mut app);
+            }
+            if app.screen == Screen::Playing && is_key_down(KeyCode::Tab) {
+                draw_player_list(&mut app);
             }
         } else {
             clear_background(Color::new(0.08, 0.09, 0.11, 1.0));
@@ -2404,6 +2662,7 @@ async fn main() {
             Screen::Paused => pause_screen(&mut app),
             Screen::Dead => dead_screen(&mut app),
             Screen::Inventory => inventory_screen(&mut app),
+            Screen::Chat => chat_screen(&mut app),
             Screen::Loading => {
                 let (w, h) = (screen_width(), screen_height());
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.07, 0.08, 0.1, 1.0));

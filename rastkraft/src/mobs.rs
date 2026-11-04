@@ -11,6 +11,17 @@ use crate::world::{Dim, World};
 use crate::worldgen::{self, Biome};
 use macroquad::prelude::*;
 
+static NEXT_UID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+
+/// События для других игроков (хост рассылает их по сети).
+#[derive(Default)]
+pub struct MobEvents {
+    /// (игрок, урон, отбрасывание)
+    pub hurts: Vec<(u8, f32, Vec3)>,
+    /// (игрок, предмет, количество) — трофеи за убийство
+    pub gives: Vec<(u8, Item, u16)>,
+}
+
 pub const MAX_FRIENDLY: usize = 50;
 pub const MAX_HOSTILE: usize = 50;
 /// Злые существа слабее табличных значений.
@@ -32,6 +43,12 @@ pub struct Mob {
     pub dying: f32,
     pub angry: bool,
     pub home: Option<Vec3>,
+    /// Сетевой номер существа.
+    pub uid: u32,
+    /// Кто из сетевых игроков нанёс смертельный удар.
+    pub killer: Option<u8>,
+    /// Куда двигаться (у клиента — позиция из снимка хоста).
+    pub net_target: Option<Vec3>,
     /// Освещённость (обновляется не каждый кадр).
     pub light: f32,
     light_t: f32,
@@ -68,6 +85,9 @@ impl Mob {
             dying: 0.0,
             angry: false,
             home: None,
+            uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            killer: None,
+            net_target: None,
             light: 1.0,
             light_t: 0.0,
             head_yaw: 0.0,
@@ -166,12 +186,12 @@ impl Mobs {
         (f, self.list.len() - f)
     }
 
-    fn try_spawn(&mut self, world: &World, player: &Player, daylight: f32, difficulty: u8) {
+    fn try_spawn(&mut self, world: &World, anchor: Vec3, daylight: f32, difficulty: u8) {
         let (fr, ho) = self.counts();
         let hostile_cap = [0, 25, MAX_HOSTILE, MAX_HOSTILE][difficulty.min(3) as usize];
         let ang = self.rand() * std::f32::consts::TAU;
         let dist = 20.0 + self.rand() * 36.0;
-        let p = player.body.pos;
+        let p = anchor;
         let (x, z) = ((p.x + ang.cos() * dist).floor() as i32, (p.z + ang.sin() * dist).floor() as i32);
         if !world.is_loaded(x, z) {
             return;
@@ -256,12 +276,15 @@ impl Mobs {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn update(&mut self, world: &World, player: &mut Player, ents: &mut Entities, dt: f32, daylight: f32, difficulty: u8, creative: bool) {
+    pub fn update(&mut self, world: &World, player: &mut Player, ents: &mut Entities, dt: f32, daylight: f32, difficulty: u8, creative: bool, remotes: &[(u8, Vec3)]) -> MobEvents {
+        let mut ev = MobEvents::default();
         self.spawn_t -= dt;
         if self.spawn_t <= 0.0 {
             self.spawn_t = 0.12;
-            for _ in 0..3 {
-                self.try_spawn(world, player, daylight, difficulty);
+            for k in 0..3 {
+                // существа появляются вокруг всех игроков по очереди
+                let anchor = if remotes.is_empty() || k == 0 { player.body.pos } else { remotes[(self.rng as usize + k) % remotes.len()].1 };
+                self.try_spawn(world, anchor, daylight, difficulty);
             }
         }
         if difficulty == 0 {
@@ -293,7 +316,19 @@ impl Mobs {
                 let (x, y, z) = (m.body.pos.x.floor() as i32, (m.body.pos.y + m.body.h * 0.6).floor() as i32, m.body.pos.z.floor() as i32);
                 m.light = if world.sky_exposed(x, y, z) { 1.0 } else { 0.0 };
             }
+            // ближайший игрок (свой или сетевой)
+            let mut tgt: (Option<u8>, Vec3) = (None, ppos);
+            let mut best = (ppos - m.body.pos).length_squared();
+            for &(rid, rp) in remotes {
+                let dd = (rp - m.body.pos).length_squared();
+                if dd < best {
+                    best = dd;
+                    tgt = (Some(rid), rp);
+                }
+            }
+            let ppos = tgt.1;
             let to = ppos - m.body.pos;
+            let tgt_creative = tgt.0.is_none() && creative;
             // голова поворачивается к игроку, если он рядом
             {
                 let eye = ppos + vec3(0.0, 1.5, 0.0) - (m.body.pos + vec3(0.0, m.body.h * 0.85, 0.0));
@@ -317,7 +352,7 @@ impl Mobs {
             let flat = to.with_y(0.0);
             let dist = flat.length();
             let dir_to = flat.normalize_or_zero();
-            let chase = m.hostile() && !creative && dist < 22.0 && to.y.abs() < 10.0;
+            let chase = m.hostile() && !tgt_creative && dist < 22.0 && to.y.abs() < 10.0;
             let fly = d.flags & FLY != 0;
             let swim = d.flags & SWIM != 0;
             let in_water = world.get(m.body.pos.x.floor() as i32, (m.body.pos.y + 0.3).floor() as i32, m.body.pos.z.floor() as i32) == WATER;
@@ -417,11 +452,21 @@ impl Mobs {
             }
 
             // атака
-            if m.hostile() && !creative && m.attack_cd <= 0.0 {
+            if m.hostile() && !tgt_creative && m.attack_cd <= 0.0 {
                 let reach = 1.2 + m.body.hw;
                 if dist < reach && (to.y + 0.5).abs() < 1.8 {
-                    player.hurt(d.dmg * dmg_k, dir_to * 6.0 + vec3(0.0, 4.0, 0.0), false);
+                    let knock = dir_to * 6.0 + vec3(0.0, 4.0, 0.0);
+                    match tgt.0 {
+                        None => {
+                            player.hurt(d.dmg * dmg_k, knock, false);
+                        }
+                        Some(rid) => ev.hurts.push((rid, d.dmg * dmg_k, knock)),
+                    }
                     m.attack_cd = 1.0;
+                    m.attack_anim = 1.0;
+                } else if d.flags & RANGED != 0 && dist < 16.0 && dist > 3.0 && tgt.0.is_some() {
+                    ev.hurts.push((tgt.0.unwrap(), d.dmg * dmg_k * 0.8, dir_to * 3.0 + vec3(0.0, 2.0, 0.0)));
+                    m.attack_cd = 3.0;
                     m.attack_anim = 1.0;
                 } else if d.flags & RANGED != 0 && dist < 16.0 && dist > 3.0 {
                     let from = m.body.pos + vec3(0.0, m.body.h * 0.8, 0.0);
@@ -444,13 +489,17 @@ impl Mobs {
 
         // смерть и трофеи
         let mut drops: Vec<(Item, u16, Vec3)> = Vec::new();
+        let mut gives: Vec<(u8, Item, u16)> = Vec::new();
+        let mut smoke_at: Vec<Vec3> = Vec::new();
+        let ppos = player.body.pos;
         self.list.retain(|m| {
             if m.dying >= 1.0 {
+                let mut out: Vec<(Item, u16)> = Vec::new();
                 let d = &MOBS[m.def];
                 let r = crate::blocks::hash(m.body.pos.x as i32, m.body.pos.z as i32, m.def as u32);
                 let p = m.body.pos + vec3(0.0, 0.5, 0.0);
                 if r < 0.75 {
-                    drops.push((Item::Thing(items::MOB_DROP0 + m.def as u16), 1 + (r < 0.2) as u16, p));
+                    out.push((Item::Thing(items::MOB_DROP0 + m.def as u16), 1 + (r < 0.2) as u16));
                 }
                 let extra = match d.extra {
                     Extra::None => None,
@@ -470,18 +519,107 @@ impl Mobs {
                     Extra::Egg => Some(items::EGG),
                 };
                 if let Some(e) = extra {
-                    drops.push((Item::Thing(e), 1 + (r * 2.5) as u16, p));
+                    out.push((Item::Thing(e), 1 + (r * 2.5) as u16));
+                }
+                smoke_at.push(p);
+                for (it, n) in out {
+                    match m.killer {
+                        Some(k) => gives.push((k, it, n)),
+                        None => drops.push((it, n, p)),
+                    }
                 }
                 return false;
             }
-            let dd = (m.body.pos - ppos).length();
+            let mut dd = (m.body.pos - ppos).length();
+            for &(_, rp) in remotes {
+                dd = dd.min((m.body.pos - rp).length());
+            }
             dd < 120.0 && m.body.pos.y > -30.0
         });
         for (k, (it, n, p)) in drops.into_iter().enumerate() {
             ents.spawn_drop(it, n, p, k as f32 * 0.37);
-            if k == 0 {
-                let smoke = [Color::from_rgba(230, 230, 230, 255), Color::from_rgba(180, 180, 185, 255), Color::from_rgba(255, 255, 255, 255)];
-                ents.burst(p, 14, 0.8, &smoke, 0.13, 1.5);
+        }
+        let smoke = [Color::from_rgba(230, 230, 230, 255), Color::from_rgba(180, 180, 185, 255), Color::from_rgba(255, 255, 255, 255)];
+        for p in smoke_at {
+            ents.burst(p, 14, 0.8, &smoke, 0.13, 1.5);
+        }
+        ev.gives = gives;
+        ev
+    }
+
+    /// Снимок существ рядом с точкой (для отправки клиенту).
+    pub fn snapshot(&self, around: Vec3, radius: f32) -> Vec<crate::net::MobSnap> {
+        self.list
+            .iter()
+            .filter(|m| (m.body.pos - around).length() < radius)
+            .map(|m| crate::net::MobSnap {
+                uid: m.uid,
+                def: m.def as u16,
+                pos: m.body.pos.to_array(),
+                yaw: m.yaw,
+                hurt: m.hurt_t > 0.0,
+                attack: (m.attack_anim.clamp(0.0, 1.0) * 255.0) as u8,
+                dying: (m.dying.clamp(0.0, 1.0) * 255.0) as u8,
+            })
+            .collect()
+    }
+
+    /// Клиент: применить снимок от хоста.
+    pub fn apply_snapshot(&mut self, list: &[crate::net::MobSnap]) {
+        let mut keep = Vec::with_capacity(list.len());
+        for s in list {
+            let pos = Vec3::from(s.pos);
+            let idx = self.list.iter().position(|m| m.uid == s.uid);
+            let mut m = match idx {
+                Some(i) => self.list.swap_remove(i),
+                None => {
+                    let mut m = Mob::new((s.def as usize).min(MOBS.len() - 1), pos);
+                    m.uid = s.uid;
+                    m
+                }
+            };
+            m.net_target = Some(pos);
+            m.yaw = s.yaw;
+            m.hurt_t = if s.hurt { 0.1 } else { 0.0 };
+            m.attack_anim = s.attack as f32 / 255.0;
+            m.dying = s.dying as f32 / 255.0;
+            keep.push(m);
+        }
+        self.list = keep;
+    }
+
+    /// Клиент: плавное движение к позициям из снимка.
+    pub fn client_tick(&mut self, world: &World, dt: f32, ppos: Vec3) {
+        for m in self.list.iter_mut() {
+            if let Some(t) = m.net_target {
+                let old = m.body.pos;
+                let k = (dt * 10.0).min(1.0);
+                m.body.pos += (t - m.body.pos) * k;
+                if (t - m.body.pos).length() > 8.0 {
+                    m.body.pos = t;
+                }
+                m.body.vel = (m.body.pos - old) / dt.max(1e-3);
+                m.body.on_ground = true;
+            }
+            m.phase += dt * vec2(m.body.vel.x, m.body.vel.z).length() * 2.4;
+            m.light_t -= dt;
+            if m.light_t <= 0.0 {
+                m.light_t = 0.6;
+                let (x, y, z) = (m.body.pos.x.floor() as i32, (m.body.pos.y + m.body.h * 0.6).floor() as i32, m.body.pos.z.floor() as i32);
+                m.light = if world.sky_exposed(x, y, z) { 1.0 } else { 0.0 };
+            }
+            let eye = ppos + vec3(0.0, 1.5, 0.0) - (m.body.pos + vec3(0.0, m.body.h * 0.85, 0.0));
+            if eye.length() < 9.0 {
+                let mut dy = eye.z.atan2(eye.x) - m.yaw;
+                while dy > std::f32::consts::PI {
+                    dy -= std::f32::consts::TAU;
+                }
+                while dy < -std::f32::consts::PI {
+                    dy += std::f32::consts::TAU;
+                }
+                m.head_yaw += (dy.clamp(-1.0, 1.0) - m.head_yaw) * (dt * 6.0).min(1.0);
+            } else {
+                m.head_yaw *= 1.0 - (dt * 6.0).min(1.0);
             }
         }
     }
