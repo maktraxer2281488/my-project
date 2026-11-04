@@ -28,11 +28,13 @@ impl Dim {
 #[derive(Clone)]
 pub struct Chunk {
     pub blocks: Vec<u8>,
+    /// Жители построек: (номер существа, координаты).
+    pub spawns: Vec<(u16, [i32; 3])>,
 }
 
 impl Chunk {
     pub fn empty() -> Self {
-        Chunk { blocks: vec![AIR; CHUNK_VOL] }
+        Chunk { blocks: vec![AIR; CHUNK_VOL], spawns: Vec::new() }
     }
 
     #[inline]
@@ -61,11 +63,13 @@ pub struct World {
     pub chunks: HashMap<(i32, i32), Arc<Chunk>>,
     /// Номер правки чанка (растёт при каждом изменении блока).
     pub versions: HashMap<(i32, i32), u32>,
+    /// Чанки из сохранения или от сервера: используются вместо генерации.
+    pub stored: HashMap<(i32, i32), Chunk>,
 }
 
 impl World {
     pub fn new(dim: Dim, seed: u32) -> Self {
-        World { dim, seed, chunks: HashMap::new(), versions: HashMap::new() }
+        World { dim, seed, chunks: HashMap::new(), versions: HashMap::new(), stored: HashMap::new() }
     }
 
     #[inline]
@@ -100,7 +104,13 @@ impl World {
             return false;
         }
         let (cx, cz) = chunk_of(x, z);
-        let Some(c) = self.chunks.get_mut(&(cx, cz)) else { return false };
+        let Some(c) = self.chunks.get_mut(&(cx, cz)) else {
+            if let Some(st) = self.stored.get_mut(&(cx, cz)) {
+                st.set(x - cx * CS, y, z - cz * CS, b);
+                return true;
+            }
+            return false;
+        };
         Arc::make_mut(c).set(x - cx * CS, y, z - cz * CS, b);
         *self.versions.entry((cx, cz)).or_insert(0) += 1;
         true

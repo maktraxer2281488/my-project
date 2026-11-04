@@ -154,20 +154,20 @@ pub fn find_spawn(seed: u32) -> (i32, i32) {
 }
 
 // ---------- генерация чанка ----------
-struct Gen<'a> {
-    c: &'a mut Chunk,
-    x0: i32,
-    z0: i32,
+pub(crate) struct Gen<'a> {
+    pub(crate) c: &'a mut Chunk,
+    pub(crate) x0: i32,
+    pub(crate) z0: i32,
 }
 
 impl Gen<'_> {
-    fn inside(&self, x: i32, y: i32, z: i32) -> bool {
+    pub(crate) fn inside(&self, x: i32, y: i32, z: i32) -> bool {
         x >= self.x0 && x < self.x0 + CS && z >= self.z0 && z < self.z0 + CS && (0..CH).contains(&y)
     }
-    fn get(&self, x: i32, y: i32, z: i32) -> u8 {
+    pub(crate) fn get(&self, x: i32, y: i32, z: i32) -> u8 {
         if self.inside(x, y, z) { self.c.get(x - self.x0, y, z - self.z0) } else { AIR }
     }
-    fn set(&mut self, x: i32, y: i32, z: i32, b: u8) {
+    pub(crate) fn set(&mut self, x: i32, y: i32, z: i32, b: u8) {
         if self.inside(x, y, z) {
             self.c.set(x - self.x0, y, z - self.z0, b);
         }
@@ -361,8 +361,10 @@ fn gen_overworld(seed: u32, cx: i32, cz: i32) -> Chunk {
                         if p < 0.10 {
                             g.set(gx, h + 1, gz, TALL_GRASS);
                         } else if p < 0.13 && patch > 0.55 {
-                            let fl = [DAISY, POPPY, CORNFLOWER, DANDELION][(patch * 40.0) as usize % 4];
+                            let fl = [DAISY, POPPY, CORNFLOWER, DANDELION, TULIP_RED, TULIP_ORANGE, TULIP_PINK, LAVENDER, BLUEBELL, SUNFLOWER][(patch * 97.0) as usize % 10];
                             g.set(gx, h + 1, gz, fl);
+                        } else if p > 0.996 && p < 0.998 {
+                            g.set(gx, h + 1, gz, if p < 0.997 { BERRY_BUSH } else { ROSE_BUSH });
                         } else if p > 0.9993 {
                             g.set(gx, h + 1, gz, PUMPKIN);
                         } else if p > 0.9986 {
@@ -375,7 +377,9 @@ fn gen_overworld(seed: u32, cx: i32, cz: i32) -> Chunk {
                         tree_spruce(&mut g, gx, h, gz, hash(gx, gz, seed.wrapping_add(6)));
                     } else if inside && g.get(gx, h + 1, gz) == AIR && g.get(gx, h, gz) == SNOW_GRASS {
                         let p = hash(gx, gz, seed.wrapping_add(7));
-                        if p < 0.06 {
+                        if p < 0.004 {
+                            g.set(gx, h + 1, gz, if p < 0.002 { SNOW_FLOWER } else { BERRY_BUSH });
+                        } else if p < 0.06 {
                             g.set(gx, h + 1, gz, FERN);
                         } else if p < 0.065 {
                             g.set(gx, h + 1, gz, if p < 0.0625 { RED_MUSHROOM } else { BROWN_MUSHROOM });
@@ -394,6 +398,8 @@ fn gen_overworld(seed: u32, cx: i32, cz: i32) -> Chunk {
                             }
                         } else if p < 0.016 {
                             g.set(gx, h + 1, gz, DEAD_BUSH);
+                        } else if p < 0.018 {
+                            g.set(gx, h + 1, gz, DESERT_ROSE);
                         }
                     }
                 }
@@ -410,6 +416,18 @@ fn gen_overworld(seed: u32, cx: i32, cz: i32) -> Chunk {
             }
         }
     }
+    // светящиеся грибы в пещерах
+    for lz in 0..CS {
+        for lx in 0..CS {
+            let (x, z) = (x0 + lx, z0 + lz);
+            for y in 6..40 {
+                if g.get(x, y, z) == AIR && matches!(g.get(x, y - 1, z), STONE | SLATE | TUFF) && hash(x * 3 + y, z, seed.wrapping_add(15)) < 0.012 {
+                    g.set(x, y, z, GLOW_MUSHROOM);
+                }
+            }
+        }
+    }
+    crate::structures::place(&mut g, Dim::Overworld, seed);
     chunk
 }
 
@@ -694,11 +712,12 @@ fn gen_heaven(seed: u32, cx: i32, cz: i32) -> Chunk {
                     g.set(gx, top, gz, HEAVEN_DIRT);
                 }
             } else if inside && r < 0.06 {
-                let fl = [DAISY, DANDELION, CORNFLOWER, TALL_GRASS][(r * 1000.0) as usize % 4];
+                let fl = [DAISY, HEAVEN_LILY, CORNFLOWER, TALL_GRASS, HEAVEN_LILY][(r * 1000.0) as usize % 5];
                 g.put(gx, top + 1, gz, fl);
             }
         }
     }
+    crate::structures::place(&mut g, Dim::Heaven, seed);
     chunk
 }
 

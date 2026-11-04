@@ -4,7 +4,7 @@
 use std::sync::OnceLock;
 
 pub const TILE: usize = 16;
-pub const ATLAS_TILES: usize = 16;
+pub const ATLAS_TILES: usize = 32;
 pub const ATLAS: usize = TILE * ATLAS_TILES;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -21,6 +21,7 @@ pub enum ToolNeed {
     Any,
     Pickaxe,
     Axe,
+    Shovel,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -151,7 +152,96 @@ pub const HEAVEN_STONE: u8 = 128;
 pub const HEAVEN_CRYSTAL: u8 = 129;
 pub const PORTAL: u8 = 130;
 pub const PORTAL_FRAME: u8 = 131;
-pub const BLOCK_COUNT: usize = 132;
+pub const POLISHED_GRANITE: u8 = 132;
+pub const POLISHED_MARBLE: u8 = 133;
+pub const POLISHED_BASALT: u8 = 134;
+pub const SLATE_BRICKS: u8 = 135;
+pub const SLATE_TILES: u8 = 136;
+pub const TUFF_BRICKS: u8 = 137;
+pub const CHISELED_STONE: u8 = 138;
+pub const CHISELED_SANDSTONE: u8 = 139;
+pub const SMOOTH_SANDSTONE: u8 = 140;
+pub const CUT_RED_SANDSTONE: u8 = 141;
+pub const MARBLE_PILLAR: u8 = 142;
+pub const OBSIDIAN_BRICKS: u8 = 143;
+pub const CRACKED_STONE_BRICKS: u8 = 144;
+pub const ICE_BRICKS: u8 = 145;
+pub const SNOW_BRICKS: u8 = 146;
+pub const HEAVEN_BRICKS: u8 = 147;
+pub const GOLD_TILES: u8 = 148;
+pub const QUARTZ: u8 = 149;
+pub const QUARTZ_PILLAR: u8 = 150;
+pub const TERRACOTTA0: u8 = 151;
+pub const GLASS_EXTRA0: u8 = 167;
+pub const LAMP0: u8 = 179;
+pub const TULIP_RED: u8 = 187;
+pub const TULIP_ORANGE: u8 = 188;
+pub const TULIP_PINK: u8 = 189;
+pub const LAVENDER: u8 = 190;
+pub const BLUEBELL: u8 = 191;
+pub const SUNFLOWER: u8 = 192;
+pub const ROSE_BUSH: u8 = 193;
+pub const BERRY_BUSH: u8 = 194;
+pub const WHEAT_CROP: u8 = 195;
+pub const CARROT_CROP: u8 = 196;
+pub const SNOW_FLOWER: u8 = 197;
+pub const DESERT_ROSE: u8 = 198;
+pub const HEAVEN_LILY: u8 = 199;
+pub const GLOW_MUSHROOM: u8 = 200;
+pub const MUD: u8 = 201;
+pub const PEAT: u8 = 202;
+pub const MOSS_BLOCK: u8 = 203;
+pub const PODZOL: u8 = 204;
+pub const COARSE_DIRT: u8 = 205;
+pub const FARMLAND: u8 = 206;
+pub const SALT_BLOCK: u8 = 207;
+pub const AMBER_BLOCK: u8 = 208;
+pub const CORAL_RED: u8 = 209;
+pub const CORAL_BLUE: u8 = 210;
+pub const CORAL_YELLOW: u8 = 211;
+pub const SEA_STONE: u8 = 212;
+pub const SEA_LANTERN: u8 = 213;
+pub const MAGMA: u8 = 214;
+pub const PUMICE: u8 = 215;
+pub const ASH_BLOCK: u8 = 216;
+pub const RED_MUSHROOM_BLOCK: u8 = 217;
+pub const BROWN_MUSHROOM_BLOCK: u8 = 218;
+pub const MUSHROOM_STEM: u8 = 219;
+pub const BAMBOO_BLOCK: u8 = 220;
+pub const CRATE: u8 = 221;
+pub const BARREL: u8 = 222;
+pub const BEEHIVE: u8 = 223;
+pub const HONEY_BLOCK: u8 = 224;
+pub const JELLY_BLOCK: u8 = 225;
+pub const ANVIL: u8 = 226;
+pub const CAULDRON: u8 = 227;
+pub const CANDLE: u8 = 228;
+pub const IRON_BARS: u8 = 229;
+pub const LATTICE: u8 = 230;
+pub const LADDER: u8 = 231;
+pub const ROPE: u8 = 232;
+pub const HALO_STONE: u8 = 233;
+pub const SUN_BLOCK: u8 = 234;
+pub const CELESTIAL_GLASS: u8 = 235;
+pub const STARDUST_BLOCK: u8 = 236;
+pub const FEATHER_BLOCK: u8 = 237;
+pub const RAINBOW_BLOCK: u8 = 238;
+pub const ADOBE: u8 = 239;
+pub const MOSAIC: u8 = 240;
+pub const TURQUOISE_BLOCK: u8 = 241;
+pub const FROST_STONE: u8 = 242;
+pub const CONE_BLOCK: u8 = 243;
+pub const FUR_BLOCK: u8 = 244;
+pub const THATCH: u8 = 245;
+pub const PAVING: u8 = 246;
+pub const WHITEWASH: u8 = 247;
+pub const TIMBER_FRAME: u8 = 248;
+pub const BONE_BLOCK: u8 = 249;
+pub const BLOCK_COUNT: usize = 250;
+
+pub fn is_climbable(b: u8) -> bool {
+    b == LADDER || b == ROPE
+}
 
 // ---------- доступ к реестру ----------
 pub struct Registry {
@@ -538,6 +628,10 @@ pub const COLOR_NAMES_F: [&str; 16] = [
     "Белая", "Светло-серая", "Серая", "Чёрная", "Коричневая", "Красная", "Оранжевая", "Жёлтая",
     "Лаймовая", "Зелёная", "Бирюзовая", "Голубая", "Синяя", "Фиолетовая", "Пурпурная", "Розовая",
 ];
+pub const COLOR_NAMES_N: [&str; 16] = [
+    "Белое", "Светло-серое", "Серое", "Чёрное", "Коричневое", "Красное", "Оранжевое", "Жёлтое",
+    "Лаймовое", "Зелёное", "Бирюзовое", "Голубое", "Синее", "Фиолетовое", "Пурпурное", "Розовое",
+];
 pub const COLOR_NAMES_M: [&str; 16] = [
     "Белый", "Светло-серый", "Серый", "Чёрный", "Коричневый", "Красный", "Оранжевый", "Жёлтый",
     "Лаймовый", "Зелёный", "Бирюзовый", "Голубой", "Синий", "Фиолетовый", "Пурпурный", "Розовый",
@@ -548,6 +642,10 @@ const PALETTE16: [Px; 16] = [
     rgb(126, 196, 46), rgb(70, 112, 40), rgb(32, 138, 140), rgb(84, 172, 222),
     rgb(52, 62, 160), rgb(116, 50, 168), rgb(176, 58, 166), rgb(236, 140, 172),
 ];
+
+pub fn palette16(i: usize) -> [u8; 4] {
+    PALETTE16[i]
+}
 
 fn leak(s: String) -> &'static str {
     Box::leak(s.into_boxed_str())
@@ -583,21 +681,21 @@ fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
         }
     });
     let t_gside = a.add(t_grass_side(grass_c, dirt_f, 77));
-    put(GRASS, "Луговая трава", [t_grass_top, t_gside, t_dirt], Cube, 0.6, Any, Nature, 0);
-    put(DIRT, "Земля", [t_dirt; 3], Cube, 0.5, Any, Nature, 0);
+    put(GRASS, "Луговая трава", [t_grass_top, t_gside, t_dirt], Cube, 0.6, Shovel, Nature, 0);
+    put(DIRT, "Земля", [t_dirt; 3], Cube, 0.5, Shovel, Nature, 0);
     let t = a.add(t_stone(stone_c, 31));
     put(STONE, "Камень", [t; 3], Cube, 1.5, Pickaxe, Nature, 0);
     let t = a.add(t_cobble(rgb(140, 144, 152), None, 121));
     put(COBBLE, "Булыжник", [t; 3], Cube, 2.0, Pickaxe, Building, 0);
     let t = a.add(t_speck(rgb(230, 210, 156), 0.06, rgb(196, 170, 120), 0.07, 41));
-    put(SAND, "Песок", [t; 3], Cube, 0.5, Any, Nature, 0);
+    put(SAND, "Песок", [t; 3], Cube, 0.5, Shovel, Nature, 0);
     let t = a.add(move |x, y| {
         let (d1, d2, id) = cells(x, y, 61, 5);
         if d2 - d1 < 0.6 { rgb(96, 90, 88) } else { shade(rgb(150, 142, 138), 0.75 + hash(id, 3, 62) * 0.4 - d1 * 0.03) }
     });
-    put(GRAVEL, "Гравий", [t; 3], Cube, 0.6, Any, Nature, 0);
+    put(GRAVEL, "Гравий", [t; 3], Cube, 0.6, Shovel, Nature, 0);
     let t = a.add(t_noise(rgb(160, 166, 178), 0.06, 71));
-    put(CLAY, "Глина", [t; 3], Cube, 0.6, Any, Nature, 0);
+    put(CLAY, "Глина", [t; 3], Cube, 0.6, Shovel, Nature, 0);
     let ss = rgb(222, 204, 150);
     let t_ss_top = a.add(t_noise(ss, 0.05, 81));
     let t_ss_side = a.add(t_layers(ss, 82));
@@ -605,15 +703,15 @@ fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
     put(SANDSTONE, "Песчаник", [t_ss_top, t_ss_side, t_ss_bot], Cube, 1.2, Pickaxe, Building, 0);
     let rs = rgb(196, 104, 52);
     let t = a.add(t_speck(rs, 0.08, shade(rs, 0.7), 0.06, 91));
-    put(RED_SAND, "Красный песок", [t; 3], Cube, 0.5, Any, Nature, 0);
+    put(RED_SAND, "Красный песок", [t; 3], Cube, 0.5, Shovel, Nature, 0);
     let t_rss_top = a.add(t_noise(rgb(184, 98, 50), 0.05, 92));
     let t_rss_side = a.add(t_layers(rgb(184, 98, 50), 93));
     put(RED_SANDSTONE, "Красный песчаник", [t_rss_top, t_rss_side, t_rss_top], Cube, 1.2, Pickaxe, Building, 0);
     let snow_c = rgb(234, 242, 250);
     let t_snow = a.add(move |x, y| if hash(x, y, 111) > 0.97 { rgb(255, 255, 255) } else { shade(snow_c, 0.95 + hash(x, y, 112) * 0.05) });
     let t_snow_side = a.add(t_grass_side(snow_c, dirt_f, 113));
-    put(SNOW_GRASS, "Заснеженная трава", [t_snow, t_snow_side, t_dirt], Cube, 0.6, Any, Nature, 0);
-    put(SNOW_BLOCK, "Снег", [t_snow; 3], Cube, 0.3, Any, Nature, 0);
+    put(SNOW_GRASS, "Заснеженная трава", [t_snow, t_snow_side, t_dirt], Cube, 0.6, Shovel, Nature, 0);
+    put(SNOW_BLOCK, "Снег", [t_snow; 3], Cube, 0.3, Shovel, Nature, 0);
     let t = a.add(move |x, y| {
         let c = shade(rgb(150, 196, 240), 0.92 + hash(x, y, 131) * 0.06);
         if (x - y).rem_euclid(9) == 0 && hash(x, y, 132) > 0.3 { shade(c, 1.2) } else { c }
@@ -888,8 +986,8 @@ fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
     let t_hd = a.add(hdirt);
     let t_hg_top = a.add(move |x, y| if hash(x, y, 131) > 0.98 { rgb(255, 240, 150) } else { shade(hg, 0.85 + blotch(x, y, 132) * 0.25) });
     let t_hg_side = a.add(t_grass_side(hg, hdirt, 133));
-    put(HEAVEN_GRASS, "Райская трава", [t_hg_top, t_hg_side, t_hd], Cube, 0.6, Any, Heaven, 0);
-    put(HEAVEN_DIRT, "Райская земля", [t_hd; 3], Cube, 0.5, Any, Heaven, 0);
+    put(HEAVEN_GRASS, "Райская трава", [t_hg_top, t_hg_side, t_hd], Cube, 0.6, Shovel, Heaven, 0);
+    put(HEAVEN_DIRT, "Райская земля", [t_hd; 3], Cube, 0.5, Shovel, Heaven, 0);
     let t = a.add(t_leaves(rgb(250, 210, 90), Some(rgb(255, 250, 210)), 134));
     put(GOLDEN_LEAVES, "Золотая листва", [t; 3], Cutout, 0.2, Any, Heaven, 0);
     let ls = a.add(t_log(rgb(236, 230, 214), 135));
@@ -912,11 +1010,217 @@ fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
     let t = a.add(t_storage(rgb(232, 196, 90), 139));
     put(PORTAL_FRAME, "Каркас портала", [t; 3], Cube, 5.0, Pickaxe, Heaven, 0);
 
+
+    // ======== расширение: ещё 118 блоков ========
+    let t = a.add(t_noise(rgb(178, 118, 100), 0.05, 701));
+    put(POLISHED_GRANITE, "Полированный гранит", [t; 3], Cube, 1.5, Pickaxe, Building, 0);
+    let t = a.add(move |x, y| { let v = (x * 2 + y) % 11 == 0; if v { rgb(196, 196, 204) } else { shade(rgb(240, 238, 234), 0.97 + hash(x, y, 702) * 0.04) } });
+    put(POLISHED_MARBLE, "Полированный мрамор", [t; 3], Cube, 1.5, Pickaxe, Building, 0);
+    let t = a.add(t_noise(rgb(70, 70, 80), 0.05, 703));
+    put(POLISHED_BASALT, "Полированный базальт", [t; 3], Cube, 1.6, Pickaxe, Building, 0);
+    let t = a.add(t_bricks(rgb(70, 74, 86), rgb(40, 42, 50), 8, 4, 704));
+    put(SLATE_BRICKS, "Сланцевый кирпич", [t; 3], Cube, 2.0, Pickaxe, Building, 0);
+    let t = a.add(t_bricks(rgb(74, 78, 90), rgb(44, 46, 54), 4, 4, 705));
+    put(SLATE_TILES, "Сланцевая плитка", [t; 3], Cube, 2.0, Pickaxe, Building, 0);
+    let t = a.add(t_bricks(rgb(112, 114, 100), rgb(70, 72, 62), 8, 8, 706));
+    put(TUFF_BRICKS, "Туфовый кирпич", [t; 3], Cube, 1.5, Pickaxe, Building, 0);
+    let t = a.add(move |x, y| { let ring = (x == 3 || x == 12 || y == 3 || y == 12) && (3..=12).contains(&x) && (3..=12).contains(&y); let edge = x == 0 || y == 0 || x == 15 || y == 15; shade(rgb(132, 136, 144), if edge { 0.7 } else if ring { 0.8 } else { 1.0 + hash(x, y, 707) * 0.06 }) });
+    put(CHISELED_STONE, "Резной камень", [t; 3], Cube, 1.8, Pickaxe, Building, 0);
+    let ss2 = rgb(222, 204, 150);
+    let t = a.add(move |x, y| { let glyph = (x % 5 == 2 && (3..12).contains(&y)) || (y % 6 == 3 && (x % 5) < 4 && x > 1 && x < 14) || ((x / 5 + y / 6) % 2 == 0 && x % 5 == 1 && y % 6 == 1); if glyph { shade(ss2, 0.62) } else { shade(ss2, 0.95 + hash(x, y, 708) * 0.06) } });
+    put(CHISELED_SANDSTONE, "Песчаник с письменами", [t_ss_top, t, t_ss_top], Cube, 1.2, Pickaxe, Building, 0);
+    let t = a.add(t_noise(rgb(226, 210, 160), 0.03, 709));
+    put(SMOOTH_SANDSTONE, "Гладкий песчаник", [t; 3], Cube, 1.2, Pickaxe, Building, 0);
+    let t = a.add(t_bricks(rgb(186, 100, 52), rgb(150, 76, 40), 16, 8, 710));
+    put(CUT_RED_SANDSTONE, "Тёсаный красный песчаник", [t; 3], Cube, 1.2, Pickaxe, Building, 0);
+    let mp_top = a.add(t_logtop(rgb(220, 218, 214), rgb(240, 238, 234)));
+    let t = a.add(move |x, y| shade(rgb(238, 236, 232), if x % 4 == 0 { 0.82 } else { 0.98 + hash(x, y, 711) * 0.04 }));
+    put(MARBLE_PILLAR, "Мраморная колонна", [mp_top, t, mp_top], Cube, 1.5, Pickaxe, Building, 0);
+    let t = a.add(t_bricks(rgb(40, 28, 58), rgb(16, 10, 24), 8, 4, 712));
+    put(OBSIDIAN_BRICKS, "Обсидиановый кирпич", [t; 3], Cube, 8.0, Pickaxe, Building, 0);
+    let sb = t_stone_bricks(rgb(132, 136, 144), false);
+    let t = a.add(move |x, y| if (x * 3 + y * 2) % 17 == 0 && hash(x, y, 713) > 0.3 { rgb(60, 62, 66) } else { sb(x, y) });
+    put(CRACKED_STONE_BRICKS, "Треснувший каменный кирпич", [t; 3], Cube, 1.8, Pickaxe, Building, 0);
+    let t = a.add(t_bricks(rgb(160, 204, 244), rgb(110, 160, 220), 8, 4, 714));
+    put(ICE_BRICKS, "Ледяной кирпич", [t; 3], Cube, 0.8, Pickaxe, Building, 0);
+    let t = a.add(t_bricks(rgb(240, 244, 250), rgb(196, 206, 224), 8, 8, 715));
+    put(SNOW_BRICKS, "Снежный кирпич", [t; 3], Cube, 0.4, Shovel, Building, 0);
+    let t = a.add(t_bricks(rgb(232, 230, 244), rgb(240, 210, 120), 8, 4, 716));
+    put(HEAVEN_BRICKS, "Райский кирпич", [t; 3], Cube, 1.5, Pickaxe, Heaven, 0);
+    let t = a.add(t_bricks(rgb(250, 210, 70), rgb(190, 140, 30), 4, 4, 717));
+    put(GOLD_TILES, "Золотая плитка", [t; 3], Cube, 2.0, Pickaxe, Building, 0);
+    let t = a.add(t_noise(rgb(240, 236, 236), 0.03, 718));
+    put(QUARTZ, "Белый кварц", [t; 3], Cube, 1.2, Pickaxe, Building, 0);
+    let q_top = a.add(t_logtop(rgb(226, 222, 222), rgb(244, 242, 242)));
+    let t = a.add(move |x, y| shade(rgb(244, 240, 240), if x == 1 || x == 14 { 0.85 } else { 0.98 + hash(x, y, 719) * 0.03 }));
+    put(QUARTZ_PILLAR, "Кварцевая колонна", [q_top, t, q_top], Cube, 1.2, Pickaxe, Building, 0);
+    for i in 0..16u8 {
+        let c = mix(PALETTE16[i as usize], rgb(160, 90, 60), 0.35);
+        let t = a.add(t_noise(c, 0.05, 720 + i as u32));
+        put(TERRACOTTA0 + i, leak(format!("{} терракота", COLOR_NAMES_F[i as usize])), [t; 3], Cube, 1.25, Pickaxe, Colored, 0);
+    }
+    let mut gi = 0u8;
+    for i in 0..16usize {
+        if matches!(i, 5 | 7 | 9 | 12) {
+            continue;
+        }
+        let t = a.add(t_glass(Some(PALETTE16[i])));
+        put(GLASS_EXTRA0 + gi, leak(format!("{} стекло", COLOR_NAMES_N[i])), [t; 3], Cube, 0.3, Any, Colored, 0);
+        gi += 1;
+    }
+    let lamp_cols = [0usize, 5, 6, 7, 8, 11, 13, 15];
+    for (k, &i) in lamp_cols.iter().enumerate() {
+        let c = PALETTE16[i];
+        let t = a.add(move |x, y| {
+            let frame = x == 0 || y == 0 || x == 15 || y == 15 || (x + y) % 8 == 0 && (x == 1 || x == 14);
+            if frame { rgb(70, 60, 50) } else { mix(c, rgb(255, 255, 240), 0.35 + 0.3 * (1.0 - ((x as f32 - 7.5).abs() + (y as f32 - 7.5).abs()) / 15.0)) }
+        });
+        put(LAMP0 + k as u8, leak(format!("{} лампа", COLOR_NAMES_F[i])), [t; 3], Cube, 0.4, Any, Decor, 15);
+    }
+    let flowers: [(u8, &str, Px, Px); 4] = [
+        (TULIP_RED, "Красный тюльпан", rgb(220, 40, 50), rgb(250, 120, 120)),
+        (TULIP_ORANGE, "Оранжевый тюльпан", rgb(240, 130, 30), rgb(255, 200, 100)),
+        (TULIP_PINK, "Розовый тюльпан", rgb(240, 140, 180), rgb(255, 210, 230)),
+        (BLUEBELL, "Колокольчик", rgb(90, 110, 230), rgb(180, 190, 255)),
+    ];
+    for (id, n, c, c2) in flowers {
+        let t = a.add(move |x, y| {
+            let cup = y >= 2 && y <= 7 && (x - 8).abs() <= 3 - (y == 2) as i32 && !(y == 2 && x == 8);
+            if cup { if x == 6 || y == 3 { c2 } else { c } } else if (x == 7 || x == 8) && y > 7 { rgb(70, 130, 50) } else if y == 11 && (4..=6).contains(&x) { rgb(90, 160, 60) } else { CLEAR }
+        });
+        put(id, n, [t; 3], Cross, 0.0, Any, Nature, 0);
+    }
+    let t = a.add(move |x, y| if (x == 7 || x == 8) && y > 5 { rgb(70, 120, 50) } else if y <= 6 && (x - 7).abs() <= 1 + (y % 2) && hash(x, y, 731) > 0.15 { mix(rgb(150, 110, 220), rgb(200, 170, 250), hash(x, y, 732)) } else { CLEAR });
+    put(LAVENDER, "Лаванда", [t; 3], Cross, 0.0, Any, Nature, 0);
+    let t = a.add(t_flower(rgb(250, 200, 30), rgb(110, 70, 30)));
+    put(SUNFLOWER, "Подсолнух", [t; 3], Cross, 0.0, Any, Nature, 0);
+    let t = a.add(t_leaves(rgb(60, 130, 60), Some(rgb(220, 40, 60)), 733));
+    put(ROSE_BUSH, "Розовый куст", [t; 3], Cross, 0.0, Any, Nature, 0);
+    let t = a.add(t_leaves(rgb(70, 140, 60), Some(rgb(200, 30, 90)), 734));
+    put(BERRY_BUSH, "Ягодный куст", [t; 3], Cross, 0.0, Any, Nature, 0);
+    let t = a.add(move |x, y| { let stalk = x % 3 == 1; if stalk && y > 3 { rgb(200, 170, 70) } else if stalk && y <= 3 && y > 0 { rgb(226, 196, 90) } else { CLEAR } });
+    put(WHEAT_CROP, "Пшеница", [t; 3], Cross, 0.0, Any, Nature, 0);
+    let t = a.add(move |x, y| if y > 11 && (x - 5).abs() < 2 || y > 11 && (x - 11).abs() < 2 { rgb(240, 120, 30) } else if y <= 11 && (x % 6 == 5 || x % 6 == 4) && y > 4 { rgb(80, 160, 60) } else { CLEAR });
+    put(CARROT_CROP, "Морковная грядка", [t; 3], Cross, 0.0, Any, Nature, 0);
+    let t = a.add(t_flower(rgb(220, 240, 255), rgb(120, 200, 255)));
+    put(SNOW_FLOWER, "Снежноцвет", [t; 3], Cross, 0.0, Any, Nature, 0);
+    let t = a.add(t_flower(rgb(230, 90, 120), rgb(250, 220, 120)));
+    put(DESERT_ROSE, "Пустынная роза", [t; 3], Cross, 0.0, Any, Nature, 0);
+    let t = a.add(t_flower(rgb(255, 250, 230), rgb(255, 210, 80)));
+    put(HEAVEN_LILY, "Райская лилия", [t; 3], Cross, 0.0, Any, Heaven, 6);
+    let gm = mush(rgb(80, 220, 210), true);
+    let t = a.add(gm);
+    put(GLOW_MUSHROOM, "Светящийся гриб", [t; 3], Cross, 0.0, Any, Nature, 8);
+    let t = a.add(t_speck(rgb(96, 70, 50), 0.08, rgb(70, 50, 36), 0.1, 741));
+    put(MUD, "Грязь", [t; 3], Cube, 0.5, Shovel, Nature, 0);
+    let t = a.add(t_noise(rgb(60, 42, 30), 0.12, 742));
+    put(PEAT, "Торф", [t; 3], Cube, 0.5, Shovel, Nature, 0);
+    let t = a.add(t_noise(rgb(90, 140, 60), 0.12, 743));
+    put(MOSS_BLOCK, "Мох", [t; 3], Cube, 0.3, Any, Nature, 0);
+    let pz_top = a.add(t_speck(rgb(110, 76, 44), 0.1, rgb(150, 110, 60), 0.2, 744));
+    let pz_side = a.add(t_grass_side(rgb(110, 76, 44), dirt_f, 745));
+    put(PODZOL, "Подзол", [pz_top, pz_side, t_dirt], Cube, 0.6, Shovel, Nature, 0);
+    let t = a.add(t_speck(rgb(126, 90, 60), 0.12, rgb(110, 110, 110), 0.12, 746));
+    put(COARSE_DIRT, "Каменистая земля", [t; 3], Cube, 0.6, Shovel, Nature, 0);
+    let t = a.add(move |x, y| if y % 4 == 0 { rgb(70, 46, 30) } else { shade(rgb(100, 68, 44), 0.9 + hash(x, y, 747) * 0.15) });
+    put(FARMLAND, "Пашня", [t, t_dirt, t_dirt], Cube, 0.6, Shovel, Nature, 0);
+    let t = a.add(t_speck(rgb(236, 232, 226), 0.04, rgb(255, 255, 255), 0.15, 748));
+    put(SALT_BLOCK, "Соляной блок", [t; 3], Cube, 1.0, Pickaxe, Nature, 0);
+    let t = a.add(move |x, y| mix(rgb(220, 130, 30), rgb(255, 200, 80), blotch(x, y, 749)));
+    put(AMBER_BLOCK, "Янтарь", [t; 3], Cube, 1.0, Pickaxe, Decor, 4);
+    for (k, (id, n, c)) in [(CORAL_RED, "Красный коралл", rgb(220, 70, 80)), (CORAL_BLUE, "Синий коралл", rgb(70, 110, 220)), (CORAL_YELLOW, "Жёлтый коралл", rgb(230, 200, 60))].into_iter().enumerate() {
+        let t = a.add(move |x, y| { let (d1, _, _) = cells(x, y, 750 + k as u32, 4); shade(c, 0.7 + (1.0 - d1 / 3.0).clamp(0.0, 1.0) * 0.5) });
+        put(id, n, [t; 3], Cube, 0.6, Any, Nature, 0);
+    }
+    let t = a.add(move |x, y| { let (d1, d2, _) = cells(x, y, 753, 4); if d2 - d1 < 0.8 { rgb(40, 110, 100) } else { shade(rgb(80, 170, 150), 0.85 + hash(x, y, 754) * 0.2) } });
+    put(SEA_STONE, "Морской камень", [t; 3], Cube, 1.5, Pickaxe, Building, 0);
+    let t = a.add(move |x, y| { let edge = x < 2 || y < 2 || x > 13 || y > 13; if edge { rgb(120, 200, 190) } else { mix(rgb(200, 250, 240), rgb(255, 255, 255), hash(x / 2, y / 2, 755)) } });
+    put(SEA_LANTERN, "Морской фонарь", [t; 3], Cube, 0.4, Any, Decor, 15);
+    let t = a.add(move |x, y| { let (d1, d2, _) = cells(x, y, 756, 4); if d2 - d1 < 0.9 { rgb(255, 140, 30) } else { shade(rgb(90, 30, 20), 0.8 + hash(x, y, 757) * 0.3) } });
+    put(MAGMA, "Магма", [t; 3], Cube, 0.8, Pickaxe, Nature, 6);
+    let t = a.add(t_speck(rgb(200, 196, 180), 0.08, rgb(150, 146, 130), 0.25, 758));
+    put(PUMICE, "Пемза", [t; 3], Cube, 0.8, Pickaxe, Nature, 0);
+    let t = a.add(t_noise(rgb(90, 88, 92), 0.1, 759));
+    put(ASH_BLOCK, "Пепел", [t; 3], Cube, 0.4, Shovel, Nature, 0);
+    let t = a.add(move |x, y| if hash(x / 3, y / 3, 760) > 0.75 { rgb(250, 250, 240) } else { shade(rgb(190, 40, 36), 0.9 + hash(x, y, 761) * 0.12) });
+    put(RED_MUSHROOM_BLOCK, "Шляпка красного гриба", [t; 3], Cube, 0.3, Axe, Nature, 0);
+    let t = a.add(t_noise(rgb(150, 110, 80), 0.08, 762));
+    put(BROWN_MUSHROOM_BLOCK, "Шляпка бурого гриба", [t; 3], Cube, 0.3, Axe, Nature, 0);
+    let t = a.add(t_noise(rgb(220, 214, 196), 0.05, 763));
+    put(MUSHROOM_STEM, "Ножка гриба", [t; 3], Cube, 0.3, Axe, Nature, 0);
+    let bt = a.add(t_logtop(rgb(150, 170, 60), rgb(200, 210, 110)));
+    let t = a.add(move |x, y| shade(rgb(160, 186, 70), if x % 4 == 0 || y % 8 == 0 { 0.75 } else { 0.95 + hash(x, y, 764) * 0.1 }));
+    put(BAMBOO_BLOCK, "Бамбуковый блок", [bt, t, bt], Cube, 1.0, Axe, Building, 0);
+    let t = a.add(move |x, y| { let edge = x < 2 || y < 2 || x > 13 || y > 13 || x == y || x == 15 - y; shade(rgb(170, 128, 76), if edge { 0.72 } else { 0.95 + hash(x / 3, y, 765) * 0.12 }) });
+    put(CRATE, "Ящик", [t; 3], Cube, 1.0, Axe, Decor, 0);
+    let br_top = a.add(t_logtop(rgb(90, 60, 36), rgb(150, 106, 62)));
+    let t = a.add(move |x, y| if y == 3 || y == 12 { rgb(70, 70, 76) } else { shade(rgb(140, 98, 56), if x % 4 == 0 { 0.75 } else { 0.95 + hash(x, y, 766) * 0.1 }) });
+    put(BARREL, "Бочка", [br_top, t, br_top], Cube, 1.2, Axe, Decor, 0);
+    let t = a.add(move |x, y| if y % 4 == 2 { rgb(170, 120, 50) } else if x % 5 == 2 && y % 4 == 0 { rgb(60, 40, 20) } else { shade(rgb(220, 180, 90), 0.9 + hash(x, y, 767) * 0.12) });
+    put(BEEHIVE, "Улей", [t; 3], Cube, 0.8, Axe, Decor, 0);
+    let t = a.add(move |x, y| mix(rgb(230, 150, 30), rgb(255, 210, 90), blotch(x, y, 768) * 0.8 + if x < 2 || y < 2 { 0.3 } else { 0.0 }));
+    put(HONEY_BLOCK, "Медовый блок", [t; 3], Cube, 0.3, Any, Decor, 0);
+    let t = a.add(move |x, y| { let edge = x < 2 || y < 2 || x > 13 || y > 13; let c = rgb(120, 220, 110); if edge { c } else { mix(c, rgb(200, 255, 190), hash(x / 3, y / 3, 769) * 0.4) } });
+    put(JELLY_BLOCK, "Желейный блок (пружинит)", [t; 3], Cube, 0.2, Any, Decor, 0);
+    let t = a.add(move |x, y| shade(rgb(70, 72, 78), if y < 4 { 1.1 } else if (4..12).contains(&x) { 0.95 } else { 0.7 } * (0.95 + hash(x, y, 770) * 0.08)));
+    put(ANVIL, "Наковальня", [t; 3], Cube, 4.0, Pickaxe, Decor, 0);
+    let ct = a.add(move |x, y| if x < 2 || y < 2 || x > 13 || y > 13 { rgb(60, 60, 66) } else { mix(rgb(60, 110, 200), rgb(110, 170, 240), hash(x, y, 771)) });
+    let cs = a.add(move |x, y| shade(rgb(64, 64, 70), if y > 12 || x < 2 || x > 13 { 0.7 } else { 0.95 + hash(x, y, 772) * 0.08 }));
+    put(CAULDRON, "Котёл", [ct, cs, cs], Cube, 3.0, Pickaxe, Decor, 0);
+    let t = a.add(move |x, y| if (7..=8).contains(&x) && y > 7 { rgb(240, 230, 210) } else if (7..=8).contains(&x) && (4..=7).contains(&y) { rgb(255, 200, 80) } else if x == 8 && y == 3 { rgb(255, 250, 200) } else { CLEAR });
+    put(CANDLE, "Свеча", [t; 3], Cross, 0.0, Any, Decor, 10);
+    let t = a.add(move |x, y| if x % 5 == 1 || y == 1 || y == 14 { shade(rgb(110, 112, 120), 0.9 + hash(x, y, 773) * 0.15) } else { CLEAR });
+    put(IRON_BARS, "Железная решётка", [t; 3], Cutout, 2.0, Pickaxe, Decor, 0);
+    let t = a.add(move |x, y| if (x + y) % 6 == 0 || (x - y).rem_euclid(6) == 0 { shade(rgb(170, 128, 76), 0.9 + hash(x, y, 774) * 0.12) } else { CLEAR });
+    put(LATTICE, "Деревянная решётка", [t; 3], Cutout, 0.8, Axe, Decor, 0);
+    let t = a.add(move |x, y| if x == 2 || x == 3 || x == 12 || x == 13 || y % 4 == 1 { shade(rgb(160, 118, 70), 0.9 + hash(x, y, 775) * 0.12) } else { CLEAR });
+    put(LADDER, "Лестница", [t; 3], Cutout, 0.4, Axe, Decor, 0);
+    let t = a.add(move |x, y| if (x == 7 || x == 8) && (y + x) % 3 != 0 { rgb(180, 150, 100) } else if x == 7 || x == 8 { rgb(140, 110, 70) } else { CLEAR });
+    put(ROPE, "Верёвка", [t; 3], Cross, 0.0, Any, Decor, 0);
+    let t = a.add(move |x, y| { let r = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt(); if (r - 5.0).abs() < 1.2 { rgb(255, 240, 170) } else { shade(rgb(214, 214, 230), 0.95 + hash(x, y, 776) * 0.05) } });
+    put(HALO_STONE, "Нимбовый камень", [t; 3], Cube, 1.5, Pickaxe, Heaven, 9);
+    let t = a.add(move |x, y| { let r = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt(); mix(rgb(255, 255, 220), rgb(255, 190, 60), (r / 10.0).min(1.0)) });
+    put(SUN_BLOCK, "Солнечный блок", [t; 3], Cube, 0.8, Any, Heaven, 15);
+    let t = a.add(t_glass(Some(rgb(250, 230, 160))));
+    put(CELESTIAL_GLASS, "Небесное стекло", [t; 3], Cube, 0.3, Any, Heaven, 0);
+    let t = a.add(move |x, y| if hash(x, y, 777) > 0.9 { rgb(255, 255, 255) } else { shade(rgb(60, 50, 120), 0.8 + hash(x, y, 778) * 0.3) });
+    put(STARDUST_BLOCK, "Звёздная пыль", [t; 3], Cube, 0.5, Shovel, Heaven, 5);
+    let t = a.add(move |x, y| shade(rgb(250, 248, 240), if (x + y / 2) % 5 == 0 { 0.85 } else { 0.98 + hash(x, y, 779) * 0.03 }));
+    put(FEATHER_BLOCK, "Перьевой блок", [t; 3], Cube, 0.2, Any, Heaven, 0);
+    let t = a.add(move |x, y| { let k = ((x + y) / 3) % 6; [rgb(240, 80, 80), rgb(250, 170, 60), rgb(250, 230, 80), rgb(100, 210, 100), rgb(80, 150, 240), rgb(160, 100, 230)][k as usize] });
+    put(RAINBOW_BLOCK, "Радужный блок", [t; 3], Cube, 0.8, Any, Heaven, 4);
+    let t = a.add(t_bricks(rgb(196, 150, 104), rgb(160, 120, 80), 8, 8, 780));
+    put(ADOBE, "Саманный кирпич", [t; 3], Cube, 1.0, Pickaxe, Building, 0);
+    let t = a.add(move |x, y| { let k = (x / 2 + y / 2) % 4; let c = [rgb(60, 140, 180), rgb(230, 210, 150), rgb(190, 80, 50), rgb(250, 240, 220)][k as usize]; if x % 2 == 1 && y % 2 == 1 { shade(c, 0.8) } else { c } });
+    put(MOSAIC, "Мозаика", [t; 3], Cube, 1.0, Pickaxe, Building, 0);
+    let t = a.add(t_ore(rgb(196, 170, 120), rgb(60, 200, 190), 781));
+    put(TURQUOISE_BLOCK, "Бирюзовая порода", [t; 3], Cube, 1.5, Pickaxe, Ores, 0);
+    let t = a.add(move |x, y| if (x * 2 + y * 3) % 13 == 0 { rgb(220, 240, 255) } else { shade(rgb(130, 150, 170), 0.85 + blotch(x, y, 782) * 0.25) });
+    put(FROST_STONE, "Морозный камень", [t; 3], Cube, 1.6, Pickaxe, Nature, 0);
+    let t = a.add(move |x, y| { let (d1, d2, _) = cells(x, y, 783, 4); if d2 - d1 < 0.7 { rgb(80, 50, 30) } else { shade(rgb(150, 100, 60), 0.85 + (1.0 - d1 / 3.0).max(0.0) * 0.3) } });
+    put(CONE_BLOCK, "Шишечный блок", [t; 3], Cube, 0.6, Axe, Decor, 0);
+    let t = a.add(move |x, y| shade(rgb(140, 110, 80), 0.75 + hash(x, y / 2, 784) * 0.35));
+    put(FUR_BLOCK, "Меховой блок", [t; 3], Cube, 0.4, Any, Decor, 0);
+    let t = a.add(move |x, y| { let stripe = (y + (x % 3)) % 4 == 0; shade(rgb(214, 180, 90), if stripe { 0.7 } else { 0.9 + hash(x, y, 785) * 0.15 }) });
+    put(THATCH, "Соломенная кровля", [t; 3], Cube, 0.5, Any, Building, 0);
+    let t = a.add(move |x, y| { let (d1, d2, id) = cells(x, y, 786, 3); if d2 - d1 < 0.7 { rgb(90, 80, 70) } else { shade(rgb(170, 160, 146), 0.85 + hash(id, 0, 787) * 0.25 - d1 * 0.03) } });
+    put(PAVING, "Мощёная дорожка", [t; 3], Cube, 1.5, Pickaxe, Building, 0);
+    let t = a.add(move |x, y| shade(rgb(242, 238, 228), 0.94 + blotch(x, y, 788) * 0.06));
+    put(WHITEWASH, "Побелённая стена", [t; 3], Cube, 1.0, Pickaxe, Building, 0);
+    let t = a.add(move |x, y| { let beam = x < 2 || x > 13 || y < 2 || y > 13 || (x - y).abs() < 2; if beam { shade(rgb(100, 66, 40), 0.9 + hash(x, y, 789) * 0.1) } else { shade(rgb(240, 234, 220), 0.95 + hash(x, y, 790) * 0.05) } });
+    put(TIMBER_FRAME, "Фахверк", [t; 3], Cube, 1.2, Axe, Building, 0);
+    let bt2 = a.add(t_logtop(rgb(220, 214, 196), rgb(236, 230, 214)));
+    let t = a.add(move |x, y| shade(rgb(232, 226, 206), if x % 5 == 0 { 0.85 } else { 0.97 + hash(x, y, 791) * 0.04 }));
+    put(BONE_BLOCK, "Костяной блок", [bt2, t, bt2], Cube, 1.5, Pickaxe, Decor, 0);
+
     // портал проходим насквозь
     let portal = defs[PORTAL as usize].as_mut().unwrap();
     portal.solid = false;
-    let web = defs[COBWEB as usize].as_mut().unwrap();
-    web.solid = false;
+    for id in [COBWEB, LADDER, IRON_BARS, LATTICE] {
+        if id == LADDER || id == COBWEB {
+            defs[id as usize].as_mut().unwrap().solid = false;
+        }
+    }
 
     let defs: Vec<BlockDef> = defs.into_iter().enumerate().map(|(i, d)| d.unwrap_or_else(|| panic!("блок {i} не описан"))).collect();
     let mut opaque = [false; 256];

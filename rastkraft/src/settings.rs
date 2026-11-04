@@ -14,6 +14,8 @@ pub struct Settings {
     pub gui_scale: f32,
     pub difficulty: u8,
     pub invert_mouse: bool,
+    pub pvp: bool,
+    pub name: String,
 }
 
 impl Default for Settings {
@@ -31,6 +33,8 @@ impl Default for Settings {
             gui_scale: 1.0,
             difficulty: 2,
             invert_mouse: false,
+            pvp: true,
+            name: "Игрок".to_string(),
         }
     }
 }
@@ -65,6 +69,8 @@ impl Settings {
                 "gui_scale" => s.gui_scale = v.parse().unwrap_or(s.gui_scale),
                 "difficulty" => s.difficulty = v.parse().unwrap_or(s.difficulty),
                 "invert_mouse" => s.invert_mouse = b,
+                "pvp" => s.pvp = b,
+                "name" => s.name = v.to_string(),
                 _ => {}
             }
         }
@@ -83,7 +89,7 @@ impl Settings {
 
     pub fn save(&self) {
         let text = format!(
-            "render_dist={}\nfov={}\nsensitivity={}\nbrightness={}\nfog={}\nclouds={}\nsmooth_light={}\nview_bob={}\nshow_fps={}\ngui_scale={}\ndifficulty={}\ninvert_mouse={}\n",
+            "render_dist={}\nfov={}\nsensitivity={}\nbrightness={}\nfog={}\nclouds={}\nsmooth_light={}\nview_bob={}\nshow_fps={}\ngui_scale={}\ndifficulty={}\ninvert_mouse={}\npvp={}\nname={}\n",
             self.render_dist,
             self.fov,
             self.sensitivity,
@@ -95,7 +101,9 @@ impl Settings {
             self.show_fps as u8,
             self.gui_scale,
             self.difficulty,
-            self.invert_mouse as u8
+            self.invert_mouse as u8,
+            self.pvp as u8,
+            self.name
         );
         let _ = std::fs::write(path(), text);
     }

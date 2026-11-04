@@ -304,11 +304,13 @@ pub struct Loader {
     order: Vec<(i32, i32)>,
     order_r: i32,
     pub epoch: u32,
+    /// Жители построек из свежесозданных чанков.
+    pub new_spawns: Vec<(u16, [i32; 3])>,
 }
 
 impl Loader {
     pub fn new() -> Self {
-        Loader { gpu: HashMap::new(), pending_gen: HashSet::new(), pending_mesh: HashMap::new(), order: Vec::new(), order_r: -1, epoch: 0 }
+        Loader { gpu: HashMap::new(), pending_gen: HashSet::new(), pending_mesh: HashMap::new(), order: Vec::new(), order_r: -1, epoch: 0, new_spawns: Vec::new() }
     }
 
     /// Выгрузить всё из видеопамяти (смена мира или измерения).
@@ -388,7 +390,15 @@ impl Loader {
                 Done::Generated { dim, seed, cx, cz, chunk } => {
                     if dim == world.dim && seed == world.seed {
                         self.pending_gen.remove(&(cx, cz));
-                        world.chunks.entry((cx, cz)).or_insert_with(|| std::sync::Arc::new(chunk));
+                        if !world.chunks.contains_key(&(cx, cz)) {
+                            if let Some(st) = world.stored.remove(&(cx, cz)) {
+                                world.chunks.insert((cx, cz), std::sync::Arc::new(st));
+                                world.versions.entry((cx, cz)).or_insert(1);
+                            } else {
+                                self.new_spawns.extend(chunk.spawns.iter().copied());
+                                world.chunks.insert((cx, cz), std::sync::Arc::new(chunk));
+                            }
+                        }
                     }
                 }
                 Done::Meshed { dim, cx, cz, version, epoch, mesh } => {
@@ -418,6 +428,11 @@ impl Loader {
             let (cx, cz) = (center.0 + dx, center.1 + dz);
             let inner = dx * dx + dz * dz <= r * r + r;
             if !world.chunks.contains_key(&(cx, cz)) {
+                if let Some(st) = world.stored.remove(&(cx, cz)) {
+                    world.chunks.insert((cx, cz), std::sync::Arc::new(st));
+                    world.versions.entry((cx, cz)).or_insert(1);
+                    continue;
+                }
                 if self.pending_gen.insert((cx, cz)) {
                     pool.submit(Job::Generate { dim: world.dim, seed: world.seed, cx, cz });
                 }

@@ -1,86 +1,126 @@
-//! Существа: враждебные Мракун (боится солнца) и Прыгун (живёт в пещерах),
-//! мирный Пушистик.
+//! Живые существа: поведение, появление (до 50 мирных и 50 враждебных
+//! одновременно), стрельба, анимация смерти и трофеи.
 
 use crate::blocks::*;
+use crate::entities::{Entities, Projectile};
+use crate::items::{self, Item};
+use crate::mobdefs::*;
+use crate::model::{self, Anim};
 use crate::player::{Body, Player};
 use crate::world::{Dim, World};
+use crate::worldgen::{self, Biome};
 use macroquad::prelude::*;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Kind {
-    Shade,
-    Hopper,
-    Fluff,
-}
-
-impl Kind {
-    pub fn hostile(self) -> bool {
-        !matches!(self, Kind::Fluff)
-    }
-    pub fn name(self) -> &'static str {
-        match self {
-            Kind::Shade => "Мракун",
-            Kind::Hopper => "Прыгун",
-            Kind::Fluff => "Пушистик",
-        }
-    }
-}
+pub const MAX_FRIENDLY: usize = 50;
+pub const MAX_HOSTILE: usize = 50;
 
 pub struct Mob {
-    pub kind: Kind,
+    pub def: usize,
     pub body: Body,
     pub yaw: f32,
     pub health: f32,
     pub hurt_t: f32,
     pub attack_cd: f32,
+    pub attack_anim: f32,
     pub think_t: f32,
     pub wander: Vec3,
     pub phase: f32,
     pub flee_t: f32,
+    pub dying: f32,
+    pub angry: bool,
+    pub home: Option<Vec3>,
 }
 
 impl Mob {
-    pub fn new(kind: Kind, pos: Vec3) -> Self {
-        let (hw, h, hp) = match kind {
-            Kind::Shade => (0.3, 1.9, 16.0),
-            Kind::Hopper => (0.45, 0.9, 8.0),
-            Kind::Fluff => (0.45, 1.0, 8.0),
+    pub fn new(def: usize, pos: Vec3) -> Self {
+        let d = &MOBS[def];
+        let s = d.scale;
+        let (hw, h) = match d.plan {
+            Plan::Biped => (0.3, 1.9),
+            Plan::Golem => (0.45, 2.1),
+            Plan::Quad => (0.4, 1.0),
+            Plan::Slime => (0.45, 0.9),
+            Plan::Bird => (0.3, 0.8),
+            Plan::Spider => (0.5, 0.7),
+            Plan::Fish => (0.4, 0.6),
+            Plan::Wisp => (0.35, 1.0),
         };
-        Mob { kind, body: Body::new(pos, hw, h), yaw: 0.0, health: hp, hurt_t: 0.0, attack_cd: 1.0, think_t: 0.0, wander: Vec3::ZERO, phase: 0.0, flee_t: 0.0 }
+        Mob {
+            def,
+            body: Body::new(pos, hw * s, h * s),
+            yaw: 0.0,
+            health: d.hp,
+            hurt_t: 0.0,
+            attack_cd: 1.0,
+            attack_anim: 0.0,
+            think_t: 0.0,
+            wander: Vec3::ZERO,
+            phase: 0.0,
+            flee_t: 0.0,
+            dying: 0.0,
+            angry: false,
+            home: None,
+        }
     }
 
-    /// Пересечение луча с телом: расстояние до попадания.
+    pub fn d(&self) -> &'static MobDef {
+        &MOBS[self.def]
+    }
+
+    pub fn hostile(&self) -> bool {
+        let d = self.d();
+        (!d.friendly && (d.flags & NEUTRAL == 0 || self.angry)) || (d.friendly && self.angry && d.flags & NEUTRAL != 0)
+    }
+
+    pub fn alive(&self) -> bool {
+        self.dying <= 0.0
+    }
+
     pub fn ray_hit(&self, o: Vec3, d: Vec3) -> Option<f32> {
+        if !self.alive() {
+            return None;
+        }
         let min = self.body.pos - vec3(self.body.hw, 0.0, self.body.hw);
         let max = self.body.pos + vec3(self.body.hw, self.body.h, self.body.hw);
-        let (mut t0, mut t1) = (0.0f32, f32::MAX);
-        for a in 0..3 {
-            if d[a].abs() < 1e-6 {
-                if o[a] < min[a] || o[a] > max[a] {
-                    return None;
-                }
-            } else {
-                let (mut ta, mut tb) = ((min[a] - o[a]) / d[a], (max[a] - o[a]) / d[a]);
-                if ta > tb {
-                    std::mem::swap(&mut ta, &mut tb);
-                }
-                t0 = t0.max(ta);
-                t1 = t1.min(tb);
-                if t0 > t1 {
-                    return None;
-                }
-            }
-        }
-        Some(t0)
+        ray_aabb(o, d, min, max)
     }
 
     pub fn damage(&mut self, amount: f32, from: Vec3) {
+        if !self.alive() {
+            return;
+        }
         self.health -= amount;
         self.hurt_t = 0.3;
         let dir = (self.body.pos - from).with_y(0.0).normalize_or_zero();
-        self.body.vel += dir * 7.0 + vec3(0.0, 5.0, 0.0);
-        self.flee_t = 3.0;
+        self.body.vel += dir * 6.0 + vec3(0.0, 4.5, 0.0);
+        self.flee_t = 4.0;
+        self.angry = true;
+        if self.health <= 0.0 {
+            self.dying = 0.01;
+        }
     }
+}
+
+pub fn ray_aabb(o: Vec3, d: Vec3, min: Vec3, max: Vec3) -> Option<f32> {
+    let (mut t0, mut t1) = (0.0f32, f32::MAX);
+    for a in 0..3 {
+        if d[a].abs() < 1e-6 {
+            if o[a] < min[a] || o[a] > max[a] {
+                return None;
+            }
+        } else {
+            let (mut ta, mut tb) = ((min[a] - o[a]) / d[a], (max[a] - o[a]) / d[a]);
+            if ta > tb {
+                std::mem::swap(&mut ta, &mut tb);
+            }
+            t0 = t0.max(ta);
+            t1 = t1.min(tb);
+            if t0 > t1 {
+                return None;
+            }
+        }
+    }
+    Some(t0)
 }
 
 pub struct Mobs {
@@ -101,252 +141,335 @@ impl Mobs {
         (self.rng & 0xffffff) as f32 / 16_777_215.0
     }
 
+    fn pick(&mut self, filter: impl Fn(&MobDef) -> bool) -> Option<usize> {
+        let ids: Vec<usize> = (0..MOBS.len()).filter(|&i| filter(&MOBS[i])).collect();
+        if ids.is_empty() {
+            return None;
+        }
+        Some(ids[(self.rand() * ids.len() as f32) as usize % ids.len()])
+    }
+
+    pub fn counts(&self) -> (usize, usize) {
+        let f = self.list.iter().filter(|m| m.d().friendly).count();
+        (f, self.list.len() - f)
+    }
+
     fn try_spawn(&mut self, world: &World, player: &Player, daylight: f32, difficulty: u8) {
-        let hostile = self.list.iter().filter(|m| m.kind.hostile()).count();
-        let passive = self.list.len() - hostile;
+        let (fr, ho) = self.counts();
+        let hostile_cap = [0, 25, MAX_HOSTILE, MAX_HOSTILE][difficulty.min(3) as usize];
         let ang = self.rand() * std::f32::consts::TAU;
-        let dist = 22.0 + self.rand() * 26.0;
+        let dist = 20.0 + self.rand() * 36.0;
         let p = player.body.pos;
         let (x, z) = ((p.x + ang.cos() * dist).floor() as i32, (p.z + ang.sin() * dist).floor() as i32);
         if !world.is_loaded(x, z) {
             return;
         }
         let y0 = p.y as i32;
-        for y in ((y0 - 24).max(1)..(y0 + 16).min(126)).rev() {
+        let start = (y0 + 20).min(124);
+        for y in ((y0 - 30).max(2)..start).rev() {
+            let at = world.get(x, y, z);
             let below = world.get(x, y - 1, z);
-            if !is_solid(below) || world.get(x, y, z) != AIR || world.get(x, y + 1, z) != AIR {
+            let water = at == WATER && world.get(x, y + 1, z) == WATER;
+            let ground = is_solid(below) && at == AIR && world.get(x, y + 1, z) == AIR;
+            if !water && !ground {
                 continue;
             }
             let exposed = world.sky_exposed(x, y, z);
             let pos = vec3(x as f32 + 0.5, y as f32, z as f32 + 0.5);
-            let r = self.rand();
-            if world.dim == Dim::Heaven {
-                if passive < 5 && below == HEAVEN_GRASS {
-                    self.list.push(Mob::new(Kind::Fluff, pos));
+            let biome = if world.dim == Dim::Heaven { Biome::Islands } else { worldgen::column(world.seed, x, z).biome };
+            let night = daylight < 0.3;
+            let want_hostile = ho < hostile_cap && (fr >= MAX_FRIENDLY || self.rand() < 0.5);
+            let want_friendly = fr < MAX_FRIENDLY;
+            let pick = if water {
+                if want_hostile && self.rand() < 0.5 {
+                    self.pick(|d| !d.friendly && d.hab == Hab::Ocean)
+                } else if want_friendly {
+                    self.pick(|d| d.friendly && d.hab == Hab::Ocean && d.flags & SWIM != 0)
+                } else {
+                    None
                 }
-                return;
-            }
-            if difficulty > 0 && hostile < 6 + difficulty as usize * 3 {
-                if exposed && daylight < 0.3 && r < 0.8 {
-                    self.list.push(Mob::new(Kind::Shade, pos));
-                    return;
+            } else if world.dim == Dim::Heaven {
+                if want_hostile && self.rand() < 0.35 {
+                    self.pick(|d| !d.friendly && d.hab == Hab::Heaven)
+                } else if want_friendly && is_solid(below) {
+                    self.pick(|d| d.friendly && d.hab == Hab::Heaven)
+                } else {
+                    None
                 }
-                if !exposed {
-                    let k = if r < 0.55 { Kind::Shade } else { Kind::Hopper };
-                    self.list.push(Mob::new(k, pos));
-                    return;
+            } else if !exposed {
+                if want_hostile && self.rand() < 0.8 {
+                    self.pick(|d| !d.friendly && d.hab == Hab::Cave)
+                } else if want_friendly {
+                    self.pick(|d| d.friendly && d.hab == Hab::Cave)
+                } else {
+                    None
                 }
-            }
-            if exposed && daylight > 0.5 && passive < 6 && below == GRASS && r < 0.35 {
-                self.list.push(Mob::new(Kind::Fluff, pos));
+            } else {
+                let hab = match biome {
+                    Biome::Desert => Hab::Desert,
+                    Biome::Taiga => Hab::Taiga,
+                    Biome::Ocean => Hab::Ocean,
+                    _ => Hab::Meadow,
+                };
+                if want_hostile && night {
+                    if self.rand() < 0.6 {
+                        self.pick(|d| !d.friendly && d.hab == Hab::Night)
+                    } else {
+                        self.pick(|d| !d.friendly && d.hab == hab)
+                    }
+                } else if want_hostile && self.rand() < 0.15 && hab != Hab::Meadow {
+                    self.pick(|d| !d.friendly && d.hab == hab && d.flags & BURNS == 0)
+                } else if want_friendly && !night {
+                    self.pick(|d| d.friendly && d.hab == hab && d.flags & SWIM == 0)
+                } else if want_friendly && night && self.rand() < 0.3 {
+                    self.pick(|d| d.friendly && d.hab == hab && d.flags & GLOW != 0)
+                } else {
+                    None
+                }
+            };
+            if let Some(id) = pick {
+                if !(water && MOBS[id].flags & SWIM == 0 && MOBS[id].flags & FLY == 0) {
+                    self.list.push(Mob::new(id, pos));
+                }
             }
             return;
         }
     }
 
-    /// Обновление; возвращает урон, нанесённый игроку.
-    pub fn update(&mut self, world: &World, player: &mut Player, dt: f32, daylight: f32, difficulty: u8, creative: bool) {
+    /// Обитатели постройки появляются у неё один раз.
+    pub fn spawn_inhabitant(&mut self, def: usize, pos: Vec3) {
+        let mut m = Mob::new(def, pos);
+        m.home = Some(pos);
+        self.list.push(m);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn update(&mut self, world: &World, player: &mut Player, ents: &mut Entities, dt: f32, daylight: f32, difficulty: u8, creative: bool) {
         self.spawn_t -= dt;
         if self.spawn_t <= 0.0 {
-            self.spawn_t = 0.7;
-            self.try_spawn(world, player, daylight, difficulty);
+            self.spawn_t = 0.12;
+            for _ in 0..3 {
+                self.try_spawn(world, player, daylight, difficulty);
+            }
         }
         if difficulty == 0 {
-            self.list.retain(|m| !m.kind.hostile());
+            self.list.retain(|m| m.d().friendly || m.home.is_some());
         }
         let ppos = player.body.pos;
         let dmg_k = [0.0, 0.5, 1.0, 1.5][difficulty.min(3) as usize];
-        let rands: Vec<f32> = (0..self.list.len() * 3).map(|_| self.rand()).collect();
+        let n = self.list.len();
+        let rands: Vec<f32> = (0..n * 4).map(|_| self.rand()).collect();
 
         for (i, m) in self.list.iter_mut().enumerate() {
+            let d = &MOBS[m.def];
+            if m.dying > 0.0 {
+                m.dying += dt * 1.6;
+                m.body.vel.x *= 0.9;
+                m.body.vel.z *= 0.9;
+                m.body.vel.y -= 20.0 * dt;
+                m.body.step(world, dt);
+                continue;
+            }
             m.hurt_t = (m.hurt_t - dt).max(0.0);
             m.attack_cd -= dt;
+            m.attack_anim = (m.attack_anim - dt * 3.0).max(0.0);
             m.think_t -= dt;
             m.flee_t -= dt;
-            let to = (ppos - m.body.pos).with_y(0.0);
-            let dist = to.length();
-            let dir_to = to.normalize_or_zero();
-            let mut wish;
-            let mut speed = 0.0;
-            let chase = m.kind.hostile() && !creative && dist < 20.0 && (ppos.y - m.body.pos.y).abs() < 8.0;
+            let to = ppos - m.body.pos;
+            let flat = to.with_y(0.0);
+            let dist = flat.length();
+            let dir_to = flat.normalize_or_zero();
+            let chase = m.hostile() && !creative && dist < 22.0 && to.y.abs() < 10.0;
+            let fly = d.flags & FLY != 0;
+            let swim = d.flags & SWIM != 0;
+            let in_water = world.get(m.body.pos.x.floor() as i32, (m.body.pos.y + 0.3).floor() as i32, m.body.pos.z.floor() as i32) == WATER;
 
+            let mut wish;
             if chase {
                 wish = dir_to;
+                if d.flags & RANGED != 0 && dist < 7.0 {
+                    wish = -dir_to * 0.6;
+                }
             } else {
                 if m.think_t <= 0.0 {
-                    m.think_t = 2.0 + rands[i * 3] * 4.0;
-                    let a = rands[i * 3 + 1] * std::f32::consts::TAU;
-                    m.wander = if rands[i * 3 + 2] < 0.4 { Vec3::ZERO } else { vec3(a.cos(), 0.0, a.sin()) };
+                    m.think_t = 2.0 + rands[i * 4] * 4.0;
+                    let a = rands[i * 4 + 1] * std::f32::consts::TAU;
+                    m.wander = if rands[i * 4 + 2] < 0.35 { Vec3::ZERO } else { vec3(a.cos(), 0.0, a.sin()) };
+                    if let Some(h) = m.home {
+                        let back = (h - m.body.pos).with_y(0.0);
+                        if back.length() > 8.0 {
+                            m.wander = back.normalize();
+                        }
+                    }
                 }
                 wish = m.wander;
-                if m.flee_t > 0.0 {
+                if m.flee_t > 0.0 && !m.hostile() {
                     wish = -dir_to;
                 }
             }
 
-            match m.kind {
-                Kind::Shade => {
-                    speed = if chase { 3.3 } else { 1.2 };
-                    let (x, y, z) = (m.body.pos.x.floor() as i32, (m.body.pos.y + 1.5).floor() as i32, m.body.pos.z.floor() as i32);
-                    if daylight > 0.55 && world.dim == Dim::Overworld && world.sky_exposed(x, y, z) {
-                        m.health -= dt * 3.0;
-                        m.hurt_t = m.hurt_t.max(0.05);
-                    }
-                }
-                Kind::Hopper => {
-                    // передвигается прыжками
-                    if m.body.on_ground {
-                        m.body.vel.x *= 0.6;
-                        m.body.vel.z *= 0.6;
-                        if m.attack_cd < 0.3 && wish != Vec3::ZERO {
-                            m.body.vel = wish * if chase { 4.5 } else { 2.0 } + vec3(0.0, 7.5, 0.0);
-                            m.attack_cd = 1.2;
-                        }
-                    }
-                }
-                Kind::Fluff => {
-                    speed = if m.flee_t > 0.0 { 4.0 } else { 1.1 };
-                }
+            let mut speed = if chase { d.speed } else { d.speed * 0.45 };
+            if m.flee_t > 0.0 && !m.hostile() {
+                speed = d.speed * 1.4;
             }
 
-            if m.kind != Kind::Hopper {
-                let k = (dt * if m.body.on_ground { 10.0 } else { 2.0 }).min(1.0);
+            if d.flags & HOP != 0 && !fly {
+                if m.body.on_ground {
+                    m.body.vel.x *= 0.5;
+                    m.body.vel.z *= 0.5;
+                    if m.attack_cd < 0.5 && wish != Vec3::ZERO && rands[i * 4 + 3] < dt * 6.0 {
+                        m.body.vel = wish * speed * 1.4 + vec3(0.0, 7.0, 0.0);
+                    }
+                }
+            } else {
+                let k = (dt * if m.body.on_ground || fly || in_water { 9.0 } else { 2.0 }).min(1.0);
                 m.body.vel.x += (wish.x * speed - m.body.vel.x) * k;
                 m.body.vel.z += (wish.z * speed - m.body.vel.z) * k;
-                if m.body.hit_wall && m.body.on_ground && wish != Vec3::ZERO {
+                if m.body.hit_wall && m.body.on_ground && wish != Vec3::ZERO && !fly {
                     m.body.vel.y = 8.4;
                 }
             }
-            if wish != Vec3::ZERO {
-                let target = wish.z.atan2(wish.x);
-                let mut d = target - m.yaw;
-                while d > std::f32::consts::PI {
-                    d -= std::f32::consts::TAU;
+            if fly {
+                // держим высоту над землёй (или над игроком при погоне)
+                let gx = m.body.pos.x.floor() as i32;
+                let gz = m.body.pos.z.floor() as i32;
+                let mut ground = m.body.pos.y as i32;
+                while ground > 0 && !is_solid(world.get(gx, ground - 1, gz)) && (m.body.pos.y as i32 - ground) < 12 {
+                    ground -= 1;
                 }
-                while d < -std::f32::consts::PI {
-                    d += std::f32::consts::TAU;
+                let target = if chase { ppos.y + 1.2 } else { ground as f32 + 3.0 + (m.phase * 0.3).sin() };
+                m.body.vel.y += ((target - m.body.pos.y) * 2.0 - m.body.vel.y) * (dt * 3.0).min(1.0);
+            } else if in_water {
+                if swim {
+                    let target = if chase { ppos.y } else { m.body.pos.y + (m.phase).sin() * 0.3 };
+                    m.body.vel.y += ((target - m.body.pos.y) * 1.5 - m.body.vel.y) * (dt * 3.0).min(1.0);
+                } else {
+                    m.body.vel.y = (m.body.vel.y + 14.0 * dt).min(2.5);
                 }
-                m.yaw += d * (dt * 8.0).min(1.0);
-            }
-            let in_water = world.get(m.body.pos.x.floor() as i32, (m.body.pos.y + 0.4).floor() as i32, m.body.pos.z.floor() as i32) == WATER;
-            if in_water {
-                m.body.vel.y = (m.body.vel.y + 14.0 * dt).min(2.5);
             } else {
                 m.body.vel.y -= 28.0 * dt;
             }
+            if wish != Vec3::ZERO {
+                let target = if chase { dir_to.z.atan2(dir_to.x) } else { wish.z.atan2(wish.x) };
+                let mut dd = target - m.yaw;
+                while dd > std::f32::consts::PI {
+                    dd -= std::f32::consts::TAU;
+                }
+                while dd < -std::f32::consts::PI {
+                    dd += std::f32::consts::TAU;
+                }
+                m.yaw += dd * (dt * 8.0).min(1.0);
+            }
             m.body.step(world, dt);
-            m.phase += dt * vec2(m.body.vel.x, m.body.vel.z).length() * 2.2;
-            if m.body.touching(world, 0.0).contains(&LAVA) {
+            m.phase += dt * (vec2(m.body.vel.x, m.body.vel.z).length() * 2.4 + if fly { 1.0 } else { 0.0 });
+
+            // солнце, лава
+            if d.flags & BURNS != 0 && daylight > 0.55 && world.dim == Dim::Overworld {
+                let (x, y, z) = (m.body.pos.x.floor() as i32, (m.body.pos.y + m.body.h).floor() as i32, m.body.pos.z.floor() as i32);
+                if world.sky_exposed(x, y, z) {
+                    m.health -= dt * 3.0;
+                    m.hurt_t = m.hurt_t.max(0.05);
+                }
+            }
+            if m.body.touching(world, 0.0).contains(&LAVA) && d.flags & GLOW == 0 {
                 m.health -= dt * 6.0;
+            }
+            if m.health <= 0.0 && m.dying <= 0.0 {
+                m.dying = 0.01;
             }
 
             // атака
-            if m.kind.hostile() && !creative {
-                let dy = ppos.y - m.body.pos.y;
-                let reach = if m.kind == Kind::Hopper { 1.0 } else { 1.3 };
-                if dist < reach + m.body.hw && dy.abs() < 1.6 && m.attack_cd <= 0.0 {
-                    let base = if m.kind == Kind::Shade { 3.0 } else { 2.0 };
-                    player.hurt(base * dmg_k, dir_to * 6.0 + vec3(0.0, 4.0, 0.0), false);
+            if m.hostile() && !creative && m.attack_cd <= 0.0 {
+                let reach = 1.2 + m.body.hw;
+                if dist < reach && (to.y + 0.5).abs() < 1.8 {
+                    player.hurt(d.dmg * dmg_k, dir_to * 6.0 + vec3(0.0, 4.0, 0.0), false);
                     m.attack_cd = 1.0;
+                    m.attack_anim = 1.0;
+                } else if d.flags & RANGED != 0 && dist < 16.0 && dist > 3.0 {
+                    let from = m.body.pos + vec3(0.0, m.body.h * 0.8, 0.0);
+                    let target = ppos + vec3(0.0, 1.0, 0.0);
+                    let dir = (target - from).normalize_or_zero();
+                    let lift = dist * 0.18;
+                    ents.projectiles.push(Projectile {
+                        pos: from + dir * 0.6,
+                        vel: dir * 16.0 + vec3(0.0, lift, 0.0),
+                        damage: d.dmg * dmg_k,
+                        color: Color::from_rgba(d.c3.0, d.c3.1, d.c3.2, 255),
+                        age: 0.0,
+                        from_player: false,
+                    });
+                    m.attack_cd = 2.2;
+                    m.attack_anim = 1.0;
                 }
             }
         }
+
+        // смерть и трофеи
+        let mut drops: Vec<(Item, u16, Vec3)> = Vec::new();
         self.list.retain(|m| {
-            let d = (m.body.pos - ppos).length();
-            m.health > 0.0 && d < 110.0 && m.body.pos.y > -20.0
+            if m.dying >= 1.0 {
+                let d = &MOBS[m.def];
+                let r = crate::blocks::hash(m.body.pos.x as i32, m.body.pos.z as i32, m.def as u32);
+                let p = m.body.pos + vec3(0.0, 0.5, 0.0);
+                if r < 0.75 {
+                    drops.push((Item::Thing(items::MOB_DROP0 + m.def as u16), 1 + (r < 0.2) as u16, p));
+                }
+                let extra = match d.extra {
+                    Extra::None => None,
+                    Extra::Beef => Some(items::RAW_BEEF),
+                    Extra::Chicken => Some(items::RAW_CHICKEN),
+                    Extra::Mutton => Some(items::RAW_MUTTON),
+                    Extra::Fish => Some(items::RAW_FISH),
+                    Extra::Leather => Some(items::LEATHER),
+                    Extra::Fur => Some(items::FUR),
+                    Extra::Bone => Some(items::BONE),
+                    Extra::Feather => Some(items::FEATHER),
+                    Extra::Slime => Some(items::SLIME),
+                    Extra::Thread => Some(items::THREAD),
+                    Extra::Coal => Some(items::COAL),
+                    Extra::Gold => Some(items::GOLD_INGOT),
+                    Extra::HeavenDust => Some(items::HEAVEN_DUST),
+                    Extra::Egg => Some(items::EGG),
+                };
+                if let Some(e) = extra {
+                    drops.push((Item::Thing(e), 1 + (r * 2.5) as u16, p));
+                }
+                return false;
+            }
+            let dd = (m.body.pos - ppos).length();
+            dd < 120.0 && m.body.pos.y > -30.0
         });
+        for (k, (it, n, p)) in drops.into_iter().enumerate() {
+            ents.spawn_drop(it, n, p, k as f32 * 0.37);
+        }
     }
 
-    pub fn draw(&self, world: &World, daylight: f32, t: f32) {
+    pub fn draw(&self, world: &World, daylight: f32, t: f32, cam: Vec3) {
         for m in &self.list {
             let p = m.body.pos;
-            let (x, y, z) = (p.x.floor() as i32, (p.y + 1.0).floor() as i32, p.z.floor() as i32);
-            let exposed = world.sky_exposed(x, y, z);
-            let light = if exposed { daylight.max(0.2) } else { 0.28 };
-            let hurt = m.hurt_t > 0.0;
-            let tint = |c: Color| -> Color {
-                let c = if hurt { Color::new(c.r * 0.4 + 0.6, c.g * 0.5, c.b * 0.5, c.a) } else { c };
-                Color::new(c.r * light, c.g * light, c.b * light, c.a)
-            };
-            let glow = |c: Color| c; // светящиеся детали не темнеют
-            let swing = (m.phase).sin() * 0.25;
-            match m.kind {
-                Kind::Shade => {
-                    let body = Color::from_rgba(52, 38, 78, 255);
-                    let dark = Color::from_rgba(30, 22, 46, 255);
-                    draw_box(p, m.yaw, vec3(0.0, 0.0, -0.12), vec3(0.22, 0.85, 0.22), vec3(swing, 0.0, 0.0), tint(dark));
-                    draw_box(p, m.yaw, vec3(0.0, 0.0, 0.12), vec3(0.22, 0.85, 0.22), vec3(-swing, 0.0, 0.0), tint(dark));
-                    draw_box(p, m.yaw, vec3(0.0, 0.85, 0.0), vec3(0.32, 0.6, 0.52), Vec3::ZERO, tint(body));
-                    draw_box(p, m.yaw, vec3(0.05, 0.85, -0.38), vec3(0.2, 0.55, 0.18), vec3(0.0, 0.0, 0.0), tint(dark));
-                    draw_box(p, m.yaw, vec3(0.05, 0.85, 0.38), vec3(0.2, 0.55, 0.18), vec3(0.0, 0.0, 0.0), tint(dark));
-                    draw_box(p, m.yaw, vec3(0.0, 1.45, 0.0), vec3(0.46, 0.44, 0.46), Vec3::ZERO, tint(body));
-                    let pulse = 0.75 + (t * 4.0).sin() * 0.25;
-                    let eye = glow(Color::new(0.45 * pulse, 0.95 * pulse, 1.0, 1.0));
-                    draw_box(p, m.yaw, vec3(0.235, 1.62, -0.11), vec3(0.02, 0.07, 0.1), Vec3::ZERO, eye);
-                    draw_box(p, m.yaw, vec3(0.235, 1.62, 0.11), vec3(0.02, 0.07, 0.1), Vec3::ZERO, eye);
-                }
-                Kind::Hopper => {
-                    let squash = if m.body.on_ground { 1.0 } else { 1.12 };
-                    let s = vec3(0.9, 0.86 * squash, 0.9);
-                    draw_box(p, m.yaw, vec3(0.0, 0.2, 0.0), vec3(0.4, 0.4, 0.4), Vec3::ZERO, tint(Color::from_rgba(40, 110, 50, 255)));
-                    draw_box(p, m.yaw, Vec3::ZERO, s, Vec3::ZERO, tint(Color::from_rgba(110, 210, 90, 170)));
-                    let eye = tint(Color::from_rgba(20, 30, 20, 255));
-                    draw_box(p, m.yaw, vec3(0.455, 0.55, -0.18), vec3(0.02, 0.14, 0.12), Vec3::ZERO, eye);
-                    draw_box(p, m.yaw, vec3(0.455, 0.55, 0.18), vec3(0.02, 0.14, 0.12), Vec3::ZERO, eye);
-                }
-                Kind::Fluff => {
-                    let wool = Color::from_rgba(244, 240, 232, 255);
-                    let leg = Color::from_rgba(70, 60, 56, 255);
-                    for (lx, lz, ph) in [(0.35, 0.22, 1.0), (0.35, -0.22, -1.0), (-0.35, 0.22, -1.0), (-0.35, -0.22, 1.0)] {
-                        draw_box(p, m.yaw, vec3(lx, 0.0, lz), vec3(0.16, 0.4, 0.16), vec3(swing * ph, 0.0, 0.0), tint(leg));
-                    }
-                    draw_box(p, m.yaw, vec3(0.0, 0.35, 0.0), vec3(1.05, 0.62, 0.8), Vec3::ZERO, tint(wool));
-                    draw_box(p, m.yaw, vec3(0.6, 0.62, 0.0), vec3(0.36, 0.36, 0.4), Vec3::ZERO, tint(Color::from_rgba(150, 110, 90, 255)));
-                    draw_box(p, m.yaw, vec3(0.55, 0.92, 0.0), vec3(0.26, 0.12, 0.46), Vec3::ZERO, tint(wool));
-                    let eye = tint(Color::from_rgba(20, 20, 20, 255));
-                    draw_box(p, m.yaw, vec3(0.785, 0.78, -0.1), vec3(0.01, 0.06, 0.06), Vec3::ZERO, eye);
-                    draw_box(p, m.yaw, vec3(0.785, 0.78, 0.1), vec3(0.01, 0.06, 0.06), Vec3::ZERO, eye);
-                }
+            if (p - cam).length() > 90.0 {
+                continue;
             }
+            let d = m.d();
+            let (x, y, z) = (p.x.floor() as i32, (p.y + 1.0).floor() as i32, p.z.floor() as i32);
+            let light = if d.flags & GLOW != 0 {
+                1.0
+            } else if world.sky_exposed(x, y, z) {
+                daylight.max(0.25)
+            } else {
+                0.35
+            };
+            let a = Anim {
+                walk: m.phase,
+                speed: vec2(m.body.vel.x, m.body.vel.z).length() / 2.0 + if d.flags & FLY != 0 { 0.5 } else { 0.0 },
+                attack: m.attack_anim,
+                hurt: m.hurt_t > 0.0 || m.dying > 0.0,
+                dying: m.dying,
+                t: t + m.def as f32,
+                light,
+                head_pitch: 0.0,
+            };
+            model::draw_mob(d, p, m.yaw, &a);
         }
     }
-}
-
-/// Рисует повёрнутый по `yaw` параллелепипед. `local` — смещение низа-центра
-/// в системе существа (x — вперёд), `swing` — поворот вокруг оси z у верхней грани.
-fn draw_box(origin: Vec3, yaw: f32, local: Vec3, size: Vec3, swing: Vec3, color: Color) {
-    let (hx, hz) = (size.x / 2.0, size.z / 2.0);
-    let mut corners = [Vec3::ZERO; 8];
-    for i in 0..8 {
-        let x = if i & 1 == 0 { -hx } else { hx };
-        let y = if i & 2 == 0 { 0.0 } else { size.y };
-        let z = if i & 4 == 0 { -hz } else { hz };
-        let mut c = vec3(x, y - size.y, z);
-        // качание конечности вокруг верхней точки
-        let (s, co) = swing.x.sin_cos();
-        c = vec3(c.x * co - c.y * s, c.x * s + c.y * co, c.z);
-        c.y += size.y;
-        let p = local + c;
-        let (sy, cy) = yaw.sin_cos();
-        corners[i] = origin + vec3(p.x * cy - p.z * sy, p.y, p.x * sy + p.z * cy);
-    }
-    let faces: [([usize; 4], f32); 6] = [
-        ([2, 3, 7, 6], 1.0),
-        ([0, 4, 5, 1], 0.5),
-        ([1, 5, 7, 3], 0.82),
-        ([0, 2, 6, 4], 0.82),
-        ([4, 6, 7, 5], 0.68),
-        ([0, 1, 3, 2], 0.68),
-    ];
-    let mut verts = Vec::with_capacity(24);
-    let mut idx = Vec::with_capacity(36);
-    for (f, k) in faces {
-        let c = Color::new(color.r * k, color.g * k, color.b * k, color.a);
-        let b = verts.len() as u16;
-        for &i in &f {
-            verts.push(Vertex::new2(corners[i], Vec2::ZERO, c));
-        }
-        idx.extend_from_slice(&[b, b + 1, b + 2, b, b + 2, b + 3]);
-    }
-    draw_mesh(&Mesh { vertices: verts, indices: idx, texture: None });
 }
