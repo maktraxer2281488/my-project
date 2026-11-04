@@ -229,6 +229,11 @@ struct App {
     just_opened: bool,
     finder: Option<net::Finder>,
     chat_input: String,
+    /// Текстура пониженного разрешения для 3D (масштаб рендера).
+    rt: Option<(RenderTarget, u32, u32)>,
+    /// Действующая дальность (при авто-настройке может быть меньше выбранной).
+    eff_dist: i32,
+    auto_t: f32,
 }
 
 fn set_grab(app: &mut App, grab: bool) {
@@ -1705,13 +1710,13 @@ fn settings_screen(app: &mut App) -> Option<Screen> {
     } else {
         draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.55));
     }
-    app.ui.text_center("Настройки", w / 2.0, h * 0.1, 34.0, WHITE);
+    app.ui.text_center("Настройки", w / 2.0, h * 0.07, 34.0, WHITE);
     let cw = 330.0 * s;
     let bh = 42.0 * s;
     let gap = 10.0 * s;
     let x1 = w / 2.0 - cw - gap / 2.0;
     let x2 = w / 2.0 + gap / 2.0;
-    let mut y = h * 0.15;
+    let mut y = h * 0.11;
     let old_smooth = app.settings.smooth_light;
     let st = &mut app.settings;
     let ui = &mut app.ui;
@@ -1767,6 +1772,7 @@ fn settings_screen(app: &mut App) -> Option<Screen> {
                 st.render_dist = 8;
                 st.smooth_light = true;
                 st.clouds = true;
+                st.render_scale = 1.0;
             }
             "Среднее" => {
                 st.render_dist = 12;
@@ -1779,8 +1785,15 @@ fn settings_screen(app: &mut App) -> Option<Screen> {
                 st.smooth_light = false;
                 st.clouds = false;
                 st.fog = true;
+                st.render_scale = 0.7;
             }
         }
+    }
+    y += bh + gap;
+    let rs = ui.slider(6, x1, y, cw, bh, &format!("Масштаб рендера: {:.0}%", st.render_scale * 100.0), st.render_scale, 0.4, 1.0);
+    st.render_scale = (rs * 20.0).round() / 20.0;
+    if ui.button(x2, y, cw, bh, &format!("Авто-дальность (60 FPS): {}", onoff(st.auto_dist))) {
+        st.auto_dist = !st.auto_dist;
     }
     y += bh + gap * 2.0;
     let done = ui.button((w - cw) / 2.0, y, cw, bh, "Готово") || is_key_pressed(KeyCode::Escape);
@@ -2230,7 +2243,7 @@ fn draw_hud(app: &mut App) {
             format!("XYZ: {:.1} / {:.1} / {:.1}", p.x, p.y, p.z),
             format!("Чанк: {cx} {cz}   Измерение: {}", g.dim.name()),
             format!("Биом: {}", biome.name()),
-            format!("Чанков в памяти: {}   отрисовано: {}", g.world().chunks.len(), app.loader.gpu.len()),
+            format!("Чанков в памяти: {}   отрисовано: {}   дальность: {}/{}", g.world().chunks.len(), app.loader.gpu.len(), app.eff_dist, app.settings.render_dist),
             format!("Время: {:02}:{:02}   Существ: {} мирных, {} злых", hours as i32, (hours.fract() * 60.0) as i32, fr, ho),
             format!("Предметов на земле: {}   Игроков онлайн: {}", g.ents.drops.len(), g.remotes.len() + 1),
             format!("Зерно: {}   Мир: {}", g.seed, if g.name.is_empty() { "сетевой" } else { &g.name }),
@@ -2252,9 +2265,32 @@ fn player_light(g: &Game) -> f32 {
 
 /// 3D-сцена: небо, мир, существа, игроки, предметы, рука.
 fn render_world(app: &mut App) {
+    // масштаб рендера: 3D рисуется в текстуру меньшего размера и растягивается
+    let (sw, sh) = (screen_width(), screen_height());
+    let scale = app.settings.render_scale;
+    let use_rt = scale < 0.99;
+    if use_rt {
+        let (w, h) = (((sw * scale) as u32).max(64), ((sh * scale) as u32).max(64));
+        if app.rt.as_ref().is_none_or(|(_, rw, rh)| *rw != w || *rh != h) {
+            let rt = render_target_ex(w, h, RenderTargetParams { sample_count: 1, depth: true });
+            rt.texture.set_filter(FilterMode::Linear);
+            app.rt = Some((rt, w, h));
+        }
+    } else {
+        app.rt = None;
+    }
+    let rt = app.rt.as_ref().map(|r| r.0.clone());
+    let pass = rt.as_ref().map(|r| r.render_pass.raw_miniquad_id());
     let g = app.game.as_ref().unwrap();
     let (top, hor) = sky_colors(g);
-    clear_background(hor);
+    if let Some(p) = pass {
+        let mut gl = unsafe { get_internal_gl() };
+        gl.flush();
+        gl.quad_context.begin_pass(Some(p), miniquad::PassAction::clear_color(hor.r, hor.g, hor.b, 1.0));
+        gl.quad_context.end_render_pass();
+    } else {
+        clear_background(hor);
+    }
     let bob = if app.settings.view_bob && !g.player.flying && g.player.body.on_ground {
         vec3(0.0, (g.player.walk_phase * 2.0).sin().abs() * 0.06, 0.0)
     } else {
@@ -2273,12 +2309,15 @@ fn render_world(app: &mut App) {
     let proj = Mat4::perspective_rh_gl(fovy, aspect, 0.05, 1500.0);
     let view = Mat4::look_to_rh(Vec3::ZERO, dir, Vec3::Y);
     let vp = proj * view;
-    set_default_camera();
+    match &rt {
+        Some(t) => set_camera(&Camera2D { render_target: Some(t.clone()), ..Camera2D::from_display_rect(Rect::new(0.0, 0.0, sw, sh)) }),
+        None => set_default_camera(),
+    }
     draw_sky(g, &vp, top, hor);
     {
         let mut gl = unsafe { get_internal_gl() };
         gl.flush();
-        let r = app.settings.render_dist as f32 * CS as f32;
+        let r = app.eff_dist as f32 * CS as f32;
         let (fog_color, fog_range) = if g.player.eye_in_water {
             ([0.1, 0.25, 0.5, 1.0], [1.0, 26.0])
         } else if app.settings.fog {
@@ -2302,15 +2341,15 @@ fn render_world(app: &mut App) {
         };
         let clouds = if app.settings.clouds { Some((g.dim, app.time)) } else { None };
         if std::env::var("RK_NOWORLD").is_err() {
-            app.renderer.draw(gl.quad_context, &app.loader, &frame, clouds);
+            app.renderer.draw(gl.quad_context, &app.loader, &frame, clouds, pass);
         }
     }
-    let cam3 = Camera3D { position: eye, target: eye + dir, up: Vec3::Y, fovy, z_near: 0.05, z_far: 1500.0, ..Default::default() };
+    let cam3 = Camera3D { position: eye, target: eye + dir, up: Vec3::Y, fovy, z_near: 0.05, z_far: 1500.0, render_target: rt.clone(), aspect: Some(sw / sh.max(1.0)), ..Default::default() };
     set_camera(&cam3);
     model::begin(&app.ui.atlas);
     let daylight = g.daylight();
     if std::env::var("RK_NOMOBS").is_err() {
-        g.mobs.draw(g.world(), daylight, app.time, eye);
+        g.mobs.draw(g.world(), daylight, app.time, eye, dir);
     }
     let right = dir.cross(Vec3::Y).normalize_or_zero();
     g.ents.draw(&app.ui.atlas, app.time, right);
@@ -2345,19 +2384,22 @@ fn render_world(app: &mut App) {
     if !g.third_person && !app.hide_hud && matches!(app.screen, Screen::Playing | Screen::Paused | Screen::Inventory) {
         let mut gl = unsafe { get_internal_gl() };
         gl.flush();
-        gl.quad_context.begin_default_pass(miniquad::PassAction::Clear { color: None, depth: Some(1.0), stencil: None });
+        gl.quad_context.begin_pass(pass, miniquad::PassAction::Clear { color: None, depth: Some(1.0), stencil: None });
         gl.quad_context.end_render_pass();
         let p = &g.player;
         let up = right.cross(dir).normalize_or_zero();
         let hb = if app.settings.view_bob { vec2(p.walk_phase.sin() * 0.03, -(p.walk_phase * 2.0).sin().abs() * 0.025) } else { Vec2::ZERO };
         let look = model::look_for(hash_seed(&app.settings.name));
         let sleeve = model::armor_color(p.armor[1]).unwrap_or(look.shirt);
-        let hand_cam = Camera3D { position: g.player.eye() + bob, target: g.player.eye() + bob + dir, up: Vec3::Y, fovy: 70f32.to_radians(), z_near: 0.02, z_far: 10.0, ..Default::default() };
+        let hand_cam = Camera3D { position: g.player.eye() + bob, target: g.player.eye() + bob + dir, up: Vec3::Y, fovy: 70f32.to_radians(), z_near: 0.02, z_far: 10.0, render_target: rt.clone(), aspect: Some(sw / sh.max(1.0)), ..Default::default() };
         set_camera(&hand_cam);
         model::draw_first_person(&app.ui.atlas, g.player.eye() + bob, dir, right, up, p.held(), g.swing_t, hb, p.eat_t, sleeve, look.skin, light);
         model::flush();
     }
     set_default_camera();
+    if let Some(t) = &rt {
+        draw_texture_ex(&t.texture, 0.0, 0.0, WHITE, DrawTextureParams { dest_size: Some(vec2(sw, sh)), flip_y: true, ..Default::default() });
+    }
     // имена игроков над головами
     for r in g.remotes.values() {
         if r.st.dim != dim_code(g.dim) {
@@ -2400,14 +2442,58 @@ fn render_world(app: &mut App) {
 
 // ---------------------------------------------------------------------------
 
+/// Заставка на чёрном экране при запуске (можно пропустить любой клавишей).
+async fn splash(font: &Font, prep: &std::thread::JoinHandle<()>) {
+    const LINE1: &str = "Эта игра полностью сделана и написана";
+    const LINE2: &str = "maktraxer228";
+    const TOTAL: f32 = 3.6;
+    let mut t = 0.0f32;
+    loop {
+        t += get_frame_time().min(0.05);
+        let skip = get_last_key_pressed().is_some() || is_mouse_button_pressed(MouseButton::Left);
+        if (t >= TOTAL || (skip && t > 0.3)) && prep.is_finished() {
+            break;
+        }
+        let a = if t < 0.8 { t / 0.8 } else if t > TOTAL - 0.8 { ((TOTAL - t) / 0.8).max(0.0) } else { 1.0 };
+        let a = a * a * (3.0 - 2.0 * a);
+        clear_background(BLACK);
+        let (w, h) = (screen_width(), screen_height());
+        let k = (h / 720.0).clamp(0.6, 3.0);
+        let s1 = (30.0 * k) as u16;
+        let s2 = (64.0 * k) as u16;
+        let d1 = measure_text(LINE1, Some(font), s1, 1.0);
+        let d2 = measure_text(LINE2, Some(font), s2, 1.0);
+        draw_text_ex(LINE1, (w - d1.width) / 2.0, h / 2.0 - 30.0 * k, TextParams { font: Some(font), font_size: s1, color: Color::new(0.85, 0.85, 0.9, a), ..Default::default() });
+        // имя автора — с тёплым свечением
+        for (o, al) in [(3.0, 0.12), (1.5, 0.2)] {
+            draw_text_ex(LINE2, (w - d2.width) / 2.0 + o * k, h / 2.0 + 50.0 * k + o * k, TextParams { font: Some(font), font_size: s2, color: Color::new(1.0, 0.55, 0.1, a * al), ..Default::default() });
+        }
+        draw_text_ex(LINE2, (w - d2.width) / 2.0, h / 2.0 + 50.0 * k, TextParams { font: Some(font), font_size: s2, color: Color::new(1.0, 0.75, 0.25, a), ..Default::default() });
+        let lw = d2.width * a;
+        draw_rectangle((w - lw) / 2.0, h / 2.0 + 66.0 * k, lw, 2.0 * k, Color::new(1.0, 0.7, 0.2, a * 0.8));
+        if let Ok(p) = std::env::var("RK_SPLASH_SHOT") {
+            if t > 1.5 {
+                get_screen_data().export_png(&p);
+                std::process::exit(0);
+            }
+        }
+        next_frame().await;
+    }
+}
+
 #[macroquad::main(window_conf)]
 async fn main() {
     let font = load_ttf_font_from_bytes(include_bytes!("../assets/DejaVuSans-Bold.ttf")).expect("шрифт");
-    clear_background(Color::new(0.08, 0.09, 0.11, 1.0));
-    let msg = "Расткрафт загружается…";
-    let dim = measure_text(msg, Some(&font), 32, 1.0);
-    draw_text_ex(msg, (screen_width() - dim.width) / 2.0, screen_height() / 2.0, TextParams { font: Some(&font), font_size: 32, color: WHITE, ..Default::default() });
-    next_frame().await;
+    // тяжёлая подготовка (атлас, рецепты) — в фоне, пока идёт заставка
+    let prep = std::thread::spawn(|| {
+        let _ = atlas_pixels();
+        let _ = crafting::recipes();
+    });
+    let test_mode = std::env::var("RK_SHOT").is_ok() || std::env::var("RK_BENCH").is_ok();
+    if !test_mode || std::env::var("RK_SPLASH").is_ok() {
+        splash(&font, &prep).await;
+    }
+    let _ = prep.join();
 
     let atlas = Texture2D::from_rgba8(ATLAS as u16, ATLAS as u16, atlas_pixels());
     atlas.set_filter(FilterMode::Nearest);
@@ -2415,7 +2501,6 @@ async fn main() {
         let ctx = unsafe { get_internal_gl() }.quad_context;
         Renderer::new(ctx, atlas.raw_miniquad_id())
     };
-    let _ = crafting::recipes();
     let mut app = App {
         screen: Screen::Title,
         settings_back: Screen::Title,
@@ -2448,8 +2533,15 @@ async fn main() {
         just_opened: false,
         finder: None,
         chat_input: String::new(),
+        rt: None,
+        eff_dist: 4,
+        auto_t: 0.0,
     };
 
+    app.eff_dist = app.settings.render_dist;
+    if std::env::var("RK_BENCH").is_ok() || std::env::var("RK_SHOT").is_ok() {
+        app.settings.auto_dist = false;
+    }
     // режим для автоматических скриншотов и проверок
     let shot = std::env::var("RK_SHOT").ok();
     let mut shot_frames = 0;
@@ -2458,6 +2550,7 @@ async fn main() {
     if let Ok(seed) = std::env::var("RK_SEED") {
         if let Ok(r) = std::env::var("RK_DIST") {
             app.settings.render_dist = r.parse().unwrap_or(8);
+            app.eff_dist = app.settings.render_dist;
         }
         if let Ok(load) = std::env::var("RK_LOAD") {
             load_game(&mut app, &load);
@@ -2542,6 +2635,23 @@ async fn main() {
 
         process_net(&mut app);
 
+        // авто-дальность: держим ~60 кадров в секунду
+        if app.settings.auto_dist && app.screen == Screen::Playing {
+            app.auto_t += dt;
+            if app.fps < 50.0 && app.eff_dist > 3 && app.auto_t > 1.5 {
+                app.eff_dist -= 1;
+                app.auto_t = 0.0;
+            } else if app.fps > 58.0 && app.eff_dist < app.settings.render_dist && app.auto_t > 5.0 {
+                app.eff_dist += 1;
+                app.auto_t = 0.0;
+            } else if app.fps >= 50.0 && app.fps <= 58.0 {
+                app.auto_t = app.auto_t.min(1.0);
+            }
+            app.eff_dist = app.eff_dist.min(app.settings.render_dist);
+        } else if !app.settings.auto_dist {
+            app.eff_dist = app.settings.render_dist;
+        }
+
         if app.game.is_some() {
             let center = {
                 let g = app.game.as_ref().unwrap();
@@ -2552,7 +2662,7 @@ async fn main() {
                 let ctx = unsafe { get_internal_gl() }.quad_context;
                 let g = app.game.as_mut().unwrap();
                 let w = &mut g.worlds[g.dim as usize];
-                app.loader.update(ctx, &mut app.pool, w, center, app.settings.render_dist, app.settings.smooth_light);
+                app.loader.update(ctx, &mut app.pool, w, center, app.eff_dist, app.settings.smooth_light);
             }
             // жители построек
             let spawns: Vec<(u16, [i32; 3])> = app.loader.new_spawns.drain(..).collect();

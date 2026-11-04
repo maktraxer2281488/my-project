@@ -16,6 +16,10 @@ pub struct Settings {
     pub invert_mouse: bool,
     pub pvp: bool,
     pub name: String,
+    /// Доля разрешения, в которой рисуется 3D (0.5–1.0).
+    pub render_scale: f32,
+    /// Сама снижать дальность, чтобы держать 60 FPS.
+    pub auto_dist: bool,
 }
 
 impl Default for Settings {
@@ -35,6 +39,8 @@ impl Default for Settings {
             invert_mouse: false,
             pvp: true,
             name: "Игрок".to_string(),
+            render_scale: 1.0,
+            auto_dist: true,
         }
     }
 }
@@ -71,6 +77,8 @@ impl Settings {
                 "invert_mouse" => s.invert_mouse = b,
                 "pvp" => s.pvp = b,
                 "name" => s.name = v.to_string(),
+                "render_scale" => s.render_scale = v.parse().unwrap_or(s.render_scale),
+                "auto_dist" => s.auto_dist = b,
                 _ => {}
             }
         }
@@ -85,11 +93,12 @@ impl Settings {
         self.brightness = self.brightness.clamp(0.0, 1.0);
         self.gui_scale = self.gui_scale.clamp(0.75, 2.0);
         self.difficulty = self.difficulty.min(3);
+        self.render_scale = self.render_scale.clamp(0.4, 1.0);
     }
 
     pub fn save(&self) {
         let text = format!(
-            "render_dist={}\nfov={}\nsensitivity={}\nbrightness={}\nfog={}\nclouds={}\nsmooth_light={}\nview_bob={}\nshow_fps={}\ngui_scale={}\ndifficulty={}\ninvert_mouse={}\npvp={}\nname={}\n",
+            "render_dist={}\nfov={}\nsensitivity={}\nbrightness={}\nfog={}\nclouds={}\nsmooth_light={}\nview_bob={}\nshow_fps={}\ngui_scale={}\ndifficulty={}\ninvert_mouse={}\npvp={}\nname={}\nrender_scale={}\nauto_dist={}\n",
             self.render_dist,
             self.fov,
             self.sensitivity,
@@ -103,7 +112,9 @@ impl Settings {
             self.difficulty,
             self.invert_mouse as u8,
             self.pvp as u8,
-            self.name
+            self.name,
+            self.render_scale,
+            self.auto_dist as u8
         );
         let _ = std::fs::write(path(), text);
     }

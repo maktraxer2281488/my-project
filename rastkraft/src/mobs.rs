@@ -156,6 +156,7 @@ pub fn ray_aabb(o: Vec3, d: Vec3, min: Vec3, max: Vec3) -> Option<f32> {
 }
 
 pub struct Mobs {
+    frame: u32,
     pub list: Vec<Mob>,
     spawn_t: f32,
     rng: u32,
@@ -163,7 +164,7 @@ pub struct Mobs {
 
 impl Mobs {
     pub fn new() -> Self {
-        Mobs { list: Vec::new(), spawn_t: 0.0, rng: 0x1234_5678 }
+        Mobs { frame: 0, list: Vec::new(), spawn_t: 0.0, rng: 0x1234_5678 }
     }
 
     fn rand(&mut self) -> f32 {
@@ -295,7 +296,19 @@ impl Mobs {
         let n = self.list.len();
         let rands: Vec<f32> = (0..n * 4).map(|_| self.rand()).collect();
 
+        self.frame = self.frame.wrapping_add(1);
+        let frame = self.frame;
         for (i, m) in self.list.iter_mut().enumerate() {
+            // далёкие существа думают и двигаются реже (каждый 3-й кадр)
+            let mut near = (player.body.pos - m.body.pos).length_squared();
+            for &(_, rp) in remotes {
+                near = near.min((rp - m.body.pos).length_squared());
+            }
+            let far = near > 44.0 * 44.0;
+            if far && m.dying <= 0.0 && (frame + i as u32) % 3 != 0 {
+                continue;
+            }
+            let dt = if far { dt * 3.0 } else { dt };
             let d = &MOBS[m.def];
             if m.dying > 0.0 {
                 m.dying += dt * 1.6;
@@ -624,10 +637,13 @@ impl Mobs {
         }
     }
 
-    pub fn draw(&self, _world: &World, daylight: f32, t: f32, cam: Vec3) {
+    pub fn draw(&self, _world: &World, daylight: f32, t: f32, cam: Vec3, fwd: Vec3) {
         for m in &self.list {
             let p = m.body.pos;
-            if (p - cam).length() > 80.0 {
+            let to = p + vec3(0.0, m.body.h * 0.5, 0.0) - cam;
+            let dist = to.length();
+            // дальние и оказавшиеся за спиной не рисуем
+            if dist > 72.0 || (dist > 4.0 && to.dot(fwd) < -m.body.h) {
                 continue;
             }
             let d = m.d();

@@ -8,13 +8,20 @@ use std::sync::Arc;
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct V {
-    pub pos: [f32; 3],
-    /// Координаты внутри грани (в блоках): текстура повторяется по объединённой грани.
-    pub uv: [f32; 2],
-    /// Левый верхний угол плитки в атласе.
-    pub tile: [f32; 2],
+    /// Позиция в 1/64 блока (компактно: 8 байт вместо 12).
+    pub pos: [u16; 4],
+    /// u, v внутри грани (в блоках) и номер плитки атласа (младший, старший байт).
+    pub uvt: [u8; 4],
     /// r — свет неба, g — свет блоков, b — затенение грани, a — прозрачность.
     pub light: [u8; 4],
+}
+
+impl V {
+    #[inline]
+    pub fn new(pos: [f32; 3], uv: [f32; 2], tile: u16, light: [u8; 4]) -> V {
+        let q = |v: f32| (v * 64.0).round().clamp(0.0, 65535.0) as u16;
+        V { pos: [q(pos[0]), q(pos[1]), q(pos[2]), 0], uvt: [uv[0] as u8, uv[1] as u8, (tile & 0xff) as u8, (tile >> 8) as u8], light }
+    }
 }
 
 #[derive(Default)]
@@ -246,9 +253,8 @@ fn lb(level: f32) -> u8 {
     (level / 15.0 * 255.0).round().clamp(0.0, 255.0) as u8
 }
 
-fn tile_origin(t: u16) -> [f32; 2] {
-    let n = ATLAS_TILES as f32;
-    [(t as usize % ATLAS_TILES) as f32 / n, (t as usize / ATLAS_TILES) as f32 / n]
+fn tile_origin(t: u16) -> u16 {
+    t
 }
 
 /// Куда кладётся грань.
@@ -300,10 +306,10 @@ pub fn build(n: &Nbhd, smooth: bool) -> MeshData {
                     let small = matches!(b, TALL_GRASS | FERN | DEAD_BUSH);
                     for (a, c) in [([0.15, 0.15], [0.85, 0.85]), ([0.85, 0.15], [0.15, 0.85])] {
                         let q = [
-                            V { pos: [fx + a[0], fy, fz + a[1]], uv: [0.0, 1.0], tile: org, light: lt },
-                            V { pos: [fx + c[0], fy, fz + c[1]], uv: [1.0, 1.0], tile: org, light: lt },
-                            V { pos: [fx + c[0], fy + 1.0, fz + c[1]], uv: [1.0, 0.0], tile: org, light: top_lt },
-                            V { pos: [fx + a[0], fy + 1.0, fz + a[1]], uv: [0.0, 0.0], tile: org, light: top_lt },
+                            V::new([fx + a[0], fy, fz + a[1]], [0.0, 1.0], org, lt),
+                            V::new([fx + c[0], fy, fz + c[1]], [1.0, 1.0], org, lt),
+                            V::new([fx + c[0], fy + 1.0, fz + c[1]], [1.0, 0.0], org, top_lt),
+                            V::new([fx + a[0], fy + 1.0, fz + a[1]], [0.0, 0.0], org, top_lt),
                         ];
                         if small {
                             push_quad(&mut out.detail_v, &mut out.detail_i, q, false);
@@ -395,13 +401,13 @@ pub fn build(n: &Nbhd, smooth: bool) -> MeshData {
                     // одиночная грань
                     let org = tile_origin(tile);
                     let uvs = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
-                    let mut q = [V { pos: [0.0; 3], uv: [0.0; 2], tile: org, light: [0; 4] }; 4];
+                    let mut q = [V::new([0.0; 3], [0.0; 2], org, [0; 4]); 4];
                     for (i, c) in corners.iter().enumerate() {
                         let mut cy = c[1];
                         if lowered && cy > 0.5 {
                             cy = 0.875;
                         }
-                        q[i] = V { pos: [x as f32 + c[0], y as f32 + cy, z as f32 + c[2]], uv: uvs[i], tile: org, light: lights[i] };
+                        q[i] = V::new([x as f32 + c[0], y as f32 + cy, z as f32 + c[2]], uvs[i], org, lights[i]);
                     }
                     let flip = ao[0] + ao[2] < ao[1] + ao[3];
                     let dark = pass == Pass::Opaque && lights.iter().all(|l| l[0] == 0 && l[1] == 0);
@@ -466,7 +472,7 @@ pub fn build(n: &Nbhd, smooth: bool) -> MeshData {
                     }
                     let org = tile_origin(key.tile);
                     let (eu, ev) = if uax == ta { (w as f32, h as f32) } else { (h as f32, w as f32) };
-                    let mut q = [V { pos: [0.0; 3], uv: [0.0; 2], tile: org, light: key.light }; 4];
+                    let mut q = [V::new([0.0; 3], [0.0; 2], org, key.light); 4];
                     for (i, c) in corners.iter().enumerate() {
                         let mut pos = [0.0f32; 3];
                         pos[na] = sl as f32 + c[na];
@@ -477,7 +483,7 @@ pub fn build(n: &Nbhd, smooth: bool) -> MeshData {
                         }
                         let u = if c[uax] == corners[1][uax] { eu } else { 0.0 };
                         let v = if c[vax] == corners[0][vax] { ev } else { 0.0 };
-                        q[i] = V { pos, uv: [u, v], tile: org, light: key.light };
+                        q[i] = V::new(pos, [u, v], org, key.light);
                     }
                     let dark = key.light[0] == 0 && key.light[1] == 0;
                     let (vv, ii) = match key.pass {

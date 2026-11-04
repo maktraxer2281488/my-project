@@ -10,9 +10,8 @@ use macroquad::prelude::{Mat4, Vec3, Vec4, vec3};
 use std::collections::{HashMap, HashSet};
 
 const VERTEX: &str = r#"#version 100
-attribute vec3 in_pos;
-attribute vec2 in_uv;
-attribute vec2 in_tile;
+attribute vec4 in_pos;
+attribute vec4 in_uvt;
 attribute vec4 in_light;
 
 uniform mat4 mvp;
@@ -30,8 +29,10 @@ varying lowp vec4 col;
 varying mediump float fogf;
 
 void main() {
-    vec3 p = in_pos + offset;
-    tile0 = in_tile;
+    vec3 lp = in_pos.xyz / 64.0;
+    vec3 p = lp + offset;
+    float tid = in_uvt.z + in_uvt.w * 256.0;
+    tile0 = vec2(mod(tid, 64.0), floor(tid / 64.0)) / 64.0;
     vec3 w = p + cam;
     float a = in_light.a;
     // колыхание травы (250) и листвы (251)
@@ -45,7 +46,7 @@ void main() {
         p.y += sin(time * 1.6 + w.x * 0.55 + w.z * 0.35) * 0.045 + sin(time * 2.3 + w.z * 0.8) * 0.025 - 0.05;
     }
     gl_Position = mvp * vec4(p, 1.0);
-    uv = in_uv;
+    uv = in_uvt.xy;
     vec4 l = in_light / 255.0;
     float sky = pow(0.8, (1.0 - l.r) * 15.0) * daylight;
     float blk = pow(0.8, (1.0 - l.g) * 15.0) * step(0.01, l.g);
@@ -179,9 +180,8 @@ impl Renderer {
         let shader = ctx.new_shader(ShaderSource::Glsl { vertex: VERTEX, fragment: FRAGMENT_CUTOUT }, meta()).expect("шейдер мира");
         let shader_opaque = ctx.new_shader(ShaderSource::Glsl { vertex: VERTEX, fragment: FRAGMENT_OPAQUE }, meta()).expect("шейдер мира");
         let attrs = [
-            VertexAttribute::new("in_pos", VertexFormat::Float3),
-            VertexAttribute::new("in_uv", VertexFormat::Float2),
-            VertexAttribute::new("in_tile", VertexFormat::Float2),
+            VertexAttribute::new("in_pos", VertexFormat::Short4),
+            VertexAttribute::new("in_uvt", VertexFormat::Byte4),
             VertexAttribute::new("in_light", VertexFormat::Byte4),
         ];
         let base = PipelineParams { depth_test: Comparison::LessOrEqual, depth_write: true, ..Default::default() };
@@ -223,7 +223,7 @@ impl Renderer {
     }
 
     /// Рисует видимые чанки (сначала непрозрачное, затем вода от дальних к ближним) и облака.
-    pub fn draw(&mut self, ctx: &mut dyn RenderingBackend, loader: &Loader, f: &Frame, clouds: Option<(Dim, f32)>) {
+    pub fn draw(&mut self, ctx: &mut dyn RenderingBackend, loader: &Loader, f: &Frame, clouds: Option<(Dim, f32)>, pass: Option<RenderPass>) {
         let planes = frustum_planes(&f.view_proj);
         let max_d = f.fog_range[1] + 24.0;
         let mut vis: Vec<(f32, Vec3, &ChunkGpu)> = Vec::new();
@@ -239,7 +239,7 @@ impl Renderer {
         }
         // ближние чанки первыми: видеокарта не тратит время на закрытые пиксели
         vis.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-        ctx.begin_default_pass(PassAction::Nothing);
+        ctx.begin_pass(pass, PassAction::Nothing);
         ctx.apply_pipeline(&self.pip_opaque);
         for (d, off, g) in &vis {
             if let Some(m) = &g.opaque {
@@ -324,16 +324,13 @@ fn build_clouds(dim: Dim) -> (Vec<V>, Vec<u32>) {
             + crate::worldgen::noise2(b.cos() * 5.0 + 20.0, a.cos() * 2.0 + b.sin() * 5.0, seed ^ 0x55) * 0.4;
         v > if dim == Dim::Overworld { 0.57 } else { 0.5 }
     };
-    let t = blocks::def(blocks::CLOUD).tex[0];
-    let at = blocks::ATLAS_TILES as f32;
-    let tile = [(t as usize % blocks::ATLAS_TILES) as f32 / at, (t as usize / blocks::ATLAS_TILES) as f32 / at];
-    let uv = [0.5, 0.5];
+    let tile = blocks::def(blocks::CLOUD).tex[0];
     let mut vs: Vec<V> = Vec::new();
     let mut is: Vec<u32> = Vec::new();
     let mut quad = |p: [[f32; 3]; 4], k: f32| {
         let b = vs.len() as u32;
         for c in p {
-            vs.push(V { pos: c, uv, tile, light: [255, 0, (k * 255.0) as u8, 210] });
+            vs.push(V::new(c, [0.0, 0.0], tile, [255, 0, (k * 255.0) as u8, 210]));
         }
         is.extend_from_slice(&[b, b + 1, b + 2, b, b + 2, b + 3]);
     };
