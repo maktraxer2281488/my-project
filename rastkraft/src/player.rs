@@ -44,7 +44,7 @@ impl Body {
     }
 
     /// Касается ли тело блока, удовлетворяющего условию (без выделения памяти).
-    pub fn touches(&self, world: &World, pad: f32, f: impl Fn(u8) -> bool) -> bool {
+    pub fn touches(&self, world: &World, pad: f32, f: impl Fn(u16) -> bool) -> bool {
         let min = self.pos - vec3(self.hw + pad, pad, self.hw + pad);
         let max = self.pos + vec3(self.hw + pad, self.h + pad, self.hw + pad);
         for y in min.y.floor() as i32..=max.y.floor() as i32 {
@@ -60,7 +60,7 @@ impl Body {
     }
 
     /// Какие блоки касаются тела (с небольшим запасом).
-    pub fn touching(&self, world: &World, pad: f32) -> Vec<u8> {
+    pub fn touching(&self, world: &World, pad: f32) -> Vec<u16> {
         let min = self.pos - vec3(self.hw + pad, pad, self.hw + pad);
         let max = self.pos + vec3(self.hw + pad, self.h + pad, self.hw + pad);
         let mut out = Vec::new();
@@ -480,7 +480,7 @@ impl Player {
 }
 
 /// Время ломания блока данным предметом (секунды; None — нельзя сломать).
-pub fn break_time(block: u8, held: Item, haste: bool) -> Option<f32> {
+pub fn break_time(block: u16, held: Item, haste: bool) -> Option<f32> {
     let d = blocks::def(block);
     if d.hardness < 0.0 {
         return None;

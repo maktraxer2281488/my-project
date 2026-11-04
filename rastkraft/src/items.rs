@@ -99,9 +99,29 @@ pub enum ToolKind {
     Dagger,
     Spear,
     Mace,
+    Katana,
+    Battleaxe,
+    Warhammer,
+    Scythe,
+    Halberd,
+    Rapier,
 }
 
-pub const TOOL_KINDS: [ToolKind; 7] = [ToolKind::Sword, ToolKind::Pickaxe, ToolKind::Axe, ToolKind::Shovel, ToolKind::Dagger, ToolKind::Spear, ToolKind::Mace];
+pub const TOOL_KINDS: [ToolKind; 13] = [
+    ToolKind::Sword, ToolKind::Pickaxe, ToolKind::Axe, ToolKind::Shovel, ToolKind::Dagger, ToolKind::Spear, ToolKind::Mace,
+    ToolKind::Katana, ToolKind::Battleaxe, ToolKind::Warhammer, ToolKind::Scythe, ToolKind::Halberd, ToolKind::Rapier,
+];
+
+impl ToolKind {
+    /// Оружие (а не инструмент для добычи).
+    pub fn is_weapon(self) -> bool {
+        !matches!(self, ToolKind::Pickaxe | ToolKind::Axe | ToolKind::Shovel)
+    }
+    /// Широкий взмах задевает существ рядом с целью.
+    pub fn sweeps(self) -> bool {
+        matches!(self, ToolKind::Battleaxe | ToolKind::Scythe | ToolKind::Halberd)
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Slot {
@@ -165,7 +185,7 @@ pub struct ThingDef {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Item {
     Empty,
-    Block(u8),
+    Block(u16),
     Tool(ToolKind, Mat),
     Armor(Slot, Mat),
     Thing(u16),
@@ -251,6 +271,53 @@ pub const MORS: u16 = 90;
 pub const GINGERBREAD: u16 = 91;
 pub const POTION0: u16 = 92;
 pub const MOB_DROP0: u16 = 102;
+/// Вещи версии 0.9 идут после трофеев.
+pub const EXTRA0: u16 = MOB_DROP0 + 100;
+pub const STEEL_INGOT: u16 = EXTRA0 + 0;
+pub const BRONZE_INGOT: u16 = EXTRA0 + 1;
+pub const PEARL: u16 = EXTRA0 + 2;
+pub const SILK: u16 = EXTRA0 + 3;
+pub const CLOTH: u16 = EXTRA0 + 4;
+pub const STRAP: u16 = EXTRA0 + 5;
+pub const GEAR: u16 = EXTRA0 + 6;
+pub const SCROLL: u16 = EXTRA0 + 7;
+pub const INK: u16 = EXTRA0 + 8;
+pub const GUNPOWDER: u16 = EXTRA0 + 9;
+pub const CHARCOAL: u16 = EXTRA0 + 10;
+pub const OBSIDIAN_SHARD: u16 = EXTRA0 + 11;
+pub const CORAL_SHARD: u16 = EXTRA0 + 12;
+pub const GEM_DUST: u16 = EXTRA0 + 13;
+pub const MAPLE_SYRUP: u16 = EXTRA0 + 14;
+pub const PIZZA: u16 = EXTRA0 + 15;
+pub const DONUT: u16 = EXTRA0 + 16;
+pub const BURGER: u16 = EXTRA0 + 17;
+pub const CHOCOLATE: u16 = EXTRA0 + 18;
+pub const CANDY: u16 = EXTRA0 + 19;
+pub const PEAR: u16 = EXTRA0 + 20;
+pub const GRAPES: u16 = EXTRA0 + 21;
+pub const CHERRIES: u16 = EXTRA0 + 22;
+pub const PLUM: u16 = EXTRA0 + 23;
+pub const ORANGE: u16 = EXTRA0 + 24;
+pub const LEMON: u16 = EXTRA0 + 25;
+pub const NUTS: u16 = EXTRA0 + 26;
+pub const CARAMEL_APPLE: u16 = EXTRA0 + 27;
+pub const BORSCHT: u16 = EXTRA0 + 28;
+pub const SHCHI: u16 = EXTRA0 + 29;
+pub const PELMENI: u16 = EXTRA0 + 30;
+pub const PILAF: u16 = EXTRA0 + 31;
+pub const OMELETTE: u16 = EXTRA0 + 32;
+pub const BLINI_JAM: u16 = EXTRA0 + 33;
+pub const SYRNIKI: u16 = EXTRA0 + 34;
+pub const SHAWARMA: u16 = EXTRA0 + 35;
+pub const FRIED_MUSHROOMS: u16 = EXTRA0 + 36;
+pub const KOMPOT: u16 = EXTRA0 + 37;
+pub const KVASS: u16 = EXTRA0 + 38;
+pub const TEA: u16 = EXTRA0 + 39;
+pub const COCOA_DRINK: u16 = EXTRA0 + 40;
+pub const HONEY_CAKE: u16 = EXTRA0 + 41;
+pub const HEAVEN_PIE: u16 = EXTRA0 + 42;
+pub const STAR_COOKIE: u16 = EXTRA0 + 43;
+pub const EXTRA_COUNT: u16 = 44;
 
 pub const POTIONS: [(Eff, f32, &str, (u8, u8, u8)); 10] = [
     (Eff::Heal, 0.0, "Зелье исцеления", (230, 50, 60)),
@@ -373,6 +440,51 @@ fn build_things() -> Vec<ThingDef> {
         let dark = ((c.0 as f32 * 0.6) as u8, (c.1 as f32 * 0.6) as u8, (c.2 as f32 * 0.6) as u8);
         t(mob.drop_name, kind, mob.drop_icon, c, dark);
     }
+    // v0.9
+    t("Стальной слиток", m, Ingot, (150, 160, 176), (0, 0, 0));
+    t("Бронзовый слиток", m, Ingot, (196, 140, 70), (0, 0, 0));
+    t("Жемчужина", m, Pearl, (240, 236, 246), (0, 0, 0));
+    t("Шёлк", m, Coil, (250, 240, 250), (230, 200, 230));
+    t("Отрез ткани", m, Paper, (200, 70, 70), (150, 40, 40));
+    t("Кожаный ремень", m, Coil, (150, 92, 52), (110, 64, 34));
+    t("Шестерёнка", m, Gear, (200, 204, 214), (0, 0, 0));
+    t("Свиток", m, Scroll, (236, 222, 180), (90, 60, 40));
+    t("Чернила", m, Bottle, (30, 30, 50), (150, 110, 70));
+    t("Порох", m, Dust, (80, 80, 86), (0, 0, 0));
+    t("Древесный уголь", m, Lump, (60, 50, 46), (110, 90, 80));
+    t("Осколок обсидиана", m, Shard, (70, 50, 110), (0, 0, 0));
+    t("Осколок коралла", m, Shard, (240, 120, 170), (0, 0, 0));
+    t("Самоцветная пыль", m, Dust, (180, 140, 250), (0, 0, 0));
+    t("Кленовый сироп", fe(5, Eff::Regen, 5.0), Jar, (200, 110, 40), (160, 110, 60));
+    t("Пицца", f(9), Pizza, (240, 200, 90), (200, 40, 40));
+    t("Пончик", f(4), Donut, (210, 150, 80), (240, 120, 170));
+    t("Бургер", f(10), Burger, (210, 150, 70), (70, 150, 50));
+    t("Плитка шоколада", fe(4, Eff::Speed, 20.0), Chocolate, (110, 60, 34), (80, 40, 22));
+    t("Леденец", fe(2, Eff::Haste, 15.0), Candy, (230, 60, 90), (250, 250, 250));
+    t("Груша", f(4), Pear, (200, 210, 80), (110, 80, 40));
+    t("Виноград", f(3), Grapes, (130, 60, 150), (90, 140, 50));
+    t("Вишня", f(2), Berries, (170, 20, 40), (70, 130, 50));
+    t("Слива", f(3), Apple, (110, 60, 140), (90, 140, 50));
+    t("Апельсин", f(4), Apple, (250, 150, 30), (80, 140, 50));
+    t("Лимон", fe(2, Eff::Speed, 10.0), Egg, (250, 230, 70), (220, 200, 40));
+    t("Орехи", f(3), Berries, (170, 120, 70), (120, 80, 40));
+    t("Карамельное яблоко", f(6), Apple, (220, 130, 40), (150, 100, 60));
+    t("Борщ", fe(9, Eff::Regen, 8.0), Soup, (190, 40, 60), (150, 104, 60));
+    t("Щи", f(8), Soup, (150, 170, 80), (150, 104, 60));
+    t("Пельмени", f(9), Soup, (240, 236, 220), (150, 104, 60));
+    t("Плов", f(9), Soup, (230, 170, 80), (150, 104, 60));
+    t("Омлет", f(6), Pancake, (250, 220, 90), (250, 250, 240));
+    t("Блины с вареньем", f(7), Pancake, (230, 180, 100), (180, 30, 60));
+    t("Сырники", f(6), Cookie, (240, 220, 170), (250, 250, 250));
+    t("Шаурма", fe(10, Eff::Strength, 20.0), Roll, (220, 180, 120), (170, 90, 50));
+    t("Жареные грибы", f(5), Skewer, (150, 110, 80), (150, 110, 70));
+    t("Компот", fe(3, Eff::Regen, 5.0), Mug, (200, 90, 120), (170, 124, 72));
+    t("Квас", fe(3, Eff::Speed, 15.0), Mug, (140, 80, 30), (170, 124, 72));
+    t("Горячий чай", fe(2, Eff::FireRes, 20.0), Mug, (170, 90, 40), (240, 240, 240));
+    t("Какао с зефиром", fe(5, Eff::Saturation, 0.0), Mug, (120, 70, 40), (250, 250, 250));
+    t("Медовик", f(8), Cake, (230, 170, 80), (150, 90, 40));
+    t("Небесный пирог", fe(12, Eff::Regen, 30.0), Pie, (255, 230, 160), (250, 210, 80));
+    t("Звёздное печенье", fe(4, Eff::Night, 60.0), Cookie, (250, 230, 120), (130, 110, 240));
     v
 }
 
@@ -387,17 +499,18 @@ pub fn thing(id: u16) -> &'static ThingDef {
 }
 
 pub const TOOL_SPRITES: usize = 0;
-pub const ARMOR_SPRITES: usize = 70;
-pub const HUD_HEART_FULL: usize = 110;
-pub const HUD_HEART_HALF: usize = 111;
-pub const HUD_HEART_EMPTY: usize = 112;
-pub const HUD_ARMOR_FULL: usize = 113;
-pub const HUD_ARMOR_HALF: usize = 114;
-pub const HUD_ARMOR_EMPTY: usize = 115;
-pub const HUD_FOOD_FULL: usize = 116;
-pub const HUD_FOOD_HALF: usize = 117;
-pub const HUD_FOOD_EMPTY: usize = 118;
-pub const THING_SPRITES: usize = 119;
+pub const ARMOR_SPRITES: usize = TOOL_KINDS.len() * 10;
+const HUD0: usize = ARMOR_SPRITES + 40;
+pub const HUD_HEART_FULL: usize = HUD0;
+pub const HUD_HEART_HALF: usize = HUD0 + 1;
+pub const HUD_HEART_EMPTY: usize = HUD0 + 2;
+pub const HUD_ARMOR_FULL: usize = HUD0 + 3;
+pub const HUD_ARMOR_HALF: usize = HUD0 + 4;
+pub const HUD_ARMOR_EMPTY: usize = HUD0 + 5;
+pub const HUD_FOOD_FULL: usize = HUD0 + 6;
+pub const HUD_FOOD_HALF: usize = HUD0 + 7;
+pub const HUD_FOOD_EMPTY: usize = HUD0 + 8;
+pub const THING_SPRITES: usize = HUD0 + 9;
 
 impl Item {
     pub fn name(self) -> String {
@@ -417,6 +530,12 @@ impl Item {
                         format!("{base}ое копьё")
                     }
                     ToolKind::Mace => format!("{} булава", a[1]),
+                    ToolKind::Katana => format!("{} катана", a[1]),
+                    ToolKind::Battleaxe => format!("{} секира", a[1]),
+                    ToolKind::Warhammer => format!("{} боевой молот", a[0]),
+                    ToolKind::Scythe => format!("{} коса", a[1]),
+                    ToolKind::Halberd => format!("{} алебарда", a[1]),
+                    ToolKind::Rapier => format!("{} рапира", a[1]),
                 }
             }
             Item::Armor(s, m) => {
@@ -454,6 +573,12 @@ impl Item {
                     ToolKind::Axe => 0.9,
                     ToolKind::Pickaxe => 0.55,
                     ToolKind::Shovel => 0.45,
+                    ToolKind::Katana => 1.15,
+                    ToolKind::Battleaxe => 1.7,
+                    ToolKind::Warhammer => 1.85,
+                    ToolKind::Scythe => 1.3,
+                    ToolKind::Halberd => 1.45,
+                    ToolKind::Rapier => 0.85,
                 }
             }
             _ => 1.0,
@@ -470,6 +595,12 @@ impl Item {
             Item::Tool(ToolKind::Axe, _) => 1.0,
             Item::Tool(ToolKind::Shovel, _) => 1.0,
             Item::Tool(ToolKind::Mace, _) => 1.25,
+            Item::Tool(ToolKind::Katana, _) => 0.55,
+            Item::Tool(ToolKind::Rapier, _) => 0.45,
+            Item::Tool(ToolKind::Battleaxe, _) => 1.3,
+            Item::Tool(ToolKind::Warhammer, _) => 1.4,
+            Item::Tool(ToolKind::Scythe, _) => 0.9,
+            Item::Tool(ToolKind::Halberd, _) => 1.1,
             _ => 0.25,
         }
     }
@@ -477,7 +608,10 @@ impl Item {
     /// Дальность удара.
     pub fn reach(self) -> f32 {
         match self {
-            Item::Tool(ToolKind::Spear, _) => 5.0,
+            Item::Tool(ToolKind::Spear, _) | Item::Tool(ToolKind::Halberd, _) => 5.0,
+            Item::Tool(ToolKind::Scythe, _) => 4.2,
+            Item::Tool(ToolKind::Rapier, _) => 4.0,
+            Item::Tool(ToolKind::Katana, _) => 3.8,
             Item::Tool(ToolKind::Dagger, _) => 3.0,
             _ => 3.6,
         }
@@ -506,7 +640,9 @@ impl Item {
             (Item::Tool(ToolKind::Pickaxe, m), N::Pickaxe) => m.speed(),
             (Item::Tool(ToolKind::Axe, m), N::Axe) => m.speed(),
             (Item::Tool(ToolKind::Shovel, m), N::Shovel) => m.speed(),
-            (Item::Tool(ToolKind::Sword, _), _) => 1.3,
+            (Item::Tool(ToolKind::Battleaxe, m), N::Axe) => m.speed() * 0.8,
+            (Item::Tool(ToolKind::Warhammer, m), N::Pickaxe) => m.speed() * 0.6,
+            (Item::Tool(ToolKind::Sword | ToolKind::Katana, _), _) => 1.3,
             _ => 1.0,
         }
     }
@@ -525,8 +661,9 @@ impl Item {
     pub fn description(self) -> Option<String> {
         match self {
             Item::Tool(k, m) => Some(match k {
-                ToolKind::Sword | ToolKind::Dagger | ToolKind::Spear | ToolKind::Mace => {
-                    format!("Урон: {:.0} · полная зарядка {:.2} с · дальность {:.1}", self.damage(), self.cooldown(), self.reach())
+                k if k.is_weapon() => {
+                    let sweep = if k.sweeps() { " · задевает соседей" } else { "" };
+                    format!("Урон: {:.0} · полная зарядка {:.2} с · дальность {:.1}{sweep}", self.damage(), self.cooldown(), self.reach())
                 }
                 _ => format!("Урон: {:.0} · скорость добычи ×{:.1}", self.damage(), m.speed()),
             }),
@@ -541,7 +678,7 @@ impl Item {
                 }),
                 TKind::Potion(e, s) => Some(if s > 0.0 { format!("{} на {:.0} с", e.name(), s) } else { e.name().to_string() }),
                 TKind::Mat => {
-                    if t >= MOB_DROP0 {
+                    if (MOB_DROP0..EXTRA0).contains(&t) {
                         Some(format!("Трофей: {}", MOBS[(t - MOB_DROP0) as usize].name))
                     } else {
                         Some("Материал для крафта".into())
@@ -576,8 +713,8 @@ impl Item {
         let lo = (c & 0xff) as usize;
         let mid = ((c >> 8) & 0xff) as usize;
         match c >> 24 {
-            1 if lo < blocks::BLOCK_COUNT => Item::Block(lo as u8),
-            2 if mid < 7 && lo < 12 => Item::Tool(TOOL_KINDS[mid], ALL_MATS[lo]),
+            1 if ((c & 0xffff) as usize) < blocks::BLOCK_COUNT => Item::Block((c & 0xffff) as u16),
+            2 if mid < TOOL_KINDS.len() && lo < 12 => Item::Tool(TOOL_KINDS[mid], ALL_MATS[lo]),
             3 if mid < 4 && lo < 12 => Item::Armor(SLOTS[mid], ALL_MATS[lo]),
             4 if ((c & 0xffff) as usize) < things().len() => Item::Thing((c & 0xffff) as u16),
             _ => Item::Empty,
@@ -839,6 +976,113 @@ const DRUMSTICK_HUD: [&str; 16] = [
     "................",
 ];
 
+/// Класс пикселя оружия: 0 пусто, 1 металл, 2 блик, 3 рукоять, 4 обмотка, 5 гарда/украшение.
+/// Координаты повёрнуты: `a` — вдоль рукояти (снизу-слева вверх-вправо), `b` — поперёк.
+fn weapon_px(k: ToolKind, x: i32, y: i32) -> u8 {
+    let (a, b) = ((x - y) as f32, (x + y - 15) as f32);
+    let handle = |from: f32, to: f32| a >= from && a <= to && b.abs() <= 1.0;
+    match k {
+        ToolKind::Katana => {
+            let c = 0.012 * (a + 5.0).powi(2);
+            let d = b - c;
+            let tip = if a > 11.0 { 14.0 - a } else { 2.0 };
+            if a >= -5.0 && a <= 14.0 && d >= -1.0 && d <= tip.min(2.0) {
+                if d > 0.5 { 2 } else { 1 }
+            } else if a >= -7.0 && a < -5.0 && b.abs() <= 3.0 {
+                5
+            } else if handle(-15.0, -7.0) {
+                if (a as i32).rem_euclid(3) == 0 { 4 } else { 3 }
+            } else {
+                0
+            }
+        }
+        ToolKind::Rapier => {
+            if a >= -4.0 && a <= 15.0 && b.abs() <= 1.0 {
+                if b < 0.0 { 2 } else { 1 }
+            } else if (a >= -6.0 && a < -4.0 && b.abs() <= 3.0) || (b.abs() >= 3.0 && b.abs() <= 4.0 && a >= -11.0 && a <= -4.0 && b > 0.0) || (a >= -15.0 && a <= -13.0 && b.abs() <= 2.0) {
+                5
+            } else if handle(-13.0, -6.0) {
+                if (a as i32).rem_euclid(2) == 0 { 4 } else { 3 }
+            } else {
+                0
+            }
+        }
+        ToolKind::Scythe => {
+            let t = -b;
+            let ac = 11.0 - 0.05 * t * t;
+            let w = 1.6 * (1.0 - t / 15.0) + 0.6;
+            if t >= 0.0 && t <= 13.0 && (a - ac).abs() <= w {
+                if a < ac - 0.3 { 2 } else { 1 }
+            } else if handle(-15.0, 13.0) {
+                if a > 9.0 && a < 13.0 { 5 } else { 3 }
+            } else {
+                0
+            }
+        }
+        ToolKind::Battleaxe => {
+            let wa = 1.5 + b.abs() * 0.45;
+            if b.abs() >= 1.0 && b.abs() <= 7.0 && (a - 6.5).abs() <= wa {
+                if b.abs() >= 6.0 { 2 } else if (a - 6.5).abs() > wa - 1.0 { 2 } else { 1 }
+            } else if a > 11.0 && a <= 14.0 && b.abs() <= 1.0 {
+                1
+            } else if handle(-15.0, 11.0) {
+                if (a - 4.0).abs() < 1.0 || (a - 9.0).abs() < 1.0 { 5 } else { 3 }
+            } else {
+                0
+            }
+        }
+        ToolKind::Halberd => {
+            if a >= 9.0 && a <= 15.0 && b.abs() <= (15.0 - a) * 0.4 + 1.0 {
+                if b < 0.0 { 2 } else { 1 }
+            } else if a >= 2.0 && a <= 9.0 && b >= 1.0 && b <= 7.0 && (a - 5.5).abs() <= 1.4 + b * 0.32 {
+                if b >= 6.0 { 2 } else { 1 }
+            } else if a >= 4.0 && a <= 7.0 && b <= -1.0 && b >= -4.0 && (a - 5.5).abs() <= 1.0 + (b + 4.0) * 0.2 {
+                1
+            } else if handle(-15.0, 9.0) {
+                if (a - 1.0).abs() < 1.0 { 5 } else { 3 }
+            } else {
+                0
+            }
+        }
+        _ => {
+            // боевой молот
+            if a >= 5.0 && a <= 11.0 && b.abs() <= 6.0 {
+                if (a - 8.0).abs() < 0.6 { 5 } else if b.abs() >= 5.0 || a >= 10.5 { 2 } else { 1 }
+            } else if handle(-15.0, 5.0) {
+                if (a as i32).rem_euclid(4) == 0 { 4 } else { 3 }
+            } else {
+                0
+            }
+        }
+    }
+}
+
+fn weapon_sprite(k: ToolKind, m: Mat) -> impl Fn(i32, i32) -> [u8; 4] {
+    let (main, dark, light) = m.colors();
+    let wood = [120, 82, 44, 255];
+    let wrap = [58, 40, 34, 255];
+    let gold = if m == Mat::Gold { [200, 120, 40, 255] } else { [232, 190, 64, 255] };
+    let sh = |c: [u8; 4], f: f32| [(c[0] as f32 * f).min(255.0) as u8, (c[1] as f32 * f).min(255.0) as u8, (c[2] as f32 * f).min(255.0) as u8, 255];
+    move |x, y| {
+        let p = weapon_px(k, x, y);
+        let n = crate::blocks::hash(x, y, 4242) * 0.1 + 0.95;
+        match p {
+            1 => sh(main, n),
+            2 => light,
+            3 => sh(wood, n),
+            4 => wrap,
+            5 => sh(gold, n),
+            _ => {
+                let near = [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|(dx, dy)| {
+                    let (nx, ny) = (x + dx, y + dy);
+                    (0..16).contains(&nx) && (0..16).contains(&ny) && weapon_px(k, nx, ny) != 0
+                });
+                if near { dark } else { [0, 0, 0, 0] }
+            }
+        }
+    }
+}
+
 /// Рисует все спрайты предметов и интерфейса; возвращает их плитки по порядку.
 pub fn item_sprites(add: &mut dyn FnMut(Box<dyn Fn(i32, i32) -> [u8; 4]>) -> u16) -> Vec<u16> {
     let wood = [120, 82, 44, 255];
@@ -847,6 +1091,11 @@ pub fn item_sprites(add: &mut dyn FnMut(Box<dyn Fn(i32, i32) -> [u8; 4]>) -> u16
         for m in TOOL_MATS {
             let (main, dark, light) = m.colors();
             out.push(add(Box::new(mask_tile(mask, vec![('M', main), ('D', dark), ('H', light), ('w', wood)]))));
+        }
+    }
+    for k in &TOOL_KINDS[7..] {
+        for m in TOOL_MATS {
+            out.push(add(Box::new(weapon_sprite(*k, m))));
         }
     }
     for mask in [HELMET, CHEST, LEGS, BOOTS] {
@@ -893,7 +1142,7 @@ pub const TABS: [&str; 12] = ["Стройка", "Природа", "Цветны�
 /// Каталог предметов для творческого инвентаря, по вкладкам.
 pub fn catalog(tab: usize) -> Vec<Item> {
     use blocks::Cat;
-    let by_cat = |c: Cat| -> Vec<Item> { (1..blocks::BLOCK_COUNT as u8).filter(|&b| blocks::def(b).cat == c).map(Item::Block).collect() };
+    let by_cat = |c: Cat| -> Vec<Item> { (1..blocks::BLOCK_COUNT as u16).filter(|&b| blocks::def(b).cat == c).map(Item::Block).collect() };
     let n = things().len() as u16;
     match tab {
         0 => by_cat(Cat::Building),
@@ -902,9 +1151,9 @@ pub fn catalog(tab: usize) -> Vec<Item> {
         3 => by_cat(Cat::Ores),
         4 => by_cat(Cat::Decor),
         5 => by_cat(Cat::Heaven),
-        6 => (0..MOB_DROP0).filter(|&t| matches!(thing(t).kind, TKind::Food(..))).map(Item::Thing).collect(),
-        7 => (0..MOB_DROP0).filter(|&t| thing(t).kind == TKind::Mat).map(Item::Thing).collect(),
-        8 => (MOB_DROP0..n).map(Item::Thing).collect(),
+        6 => (0..MOB_DROP0).chain(EXTRA0..n).filter(|&t| matches!(thing(t).kind, TKind::Food(..))).map(Item::Thing).collect(),
+        7 => (0..MOB_DROP0).chain(EXTRA0..n).filter(|&t| thing(t).kind == TKind::Mat).map(Item::Thing).collect(),
+        8 => (MOB_DROP0..EXTRA0).map(Item::Thing).collect(),
         9 => TOOL_KINDS.iter().flat_map(|&k| TOOL_MATS.iter().map(move |&m| Item::Tool(k, m))).collect(),
         10 => ARMOR_MATS.iter().flat_map(|&m| SLOTS.iter().map(move |&s| Item::Armor(s, m))).collect(),
         _ => (0..10).map(|i| Item::Thing(POTION0 + i)).collect(),
@@ -939,7 +1188,7 @@ mod counts {
     #[test]
     #[ignore]
     fn print_counts() {
-        let blocks = (1..crate::blocks::BLOCK_COUNT as u8).filter(|&b| crate::blocks::def(b).cat != crate::blocks::Cat::Hidden).count();
+        let blocks = (1..crate::blocks::BLOCK_COUNT as u16).filter(|&b| crate::blocks::def(b).cat != crate::blocks::Cat::Hidden).count();
         println!("blocks={} things={} total_kinds={} recipes={}", blocks, super::things().len(), super::total_kinds(), crate::crafting::recipes().len());
     }
 }

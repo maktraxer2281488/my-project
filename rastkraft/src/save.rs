@@ -22,8 +22,10 @@ pub fn sanitize(name: &str) -> String {
     if s.is_empty() { "Мир".into() } else { s }
 }
 
-pub fn rle_encode(blocks: &[u8]) -> Vec<u8> {
-    let mut out = Vec::new();
+/// RLE чанка. Формат 2: заголовок [0, 0xB2], затем тройки (длина, младший байт, старший байт).
+/// Старый формат 1 (пары длина + номер блока u8) читается для совместимости.
+pub fn rle_encode(blocks: &[u16]) -> Vec<u8> {
+    let mut out = vec![0, 0xB2];
     let mut i = 0;
     while i < blocks.len() {
         let b = blocks[i];
@@ -32,16 +34,27 @@ pub fn rle_encode(blocks: &[u8]) -> Vec<u8> {
             n += 1;
         }
         out.push(n as u8);
-        out.push(b);
+        out.push((b & 0xff) as u8);
+        out.push((b >> 8) as u8);
         i += n;
     }
     out
 }
 
-pub fn rle_decode(data: &[u8]) -> Option<Vec<u8>> {
+pub fn rle_decode(data: &[u8]) -> Option<Vec<u16>> {
     let mut out = Vec::with_capacity(CHUNK_VOL);
-    for pair in data.chunks_exact(2) {
-        out.extend(std::iter::repeat_n(pair[1], pair[0] as usize));
+    if data.len() >= 2 && data[0] == 0 && data[1] == 0xB2 {
+        for t in data[2..].chunks_exact(3) {
+            let b = t[1] as u16 | (t[2] as u16) << 8;
+            if b as usize >= crate::blocks::BLOCK_COUNT {
+                return None;
+            }
+            out.extend(std::iter::repeat_n(b, t[0] as usize));
+        }
+    } else {
+        for pair in data.chunks_exact(2) {
+            out.extend(std::iter::repeat_n(pair[1] as u16, pair[0] as usize));
+        }
     }
     (out.len() == CHUNK_VOL).then_some(out)
 }
@@ -146,6 +159,19 @@ mod tests {
         let enc = rle_encode(&c.blocks);
         assert!(enc.len() < 400);
         assert_eq!(rle_decode(&enc).unwrap(), c.blocks);
+        // блок с номером больше 255
+        c.set(5, 5, 5, crate::blocks::RUG_BLOCK);
+        assert_eq!(rle_decode(&rle_encode(&c.blocks)).unwrap(), c.blocks);
+        // старый формат (пары u8) читается
+        let mut old = Vec::new();
+        let mut left = CHUNK_VOL;
+        while left > 0 {
+            let n = left.min(255);
+            old.push(n as u8);
+            old.push(3);
+            left -= n;
+        }
+        assert!(rle_decode(&old).unwrap().iter().all(|&b| b == 3));
         let kv = Kv::parse("a=1\nb=x,y\n");
         assert_eq!(kv.u("a", 0), 1);
         assert_eq!(kv.get("b"), Some("x,y"));

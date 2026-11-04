@@ -24,7 +24,7 @@ impl Station {
             Station::Anvil => "наковальня",
         }
     }
-    pub fn block(self) -> Option<u8> {
+    pub fn block(self) -> Option<u16> {
         match self {
             Station::Hand => None,
             Station::Workbench => Some(WORKBENCH),
@@ -186,6 +186,12 @@ fn build() -> Vec<Recipe> {
             ToolKind::Dagger => (1, 1),
             ToolKind::Spear => (1, 3),
             ToolKind::Mace => (4, 1),
+            ToolKind::Katana => (3, 1),
+            ToolKind::Battleaxe => (5, 2),
+            ToolKind::Warhammer => (6, 2),
+            ToolKind::Scythe => (3, 3),
+            ToolKind::Halberd => (4, 3),
+            ToolKind::Rapier => (2, 1),
         };
         for m in TOOL_MATS {
             let st = if matches!(m, Mat::Wood | Mat::Stone) { Workbench } else { Anvil };
@@ -238,7 +244,7 @@ fn build() -> Vec<Recipe> {
     r((t(items::SALT), 2), &[(b(SALT_BLOCK), 1)], Hand);
 
     // красители и цветные блоки
-    let flower_dye: [(u8, usize); 12] = [
+    let flower_dye: [(u16, usize); 12] = [
         (DAISY, 0), (POPPY, 5), (CORNFLOWER, 12), (DANDELION, 7), (TULIP_RED, 5), (TULIP_ORANGE, 6),
         (TULIP_PINK, 15), (LAVENDER, 13), (BLUEBELL, 11), (SUNFLOWER, 7), (ROSE_BUSH, 14), (DESERT_ROSE, 15),
     ];
@@ -253,17 +259,17 @@ fn build() -> Vec<Recipe> {
     r((t(items::DYE0 + 10), 2), &[(t(items::DYE0 + 9), 1), (t(items::DYE0 + 12), 1)], Hand);
     r((t(items::DYE0 + 1), 2), &[(t(items::DYE0 + 2), 1), (t(items::DYE0), 1)], Hand);
     r((t(items::DYE0 + 2), 2), &[(t(items::DYE0 + 3), 1), (t(items::DYE0), 1)], Hand);
-    for i in 0..16u8 {
+    for i in 0..16u16 {
         let dye = t(items::DYE0 + i as u16);
         r((b(WOOL0 + i), 1), &[(b(WOOL0), 1), (dye, 1)], Hand);
         r((b(CONCRETE0 + i), 8), &[(b(SAND), 4), (b(GRAVEL), 4), (dye, 1)], Workbench);
         r((b(TERRACOTTA0 + i), 8), &[(b(CLAY), 8), (dye, 1)], Furnace);
     }
-    let glass_cols: [(u8, usize); 4] = [(GLASS_RED, 5), (GLASS_BLUE, 12), (GLASS_GREEN, 9), (GLASS_YELLOW, 7)];
+    let glass_cols: [(u16, usize); 4] = [(GLASS_RED, 5), (GLASS_BLUE, 12), (GLASS_GREEN, 9), (GLASS_YELLOW, 7)];
     for (g, d) in glass_cols {
         r((b(g), 8), &[(b(GLASS), 8), (t(items::DYE0 + d as u16), 1)], Workbench);
     }
-    let mut gi = 0u8;
+    let mut gi = 0u16;
     for i in 0..16u16 {
         if matches!(i, 5 | 7 | 9 | 12) {
             continue;
@@ -272,7 +278,7 @@ fn build() -> Vec<Recipe> {
         gi += 1;
     }
     for (k, i) in [0u16, 5, 6, 7, 8, 11, 13, 15].iter().enumerate() {
-        r((b(LAMP0 + k as u8), 2), &[(b(GLOWSTONE), 1), (b(GLASS), 2), (t(items::DYE0 + i), 1)], Workbench);
+        r((b(LAMP0 + k as u16), 2), &[(b(GLOWSTONE), 1), (b(GLASS), 2), (t(items::DYE0 + i), 1)], Workbench);
     }
 
     // Рай
@@ -304,6 +310,119 @@ fn build() -> Vec<Recipe> {
         ins.extend_from_slice(ing);
         r((t(items::POTION0 + i as u16), 1), &ins, Cauldron);
     }
+    // ===== v0.9 =====
+    use items as it;
+    for log in [MAPLE_LOG, EBONY_LOG, WILLOW_LOG, ACACIA_LOG, MANGROVE_LOG, CEDAR_LOG] {
+        r((b(log + 1), 4), &[(b(log), 1)], Hand);
+        r((b(OAK_PLANKS), 1), &[(b(log + 1), 1)], Hand);
+    }
+    for (tile, src) in [(STONE_TILES, STONE), (GRANITE_TILES, POLISHED_GRANITE), (MARBLE_TILES, POLISHED_MARBLE), (BASALT_TILES, POLISHED_BASALT), (TUFF_TILES, TUFF_BRICKS), (OBSIDIAN_TILES, OBSIDIAN_BRICKS)] {
+        r((b(tile), 4), &[(b(src), 4)], Workbench);
+    }
+    for (ch, src) in [(CHISELED_GRANITE, POLISHED_GRANITE), (CHISELED_MARBLE, POLISHED_MARBLE), (CHISELED_BASALT, POLISHED_BASALT), (CHISELED_SLATE, SLATE_BRICKS), (CHISELED_TUFF, TUFF_BRICKS), (CHISELED_OBSIDIAN, OBSIDIAN_BRICKS)] {
+        r((b(ch), 1), &[(b(src), 2)], Workbench);
+    }
+    r((b(GRANITE_BRICKS), 4), &[(b(POLISHED_GRANITE), 4)], Workbench);
+    r((b(MARBLE_BRICKS), 4), &[(b(POLISHED_MARBLE), 4)], Workbench);
+    r((b(BASALT_BRICKS), 4), &[(b(POLISHED_BASALT), 4)], Workbench);
+    r((b(SMOOTH_STONE), 1), &[(b(STONE), 1)], Furnace);
+    r((b(POLISHED_SLATE), 4), &[(b(SLATE), 4)], Workbench);
+    r((b(POLISHED_TUFF), 4), &[(b(TUFF), 4)], Workbench);
+    r((b(POLISHED_OBSIDIAN), 4), &[(b(OBSIDIAN), 4), (t(it::SALT), 1)], Anvil);
+    for i in 0..16u16 {
+        let dye = t(items::DYE0 + i);
+        r((b(GLAZED0 + i), 1), &[(b(TERRACOTTA0 + i), 1)], Furnace);
+        r((b(PAINTED_PLANKS0 + i), 8), &[(b(OAK_PLANKS), 8), (dye, 1)], Workbench);
+    }
+    for (k, i) in [1u16, 2, 3, 4, 9, 10, 12, 14].iter().enumerate() {
+        r((b(LAMP_EXTRA0 + k as u16), 2), &[(b(GLOWSTONE), 1), (b(GLASS), 2), (t(items::DYE0 + i), 1)], Workbench);
+    }
+    let metal_src = [COPPER_BLOCK, IRON_BLOCK, GOLD_BLOCK, RUBY_BLOCK, SAPPHIRE_BLOCK, MALACHITE_BLOCK, CRYSTAL_BLOCK, STARDUST_BLOCK];
+    for (k, src) in metal_src.iter().enumerate() {
+        r((b(CHISELED_METAL0 + k as u16), 4), &[(b(*src), 4)], Anvil);
+        r((b(METAL_PILLAR0 + k as u16), 2), &[(b(CHISELED_METAL0 + k as u16), 2)], Anvil);
+    }
+    r((b(COPPER_GRATE), 8), &[(t(it::COPPER_INGOT), 6)], Workbench);
+    r((b(GOLD_GRATE), 8), &[(t(it::GOLD_INGOT), 6)], Anvil);
+    r((b(HEAVEN_GRATE), 8), &[(t(it::HEAVEN_INGOT), 6)], Anvil);
+    // природа
+    r((b(BLACK_SAND), 4), &[(b(SAND), 4), (t(it::COAL), 1)], Hand);
+    r((b(ROOTED_DIRT), 2), &[(b(DIRT), 2), (t(it::STICK), 1)], Hand);
+    r((b(CRACKED_EARTH), 1), &[(b(DIRT), 1)], Furnace);
+    r((b(GLOW_MOSS), 2), &[(b(MOSS_BLOCK), 2), (b(GLOW_MUSHROOM), 1)], Hand);
+    r((b(MYCELIUM), 2), &[(b(DIRT), 2), (b(BROWN_MUSHROOM), 1), (b(RED_MUSHROOM), 1)], Hand);
+    r((b(CALCITE), 2), &[(b(STONE), 1), (t(it::BONE), 1)], Workbench);
+    r((b(LIMESTONE), 4), &[(b(SANDSTONE), 2), (b(CALCITE), 2)], Workbench);
+    r((b(CHALK), 4), &[(b(CALCITE), 2), (t(it::SALT), 1)], Hand);
+    r((b(DRIPSTONE), 2), &[(b(TUFF), 1), (b(CLAY), 1)], Workbench);
+    r((b(SNOW_PACKED), 1), &[(b(SNOW_BLOCK), 2)], Hand);
+    r((b(KELP_BLOCK), 1), &[(b(REEDS), 6), (t(it::SALT), 1)], Furnace);
+    r((b(CORAL_PINK), 1), &[(t(it::CORAL_SHARD), 4), (t(items::DYE0 + 15), 1)], Hand);
+    r((b(CORAL_PURPLE), 1), &[(t(it::CORAL_SHARD), 4), (t(items::DYE0 + 13), 1)], Hand);
+    for (f, d) in [(ORCHID, 14u16), (PEONY, 15), (THISTLE, 13), (FIREFLOWER, 6)] {
+        r((t(items::DYE0 + d), 2), &[(b(f), 1)], Hand);
+    }
+    // декор
+    r((b(PARQUET), 4), &[(b(OAK_PLANKS), 2), (b(EBONY_LOG + 1), 2)], Workbench);
+    r((b(CHECKER_TILES), 4), &[(b(QUARTZ), 2), (b(POLISHED_BASALT), 2)], Workbench);
+    r((b(APPLE_CRATE), 1), &[(b(CRATE), 1), (t(it::APPLE), 9)], Hand);
+    r((b(CARROT_CRATE), 1), &[(b(CRATE), 1), (t(it::CARROT), 9)], Hand);
+    r((b(POTATO_CRATE), 1), &[(b(CRATE), 1), (t(it::POTATO), 9)], Hand);
+    r((b(FISH_BARREL), 1), &[(b(BARREL), 1), (t(it::RAW_FISH), 9)], Hand);
+    r((t(it::APPLE), 9), &[(b(APPLE_CRATE), 1)], Hand);
+    r((t(it::CARROT), 9), &[(b(CARROT_CRATE), 1)], Hand);
+    r((t(it::POTATO), 9), &[(b(POTATO_CRATE), 1)], Hand);
+    r((t(it::RAW_FISH), 9), &[(b(FISH_BARREL), 1)], Hand);
+    r((b(JAR_SHELF), 1), &[(b(OAK_PLANKS), 6), (t(it::BOTTLE), 3)], Workbench);
+    r((b(SCROLL_SHELF), 1), &[(b(OAK_PLANKS), 6), (t(it::SCROLL), 3)], Workbench);
+    r((b(SAFE), 1), &[(b(IRON_BLOCK), 2), (t(it::GEAR), 2)], Anvil);
+    r((b(CLOCK_BLOCK), 1), &[(b(OAK_PLANKS), 4), (t(it::GEAR), 1), (t(it::GOLD_INGOT), 1)], Workbench);
+    r((b(MAP_BLOCK), 1), &[(t(it::PAPER), 8), (t(it::INK), 1)], Workbench);
+    r((b(STAINED_WINDOW), 4), &[(b(GLASS_RED), 1), (b(GLASS_BLUE), 1), (b(GLASS_YELLOW), 1), (b(GLASS_GREEN), 1)], Workbench);
+    r((b(PAPER_LANTERN), 2), &[(t(it::PAPER), 4), (b(CANDLE), 1), (t(it::STICK), 2)], Workbench);
+    r((b(WEAPON_RACK), 1), &[(b(OAK_PLANKS), 4), (t(it::IRON_INGOT), 3)], Workbench);
+    r((b(TAPESTRY), 1), &[(t(it::CLOTH), 4), (t(items::DYE0 + 7), 1)], Workbench);
+    r((b(RUG_BLOCK), 2), &[(t(it::CLOTH), 3), (t(it::THREAD), 2)], Workbench);
+    // материалы
+    r((t(it::STEEL_INGOT), 1), &[(t(it::IRON_INGOT), 1), (t(it::COAL), 2)], Furnace);
+    r((t(it::BRONZE_INGOT), 2), &[(t(it::COPPER_INGOT), 1), (t(it::GOLD_INGOT), 1)], Furnace);
+    r((t(it::SILK), 2), &[(t(it::THREAD), 3)], Workbench);
+    r((t(it::CLOTH), 2), &[(t(it::THREAD), 4), (b(WOOL0), 1)], Workbench);
+    r((t(it::STRAP), 2), &[(t(it::LEATHER), 1)], Hand);
+    r((t(it::GEAR), 2), &[(t(it::STEEL_INGOT), 1)], Anvil);
+    r((t(it::INK), 1), &[(t(it::BOTTLE), 1), (t(items::DYE0 + 3), 1)], Hand);
+    r((t(it::SCROLL), 1), &[(t(it::PAPER), 2), (t(it::INK), 1)], Hand);
+    r((t(it::GUNPOWDER), 2), &[(t(it::CHARCOAL), 1), (t(it::SALT), 1), (t(it::FLINT), 1)], Workbench);
+    r((t(it::CHARCOAL), 1), &[(b(OAK_LOG), 1)], Furnace);
+    r((t(it::OBSIDIAN_SHARD), 4), &[(b(OBSIDIAN), 1)], Anvil);
+    r((t(it::GEM_DUST), 3), &[(t(it::RUBY), 1), (t(it::SAPPHIRE), 1), (t(it::MALACHITE), 1)], Anvil);
+    r((t(it::PEARL), 1), &[(t(it::CORAL_SHARD), 3), (t(it::SALT), 1)], Cauldron);
+    // еда
+    r((t(it::PIZZA), 2), &[(t(it::FLOUR), 2), (t(it::CHEESE), 1), (t(it::STEAK), 1)], Furnace);
+    r((t(it::DONUT), 4), &[(t(it::FLOUR), 2), (t(it::SUGAR), 1), (t(it::EGG), 1)], Furnace);
+    r((t(it::BURGER), 1), &[(t(it::BREAD), 1), (t(it::STEAK), 1), (t(it::CHEESE), 1)], Hand);
+    r((t(it::CHOCOLATE), 2), &[(t(it::COCOA), 2), (t(it::SUGAR), 1), (t(it::MILK), 1)], Cauldron);
+    r((t(it::CANDY), 4), &[(t(it::SUGAR), 2), (t(items::DYE0 + 5), 1)], Cauldron);
+    r((t(it::CARAMEL_APPLE), 1), &[(t(it::APPLE), 1), (t(it::SUGAR), 2), (t(it::STICK), 1)], Cauldron);
+    r((t(it::BORSCHT), 1), &[(t(it::STEAK), 1), (t(it::POTATO), 1), (t(it::CARROT), 1), (t(items::DYE0 + 5), 1), (t(it::BOWL), 1)], Cauldron);
+    r((t(it::SHCHI), 1), &[(t(it::POTATO), 1), (t(it::CARROT), 1), (b(FERN), 2), (t(it::BOWL), 1)], Cauldron);
+    r((t(it::PELMENI), 1), &[(t(it::FLOUR), 2), (t(it::RAW_BEEF), 1), (t(it::BOWL), 1)], Cauldron);
+    r((t(it::PILAF), 1), &[(t(it::WHEAT), 3), (t(it::RAW_MUTTON), 1), (t(it::CARROT), 1), (t(it::BOWL), 1)], Cauldron);
+    r((t(it::OMELETTE), 1), &[(t(it::EGG), 2), (t(it::MILK), 1)], Furnace);
+    r((t(it::BLINI_JAM), 2), &[(t(it::PANCAKES), 1), (t(it::JAM), 1)], Hand);
+    r((t(it::SYRNIKI), 3), &[(t(it::CHEESE), 1), (t(it::FLOUR), 1), (t(it::EGG), 1)], Furnace);
+    r((t(it::SHAWARMA), 1), &[(t(it::BREAD), 1), (t(it::ROAST_CHICKEN), 1), (t(it::CARROT), 1)], Hand);
+    r((t(it::FRIED_MUSHROOMS), 1), &[(b(BROWN_MUSHROOM), 2), (t(it::STICK), 1)], Furnace);
+    r((t(it::KOMPOT), 2), &[(t(it::CHERRIES), 2), (t(it::PLUM), 1), (t(it::BOTTLE), 1)], Cauldron);
+    r((t(it::KVASS), 2), &[(t(it::BREAD), 1), (t(it::SUGAR), 1), (t(it::BOTTLE), 1)], Cauldron);
+    r((t(it::TEA), 1), &[(b(LAVENDER), 1), (t(it::BOTTLE), 1)], Cauldron);
+    r((t(it::COCOA_DRINK), 1), &[(t(it::COCOA), 1), (t(it::MILK), 1), (t(it::SUGAR), 1)], Cauldron);
+    r((t(it::HONEY_CAKE), 4), &[(t(it::FLOUR), 3), (t(it::HONEY_JAR), 1), (t(it::EGG), 1)], Furnace);
+    r((t(it::HEAVEN_PIE), 1), &[(t(it::FLOUR), 2), (t(it::STARFRUIT), 1), (t(it::HEAVEN_DUST), 2)], Furnace);
+    r((t(it::STAR_COOKIE), 4), &[(t(it::FLOUR), 1), (t(it::STARFRUIT), 1)], Furnace);
+    r((t(it::CHERRIES), 4), &[(b(SAKURA_LEAVES + 0), 4)], Hand);
+    r((t(it::GRAPES), 2), &[(b(WILLOW_LEAVES), 4)], Hand);
+    r((t(it::LEMON), 2), &[(b(ACACIA_LEAVES), 4)], Hand);
     v
 }
 

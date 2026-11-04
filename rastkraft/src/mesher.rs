@@ -47,7 +47,7 @@ pub struct Nbhd {
 
 impl Nbhd {
     #[inline]
-    fn get(&self, x: i32, y: i32, z: i32) -> u8 {
+    fn get(&self, x: i32, y: i32, z: i32) -> u16 {
         if y < 0 {
             return BEDROCK;
         }
@@ -63,9 +63,6 @@ impl Nbhd {
 const LM: i32 = 14;
 const RW: i32 = CS + 2 * LM;
 
-fn is_leaves(b: u8) -> bool {
-    matches!(b, OAK_LEAVES | SPRUCE_LEAVES | BIRCH_LEAVES | SAKURA_LEAVES | PALM_LEAVES | GOLDEN_LEAVES)
-}
 
 struct Light {
     sky: Vec<u8>,
@@ -224,7 +221,7 @@ const FACES: [([i32; 3], [[f32; 3]; 4], f32); 6] = [
 ];
 const AO_LEVELS: [f32; 4] = [0.45, 0.64, 0.82, 1.0];
 
-fn face_visible(b: u8, nb: u8) -> bool {
+fn face_visible(b: u16, nb: u16) -> bool {
     let reg = blocks::reg();
     if reg.opaque[nb as usize] {
         return false;

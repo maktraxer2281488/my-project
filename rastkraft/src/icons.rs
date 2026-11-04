@@ -61,6 +61,16 @@ pub enum Icon {
     Heart,
     Mane,
     Spore,
+    Donut,
+    Pizza,
+    Chocolate,
+    Candy,
+    Pear,
+    Grapes,
+    Burger,
+    Scroll,
+    Gear,
+    Pearl,
 }
 
 fn hsh(x: i32, y: i32, s: u32) -> f32 {
@@ -394,6 +404,91 @@ fn region(icon: Icon, xi: i32, yi: i32) -> u8 {
                 if xi % 2 == 0 { 1 } else { 3 }
             } else if seg(x, y, 2.0, 14.0, 13.5, 2.5).0 < 0.6 {
                 2
+            } else {
+                0
+            }
+        }
+        Donut => {
+            let r = ((x - 8.0).powi(2) + (y - 8.0).powi(2)).sqrt();
+            if r < 6.2 && r > 2.2 {
+                if y < 8.5 && r > 2.8 && r < 5.6 { if hsh(xi, yi, 31) > 0.82 { 4 } else { 2 } } else { 1 }
+            } else {
+                0
+            }
+        }
+        Pizza => {
+            let inside = y > 2.5 && y < 14.0 && (x - 8.0).abs() < (14.0 - y) * 0.5;
+            if inside {
+                if y > 12.0 { 3 } else if ((x - 6.5).powi(2) + (y - 8.0).powi(2)) < 1.6 || ((x - 9.0).powi(2) + (y - 11.0).powi(2)) < 1.4 || ((x - 8.0).powi(2) + (y - 5.0).powi(2)) < 1.0 { 2 } else { 1 }
+            } else {
+                0
+            }
+        }
+        Chocolate => {
+            if rect(x, y, 3.0, 2.0, 13.0, 14.0) {
+                if y > 10.0 && x > 6.0 { 4 } else if xi % 3 == 0 || yi % 3 == 2 { 2 } else if xi % 3 == 1 && yi % 3 == 0 { 3 } else { 1 }
+            } else {
+                0
+            }
+        }
+        Candy => {
+            if ell(x, y, 8.0, 8.0, 3.2, 3.2) {
+                if (xi + yi) % 3 == 0 { 4 } else { 1 }
+            } else if (x < 5.0 && x > 1.5 && (y - 8.0).abs() < (5.0 - x) * 0.9) || (x > 11.0 && x < 14.5 && (y - 8.0).abs() < (x - 11.0) * 0.9) {
+                2
+            } else {
+                0
+            }
+        }
+        Pear => {
+            if ell(x, y, 8.0, 10.5, 4.5, 4.0) || ell(x, y, 8.0, 6.0, 2.6, 3.2) {
+                if ell(x, y, 6.5, 9.0, 1.0, 1.4) { 3 } else { 1 }
+            } else if seg(x, y, 8.0, 3.0, 9.0, 1.0).0 < 0.7 {
+                2
+            } else {
+                0
+            }
+        }
+        Grapes => {
+            for (cx, cy) in [(6.0, 6.0), (10.0, 6.0), (8.0, 8.5), (5.0, 9.0), (11.0, 9.0), (6.5, 11.5), (9.5, 11.5), (8.0, 14.0)] {
+                if ell(x, y, cx, cy, 1.9, 1.9) {
+                    return if ell(x, y, cx - 0.6, cy - 0.6, 0.6, 0.6) { 3 } else { 1 };
+                }
+            }
+            if seg(x, y, 8.0, 4.0, 9.0, 1.5).0 < 0.7 || ell(x, y, 11.0, 3.0, 2.0, 1.0) { 2 } else { 0 }
+        }
+        Burger => {
+            if ell(x, y, 8.0, 6.0, 6.0, 3.0) && y < 7.5 {
+                if hsh(xi, yi, 33) > 0.85 { 4 } else { 1 }
+            } else if rect(x, y, 2.0, 7.5, 14.0, 8.5) {
+                2
+            } else if rect(x, y, 2.5, 8.5, 13.5, 10.5) {
+                5
+            } else if ell(x, y, 8.0, 11.5, 6.0, 2.0) && y > 10.5 {
+                1
+            } else {
+                0
+            }
+        }
+        Scroll => {
+            if rect(x, y, 4.0, 3.0, 12.0, 13.0) {
+                if (yi == 6 || yi == 8 || yi == 10) && xi > 5 && xi < 11 { 2 } else { 1 }
+            } else if ell(x, y, 8.0, 3.0, 5.5, 1.3) || ell(x, y, 8.0, 13.0, 5.5, 1.3) {
+                3
+            } else {
+                0
+            }
+        }
+        Gear => {
+            let (dx, dy) = (x - 8.0, y - 8.0);
+            let r = (dx * dx + dy * dy).sqrt();
+            let a = dy.atan2(dx);
+            let tooth = (a * 8.0 / std::f32::consts::TAU * 2.0).rem_euclid(2.0) < 1.0;
+            if r < 2.0 { 0 } else if r < 5.0 || (r < 6.6 && tooth) { if dx < 0.0 && dy < 0.0 { 3 } else { 1 } } else { 0 }
+        }
+        Pearl => {
+            if ell(x, y, 8.0, 8.5, 4.5, 4.5) {
+                if ell(x, y, 6.5, 7.0, 1.3, 1.3) { 4 } else if ell(x, y, 9.0, 10.0, 2.5, 2.5) { 1 } else { 3 }
             } else {
                 0
             }

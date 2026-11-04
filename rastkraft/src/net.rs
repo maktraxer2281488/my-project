@@ -30,7 +30,7 @@ pub enum Msg {
     Hello { name: String },
     Welcome { id: u8, seed: u32, creative: bool, time: f32, chunks: Vec<(u8, i32, i32, Vec<u8>)> },
     State(PState),
-    Edit { dim: u8, x: i32, y: i32, z: i32, b: u8 },
+    Edit { dim: u8, x: i32, y: i32, z: i32, b: u16 },
     Hit { target: u8, from: u8, dmg: f32, knock: [f32; 3] },
     Chat { text: String },
     Leave { id: u8 },
@@ -62,6 +62,9 @@ impl W {
     fn u8(&mut self, v: u8) {
         self.0.push(v);
     }
+    fn u16(&mut self, v: u16) {
+        self.0.extend_from_slice(&v.to_le_bytes());
+    }
     fn u32(&mut self, v: u32) {
         self.0.extend_from_slice(&v.to_le_bytes());
     }
@@ -89,6 +92,9 @@ impl R<'_> {
     }
     fn u8(&mut self) -> Option<u8> {
         Some(self.take(1)?[0])
+    }
+    fn u16(&mut self) -> Option<u16> {
+        Some(u16::from_le_bytes(self.take(2)?.try_into().ok()?))
     }
     fn u32(&mut self) -> Option<u32> {
         Some(u32::from_le_bytes(self.take(4)?.try_into().ok()?))
@@ -157,7 +163,7 @@ pub fn encode(m: &Msg) -> Vec<u8> {
             w.i32(*x);
             w.i32(*y);
             w.i32(*z);
-            w.u8(*b);
+            w.u16(*b);
         }
         Msg::Hit { target, from, dmg, knock } => {
             w.u8(5);
@@ -235,7 +241,7 @@ pub fn decode(b: &[u8]) -> Option<Msg> {
             let armor = [r.u32()?, r.u32()?, r.u32()?, r.u32()?];
             Msg::State(PState { id, name, dim, pos, yaw, pitch, held, armor, health: r.f32()?, walk: r.f32()?, speed: r.f32()?, swing: r.f32()? })
         }
-        4 => Msg::Edit { dim: r.u8()?, x: r.i32()?, y: r.i32()?, z: r.i32()?, b: r.u8()? },
+        4 => Msg::Edit { dim: r.u8()?, x: r.i32()?, y: r.i32()?, z: r.i32()?, b: r.u16()? },
         5 => Msg::Hit { target: r.u8()?, from: r.u8()?, dmg: r.f32()?, knock: [r.f32()?, r.f32()?, r.f32()?] },
         6 => Msg::Chat { text: r.str()? },
         7 => Msg::Leave { id: r.u8()? },

@@ -27,7 +27,7 @@ impl Dim {
 
 #[derive(Clone)]
 pub struct Chunk {
-    pub blocks: Vec<u8>,
+    pub blocks: Vec<u16>,
     /// Жители построек: (номер существа, координаты).
     pub spawns: Vec<(u16, [i32; 3])>,
 }
@@ -43,12 +43,12 @@ impl Chunk {
     }
 
     #[inline]
-    pub fn get(&self, x: i32, y: i32, z: i32) -> u8 {
+    pub fn get(&self, x: i32, y: i32, z: i32) -> u16 {
         self.blocks[Self::idx(x, y, z)]
     }
 
     #[inline]
-    pub fn set(&mut self, x: i32, y: i32, z: i32, b: u8) {
+    pub fn set(&mut self, x: i32, y: i32, z: i32, b: u16) {
         self.blocks[Self::idx(x, y, z)] = b;
     }
 }
@@ -73,7 +73,7 @@ impl World {
     }
 
     #[inline]
-    pub fn get(&self, x: i32, y: i32, z: i32) -> u8 {
+    pub fn get(&self, x: i32, y: i32, z: i32) -> u16 {
         if y < 0 {
             return if self.dim == Dim::Overworld { BEDROCK } else { AIR };
         }
@@ -99,7 +99,7 @@ impl World {
         blocks::is_solid(self.get(x, y, z))
     }
 
-    pub fn set(&mut self, x: i32, y: i32, z: i32, b: u8) -> bool {
+    pub fn set(&mut self, x: i32, y: i32, z: i32, b: u16) -> bool {
         if !(0..CH).contains(&y) {
             return false;
         }

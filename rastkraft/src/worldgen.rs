@@ -164,16 +164,16 @@ impl Gen<'_> {
     pub(crate) fn inside(&self, x: i32, y: i32, z: i32) -> bool {
         x >= self.x0 && x < self.x0 + CS && z >= self.z0 && z < self.z0 + CS && (0..CH).contains(&y)
     }
-    pub(crate) fn get(&self, x: i32, y: i32, z: i32) -> u8 {
+    pub(crate) fn get(&self, x: i32, y: i32, z: i32) -> u16 {
         if self.inside(x, y, z) { self.c.get(x - self.x0, y, z - self.z0) } else { AIR }
     }
-    pub(crate) fn set(&mut self, x: i32, y: i32, z: i32, b: u8) {
+    pub(crate) fn set(&mut self, x: i32, y: i32, z: i32, b: u16) {
         if self.inside(x, y, z) {
             self.c.set(x - self.x0, y, z - self.z0, b);
         }
     }
     /// Ставит блок только в пустоту (или в траву/листву для стволов).
-    fn put(&mut self, x: i32, y: i32, z: i32, b: u8) {
+    fn put(&mut self, x: i32, y: i32, z: i32, b: u16) {
         if self.inside(x, y, z) {
             let cur = self.get(x, y, z);
             if cur == AIR || def(cur).shape == Shape::Cross || (def(cur).shape == Shape::Cutout && def(b).shape == Shape::Cube) {
@@ -269,7 +269,7 @@ fn gen_overworld(seed: u32, cx: i32, cz: i32) -> Chunk {
     let mut g = Gen { c: &mut chunk, x0, z0 };
 
     // --- руды ---
-    let ores: [(u8, u32, i32, i32, u32); 8] = [
+    let ores: [(u16, u32, i32, i32, u32); 8] = [
         (COAL_ORE, 18, 5, 110, 10),
         (IRON_ORE, 12, 5, 70, 7),
         (COPPER_ORE, 10, 20, 80, 8),
@@ -350,6 +350,12 @@ fn gen_overworld(seed: u32, cx: i32, cz: i32) -> Chunk {
                         let t = hash(gx, gz, seed.wrapping_add(6));
                         if grove > 0.64 {
                             tree_sakura(&mut g, gx, h, gz, t);
+                        } else if h <= SEA + 3 && t > 0.5 {
+                            tree_willow(&mut g, gx, h, gz, t);
+                        } else if forest > 0.72 && t > 0.85 {
+                            tree_ebony(&mut g, gx, h, gz, t);
+                        } else if grove < 0.3 && t > 0.6 {
+                            tree_maple(&mut g, gx, h, gz, t);
                         } else if t < 0.3 {
                             tree_birch(&mut g, gx, h, gz, t);
                         } else {
@@ -358,10 +364,12 @@ fn gen_overworld(seed: u32, cx: i32, cz: i32) -> Chunk {
                     } else if inside && g.get(gx, h + 1, gz) == AIR && g.get(gx, h, gz) == GRASS {
                         let p = hash(gx, gz, seed.wrapping_add(7));
                         let patch = fbm2(fx * 0.08, fz * 0.08, seed.wrapping_add(12), 1);
-                        if p < 0.10 {
+                        if h <= SEA + 1 && p < 0.08 {
+                            g.set(gx, h + 1, gz, CATTAIL);
+                        } else if p < 0.10 {
                             g.set(gx, h + 1, gz, TALL_GRASS);
                         } else if p < 0.13 && patch > 0.55 {
-                            let fl = [DAISY, POPPY, CORNFLOWER, DANDELION, TULIP_RED, TULIP_ORANGE, TULIP_PINK, LAVENDER, BLUEBELL, SUNFLOWER][(patch * 97.0) as usize % 10];
+                            let fl = [DAISY, POPPY, CORNFLOWER, DANDELION, TULIP_RED, TULIP_ORANGE, TULIP_PINK, LAVENDER, BLUEBELL, SUNFLOWER, ORCHID, PEONY, CLOVER, THISTLE][(patch * 97.0) as usize % 14];
                             g.set(gx, h + 1, gz, fl);
                         } else if p > 0.996 && p < 0.998 {
                             g.set(gx, h + 1, gz, if p < 0.997 { BERRY_BUSH } else { ROSE_BUSH });
@@ -374,7 +382,12 @@ fn gen_overworld(seed: u32, cx: i32, cz: i32) -> Chunk {
                 }
                 Biome::Taiga => {
                     if r < 0.02 && h > SEA + 1 && h < 86 {
-                        tree_spruce(&mut g, gx, h, gz, hash(gx, gz, seed.wrapping_add(6)));
+                        let t = hash(gx, gz, seed.wrapping_add(6));
+                        if t > 0.78 {
+                            tree_cedar(&mut g, gx, h, gz, t);
+                        } else {
+                            tree_spruce(&mut g, gx, h, gz, t);
+                        }
                     } else if inside && g.get(gx, h + 1, gz) == AIR && g.get(gx, h, gz) == SNOW_GRASS {
                         let p = hash(gx, gz, seed.wrapping_add(7));
                         if p < 0.004 {
@@ -388,7 +401,14 @@ fn gen_overworld(seed: u32, cx: i32, cz: i32) -> Chunk {
                 }
                 Biome::Desert => {
                     if h <= SEA + 3 && r < 0.02 {
-                        tree_palm(&mut g, gx, h, gz, hash(gx, gz, seed.wrapping_add(6)));
+                        let t = hash(gx, gz, seed.wrapping_add(6));
+                        if t > 0.8 {
+                            tree_mangrove(&mut g, gx, h, gz, t);
+                        } else {
+                            tree_palm(&mut g, gx, h, gz, t);
+                        }
+                    } else if r > 0.9985 && h > SEA + 4 {
+                        tree_acacia(&mut g, gx, h, gz, hash(gx, gz, seed.wrapping_add(6)));
                     } else if inside && g.get(gx, h + 1, gz) == AIR && g.get(gx, h, gz) == SAND {
                         let p = hash(gx, gz, seed.wrapping_add(7));
                         if p < 0.006 {
@@ -422,7 +442,7 @@ fn gen_overworld(seed: u32, cx: i32, cz: i32) -> Chunk {
             let (x, z) = (x0 + lx, z0 + lz);
             for y in 6..40 {
                 if g.get(x, y, z) == AIR && matches!(g.get(x, y - 1, z), STONE | SLATE | TUFF) && hash(x * 3 + y, z, seed.wrapping_add(15)) < 0.012 {
-                    g.set(x, y, z, GLOW_MUSHROOM);
+                    g.set(x, y, z, if hash(x, z * 5 + y, 951) < 0.3 { BLUE_MUSHROOM } else { GLOW_MUSHROOM });
                 }
             }
         }
@@ -448,7 +468,7 @@ impl Rng {
 }
 
 // ---------- деревья ----------
-fn leaves_blob(g: &mut Gen, x: i32, top: i32, z: i32, leaf: u8, rnd: f32) {
+fn leaves_blob(g: &mut Gen, x: i32, top: i32, z: i32, leaf: u16, rnd: f32) {
     for dy in -2..=1 {
         let r: i32 = if dy >= 0 { 1 } else { 2 };
         for dz in -r..=r {
@@ -463,7 +483,7 @@ fn leaves_blob(g: &mut Gen, x: i32, top: i32, z: i32, leaf: u8, rnd: f32) {
     }
 }
 
-fn trunk(g: &mut Gen, x: i32, h: i32, z: i32, len: i32, log: u8) {
+fn trunk(g: &mut Gen, x: i32, h: i32, z: i32, len: i32, log: u16) {
     for y in 1..=len {
         if g.inside(x, h + y, z) {
             g.set(x, h + y, z, log);
@@ -521,6 +541,119 @@ fn tree_sakura(g: &mut Gen, x: i32, h: i32, z: i32, t: f32) {
         }
     }
     trunk(g, x, h, z, len, SAKURA_LOG);
+}
+
+
+fn tree_maple(g: &mut Gen, x: i32, h: i32, z: i32, t: f32) {
+    // широкая округлая крона
+    let len = 5 + (t * 3.0) as i32;
+    let top = h + len;
+    for dy in -2i32..=2 {
+        let r: i32 = if dy.abs() == 2 { 2 } else { 3 };
+        for dz in -r..=r {
+            for dx in -r..=r {
+                if dx * dx + dz * dz + dy * dy * 2 <= r * r + 2 && hash(x + dx * 7, z + dz + dy * 3, 931) > 0.08 {
+                    g.put(x + dx, top + dy, z + dz, MAPLE_LEAVES);
+                }
+            }
+        }
+    }
+    trunk(g, x, h, z, len, MAPLE_LOG);
+}
+
+fn tree_ebony(g: &mut Gen, x: i32, h: i32, z: i32, t: f32) {
+    // высокое тёмное дерево с несколькими ярусами
+    let len = 9 + (t * 5.0) as i32;
+    for k in 0..3 {
+        let y = h + len - k * 3;
+        let r = 1 + k;
+        for dz in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() + dz.abs() <= r + 1 {
+                    g.put(x + dx, y, z + dz, EBONY_LEAVES);
+                }
+            }
+        }
+    }
+    g.put(x, h + len + 1, z, EBONY_LEAVES);
+    trunk(g, x, h, z, len, EBONY_LOG);
+}
+
+fn tree_willow(g: &mut Gen, x: i32, h: i32, z: i32, t: f32) {
+    // крона с длинными свисающими ветвями
+    let len = 5 + (t * 2.0) as i32;
+    let top = h + len;
+    for dz in -3i32..=3 {
+        for dx in -3i32..=3 {
+            let d = dx * dx + dz * dz;
+            if d <= 10 {
+                g.put(x + dx, top, z + dz, WILLOW_LEAVES);
+                if d <= 4 {
+                    g.put(x + dx, top + 1, z + dz, WILLOW_LEAVES);
+                }
+                if d >= 5 {
+                    let hang = 1 + (hash(x + dx, z + dz, 941) * 4.0) as i32;
+                    for k in 1..=hang {
+                        g.put(x + dx, top - k, z + dz, WILLOW_LEAVES);
+                    }
+                }
+            }
+        }
+    }
+    trunk(g, x, h, z, len, WILLOW_LOG);
+}
+
+fn tree_acacia(g: &mut Gen, x: i32, h: i32, z: i32, t: f32) {
+    // наклонный ствол и плоская крона-зонтик
+    let len = 4 + (t * 2.0) as i32;
+    let (dx, dz) = if t < 0.5 { (1, 0) } else { (0, 1) };
+    trunk(g, x, h, z, len, ACACIA_LOG);
+    let (tx, tz) = (x + dx * 2, z + dz * 2);
+    g.put(x + dx, h + len + 1, z + dz, ACACIA_LOG);
+    g.put(tx, h + len + 2, tz, ACACIA_LOG);
+    let top = h + len + 3;
+    for oz in -3i32..=3 {
+        for ox in -3i32..=3 {
+            if ox.abs() + oz.abs() <= 4 {
+                g.put(tx + ox, top, tz + oz, ACACIA_LEAVES);
+            }
+            if ox.abs() + oz.abs() <= 1 {
+                g.put(tx + ox, top + 1, tz + oz, ACACIA_LEAVES);
+            }
+        }
+    }
+}
+
+fn tree_mangrove(g: &mut Gen, x: i32, h: i32, z: i32, t: f32) {
+    // ствол на корнях-ходулях
+    for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+        for k in 0..2 {
+            g.put(x + dx * (2 - k), h + 1 + k, z + dz * (2 - k), MANGROVE_LOG);
+        }
+    }
+    let len = 6 + (t * 2.0) as i32;
+    leaves_blob(g, x, h + len, z, MANGROVE_LEAVES, t);
+    for (dx, dz) in [(2, 0), (-2, 0), (0, 2), (0, -2)] {
+        g.put(x + dx, h + len - 1, z + dz, MANGROVE_LEAVES);
+    }
+    trunk(g, x, h, z, len - 1, MANGROVE_LOG);
+}
+
+fn tree_cedar(g: &mut Gen, x: i32, h: i32, z: i32, t: f32) {
+    // голый ствол и пышная верхушка
+    let len = 8 + (t * 4.0) as i32;
+    let top = h + len;
+    for dy in -3..=1 {
+        let r: i32 = if dy == 1 { 0 } else if dy == -3 { 1 } else { 2 };
+        for dz in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() + dz.abs() <= r + (r > 1) as i32 {
+                    g.put(x + dx, top + dy, z + dz, CEDAR_LEAVES);
+                }
+            }
+        }
+    }
+    trunk(g, x, h, z, len - 1, CEDAR_LOG);
 }
 
 fn tree_palm(g: &mut Gen, x: i32, h: i32, z: i32, t: f32) {

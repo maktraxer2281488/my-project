@@ -205,7 +205,7 @@ impl Entities {
 }
 
 /// Что выпадает из сломанного блока.
-pub fn block_drops(b: u8, held: Item, r: f32) -> Vec<(Item, u16)> {
+pub fn block_drops(b: u16, held: Item, r: f32) -> Vec<(Item, u16)> {
     use items as it;
     let t = Item::Thing;
     let pick = matches!(held, Item::Tool(ToolKind::Pickaxe, _));
@@ -243,12 +243,18 @@ pub fn block_drops(b: u8, held: Item, r: f32) -> Vec<(Item, u16)> {
         AMBER_BLOCK => vec![(t(it::AMBER), 3)],
         MELON => vec![(t(it::MELON_SLICE), 3 + (r * 4.0) as u16)],
         CACTUS => if r < 0.3 { vec![(Item::Block(CACTUS), 1), (t(it::CACTUS_FRUIT), 1)] } else { one(Item::Block(CACTUS)) },
-        OAK_LEAVES | SAKURA_LEAVES | BIRCH_LEAVES | SPRUCE_LEAVES | PALM_LEAVES | GOLDEN_LEAVES => {
+        x if blocks::is_leaves(x) => {
             if r < 0.05 {
                 one(t(match b {
                     OAK_LEAVES => it::APPLE,
                     PALM_LEAVES => it::COCONUT,
                     GOLDEN_LEAVES => it::GOLDEN_APPLE,
+                    MAPLE_LEAVES => it::MAPLE_SYRUP,
+                    WILLOW_LEAVES => it::PEAR,
+                    ACACIA_LEAVES => it::NUTS,
+                    CEDAR_LEAVES => it::NUTS,
+                    MANGROVE_LEAVES => it::ORANGE,
+                    EBONY_LEAVES => it::PLUM,
                     _ => it::STICK,
                 }))
             } else if r < 0.15 {
@@ -259,6 +265,8 @@ pub fn block_drops(b: u8, held: Item, r: f32) -> Vec<(Item, u16)> {
                 vec![]
             }
         }
+        CORAL_PINK | CORAL_PURPLE if r < 0.3 => vec![(Item::Block(b), 1), (t(it::CORAL_SHARD), 1)],
+        STAINED_WINDOW => vec![],
         SPRUCE_LOG if r < 0.1 => vec![(Item::Block(SPRUCE_LOG), 1), (t(it::RESIN), 1)],
         _ => one(Item::Block(b)),
     }
@@ -294,7 +302,7 @@ pub fn chest_loot(tier: u32, seed: u32) -> Vec<(Item, u16)> {
         let mi = ((tier as f32 * 1.6 + h(201) * 3.0) as usize).min(mats.len() - 1);
         let m = mats[mi];
         let it = if h(202) < 0.5 {
-            Item::Tool(items::TOOL_KINDS[(h(203) * 7.0) as usize % 7], m)
+            Item::Tool(items::TOOL_KINDS[(h(203) * 13.0) as usize % items::TOOL_KINDS.len()], m)
         } else {
             let am = if m == Mat::Stone { Mat::Leather } else { m };
             Item::Armor(SLOTS[(h(204) * 4.0) as usize % 4], am)

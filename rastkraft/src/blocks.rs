@@ -50,204 +50,289 @@ pub struct BlockDef {
 }
 
 // ---------- идентификаторы ----------
-pub const AIR: u8 = 0;
-pub const GRASS: u8 = 1;
-pub const DIRT: u8 = 2;
-pub const STONE: u8 = 3;
-pub const COBBLE: u8 = 4;
-pub const SAND: u8 = 5;
-pub const GRAVEL: u8 = 6;
-pub const CLAY: u8 = 7;
-pub const SANDSTONE: u8 = 8;
-pub const RED_SAND: u8 = 9;
-pub const RED_SANDSTONE: u8 = 10;
-pub const SNOW_GRASS: u8 = 11;
-pub const SNOW_BLOCK: u8 = 12;
-pub const ICE: u8 = 13;
-pub const PACKED_ICE: u8 = 14;
-pub const WATER: u8 = 15;
-pub const LAVA: u8 = 16;
-pub const BEDROCK: u8 = 17;
-pub const MOSSY_COBBLE: u8 = 18;
-pub const GRANITE: u8 = 19;
-pub const MARBLE: u8 = 20;
-pub const BASALT: u8 = 21;
-pub const SLATE: u8 = 22;
-pub const TUFF: u8 = 23;
-pub const OBSIDIAN: u8 = 24;
-pub const COAL_ORE: u8 = 25;
-pub const IRON_ORE: u8 = 26;
-pub const COPPER_ORE: u8 = 27;
-pub const GOLD_ORE: u8 = 28;
-pub const RUBY_ORE: u8 = 29;
-pub const CRYSTAL_ORE: u8 = 30;
-pub const SAPPHIRE_ORE: u8 = 31;
-pub const MALACHITE_ORE: u8 = 32;
-pub const COAL_BLOCK: u8 = 33;
-pub const IRON_BLOCK: u8 = 34;
-pub const COPPER_BLOCK: u8 = 35;
-pub const GOLD_BLOCK: u8 = 36;
-pub const RUBY_BLOCK: u8 = 37;
-pub const CRYSTAL_BLOCK: u8 = 38;
-pub const SAPPHIRE_BLOCK: u8 = 39;
-pub const MALACHITE_BLOCK: u8 = 40;
-pub const OAK_LOG: u8 = 41;
-pub const OAK_PLANKS: u8 = 42;
-pub const OAK_LEAVES: u8 = 43;
-pub const SPRUCE_LOG: u8 = 44;
-pub const SPRUCE_PLANKS: u8 = 45;
-pub const SPRUCE_LEAVES: u8 = 46;
-pub const BIRCH_LOG: u8 = 47;
-pub const BIRCH_PLANKS: u8 = 48;
-pub const BIRCH_LEAVES: u8 = 49;
-pub const SAKURA_LOG: u8 = 50;
-pub const SAKURA_PLANKS: u8 = 51;
-pub const SAKURA_LEAVES: u8 = 52;
-pub const PALM_LOG: u8 = 53;
-pub const PALM_PLANKS: u8 = 54;
-pub const PALM_LEAVES: u8 = 55;
-pub const TALL_GRASS: u8 = 56;
-pub const FERN: u8 = 57;
-pub const DAISY: u8 = 58;
-pub const POPPY: u8 = 59;
-pub const CORNFLOWER: u8 = 60;
-pub const DANDELION: u8 = 61;
-pub const DEAD_BUSH: u8 = 62;
-pub const RED_MUSHROOM: u8 = 63;
-pub const BROWN_MUSHROOM: u8 = 64;
-pub const REEDS: u8 = 65;
-pub const CACTUS: u8 = 66;
-pub const WOOL0: u8 = 67;
-pub const CONCRETE0: u8 = 83;
-pub const GLASS: u8 = 99;
-pub const GLASS_RED: u8 = 100;
-pub const GLASS_BLUE: u8 = 101;
-pub const GLASS_GREEN: u8 = 102;
-pub const GLASS_YELLOW: u8 = 103;
-pub const BRICKS: u8 = 104;
-pub const STONE_BRICKS: u8 = 105;
-pub const MOSSY_STONE_BRICKS: u8 = 106;
-pub const SANDSTONE_BRICKS: u8 = 107;
-pub const DARK_BRICKS: u8 = 108;
-pub const BOOKSHELF: u8 = 109;
-pub const WORKBENCH: u8 = 110;
-pub const FURNACE: u8 = 111;
-pub const CHEST: u8 = 112;
-pub const PUMPKIN: u8 = 113;
-pub const MELON: u8 = 114;
-pub const HAY: u8 = 115;
-pub const GLOWSTONE: u8 = 116;
-pub const LANTERN: u8 = 117;
-pub const SPONGE: u8 = 118;
-pub const BEAM: u8 = 119;
-pub const COBWEB: u8 = 120;
-pub const TORCH: u8 = 121;
-pub const CLOUD: u8 = 122;
-pub const HEAVEN_GRASS: u8 = 123;
-pub const HEAVEN_DIRT: u8 = 124;
-pub const GOLDEN_LEAVES: u8 = 125;
-pub const LIGHT_LOG: u8 = 126;
-pub const LIGHT_PLANKS: u8 = 127;
-pub const HEAVEN_STONE: u8 = 128;
-pub const HEAVEN_CRYSTAL: u8 = 129;
-pub const PORTAL: u8 = 130;
-pub const PORTAL_FRAME: u8 = 131;
-pub const POLISHED_GRANITE: u8 = 132;
-pub const POLISHED_MARBLE: u8 = 133;
-pub const POLISHED_BASALT: u8 = 134;
-pub const SLATE_BRICKS: u8 = 135;
-pub const SLATE_TILES: u8 = 136;
-pub const TUFF_BRICKS: u8 = 137;
-pub const CHISELED_STONE: u8 = 138;
-pub const CHISELED_SANDSTONE: u8 = 139;
-pub const SMOOTH_SANDSTONE: u8 = 140;
-pub const CUT_RED_SANDSTONE: u8 = 141;
-pub const MARBLE_PILLAR: u8 = 142;
-pub const OBSIDIAN_BRICKS: u8 = 143;
-pub const CRACKED_STONE_BRICKS: u8 = 144;
-pub const ICE_BRICKS: u8 = 145;
-pub const SNOW_BRICKS: u8 = 146;
-pub const HEAVEN_BRICKS: u8 = 147;
-pub const GOLD_TILES: u8 = 148;
-pub const QUARTZ: u8 = 149;
-pub const QUARTZ_PILLAR: u8 = 150;
-pub const TERRACOTTA0: u8 = 151;
-pub const GLASS_EXTRA0: u8 = 167;
-pub const LAMP0: u8 = 179;
-pub const TULIP_RED: u8 = 187;
-pub const TULIP_ORANGE: u8 = 188;
-pub const TULIP_PINK: u8 = 189;
-pub const LAVENDER: u8 = 190;
-pub const BLUEBELL: u8 = 191;
-pub const SUNFLOWER: u8 = 192;
-pub const ROSE_BUSH: u8 = 193;
-pub const BERRY_BUSH: u8 = 194;
-pub const WHEAT_CROP: u8 = 195;
-pub const CARROT_CROP: u8 = 196;
-pub const SNOW_FLOWER: u8 = 197;
-pub const DESERT_ROSE: u8 = 198;
-pub const HEAVEN_LILY: u8 = 199;
-pub const GLOW_MUSHROOM: u8 = 200;
-pub const MUD: u8 = 201;
-pub const PEAT: u8 = 202;
-pub const MOSS_BLOCK: u8 = 203;
-pub const PODZOL: u8 = 204;
-pub const COARSE_DIRT: u8 = 205;
-pub const FARMLAND: u8 = 206;
-pub const SALT_BLOCK: u8 = 207;
-pub const AMBER_BLOCK: u8 = 208;
-pub const CORAL_RED: u8 = 209;
-pub const CORAL_BLUE: u8 = 210;
-pub const CORAL_YELLOW: u8 = 211;
-pub const SEA_STONE: u8 = 212;
-pub const SEA_LANTERN: u8 = 213;
-pub const MAGMA: u8 = 214;
-pub const PUMICE: u8 = 215;
-pub const ASH_BLOCK: u8 = 216;
-pub const RED_MUSHROOM_BLOCK: u8 = 217;
-pub const BROWN_MUSHROOM_BLOCK: u8 = 218;
-pub const MUSHROOM_STEM: u8 = 219;
-pub const BAMBOO_BLOCK: u8 = 220;
-pub const CRATE: u8 = 221;
-pub const BARREL: u8 = 222;
-pub const BEEHIVE: u8 = 223;
-pub const HONEY_BLOCK: u8 = 224;
-pub const JELLY_BLOCK: u8 = 225;
-pub const ANVIL: u8 = 226;
-pub const CAULDRON: u8 = 227;
-pub const CANDLE: u8 = 228;
-pub const IRON_BARS: u8 = 229;
-pub const LATTICE: u8 = 230;
-pub const LADDER: u8 = 231;
-pub const ROPE: u8 = 232;
-pub const HALO_STONE: u8 = 233;
-pub const SUN_BLOCK: u8 = 234;
-pub const CELESTIAL_GLASS: u8 = 235;
-pub const STARDUST_BLOCK: u8 = 236;
-pub const FEATHER_BLOCK: u8 = 237;
-pub const RAINBOW_BLOCK: u8 = 238;
-pub const ADOBE: u8 = 239;
-pub const MOSAIC: u8 = 240;
-pub const TURQUOISE_BLOCK: u8 = 241;
-pub const FROST_STONE: u8 = 242;
-pub const CONE_BLOCK: u8 = 243;
-pub const FUR_BLOCK: u8 = 244;
-pub const THATCH: u8 = 245;
-pub const PAVING: u8 = 246;
-pub const WHITEWASH: u8 = 247;
-pub const TIMBER_FRAME: u8 = 248;
-pub const BONE_BLOCK: u8 = 249;
-pub const BLOCK_COUNT: usize = 250;
+pub const AIR: u16 = 0;
+pub const GRASS: u16 = 1;
+pub const DIRT: u16 = 2;
+pub const STONE: u16 = 3;
+pub const COBBLE: u16 = 4;
+pub const SAND: u16 = 5;
+pub const GRAVEL: u16 = 6;
+pub const CLAY: u16 = 7;
+pub const SANDSTONE: u16 = 8;
+pub const RED_SAND: u16 = 9;
+pub const RED_SANDSTONE: u16 = 10;
+pub const SNOW_GRASS: u16 = 11;
+pub const SNOW_BLOCK: u16 = 12;
+pub const ICE: u16 = 13;
+pub const PACKED_ICE: u16 = 14;
+pub const WATER: u16 = 15;
+pub const LAVA: u16 = 16;
+pub const BEDROCK: u16 = 17;
+pub const MOSSY_COBBLE: u16 = 18;
+pub const GRANITE: u16 = 19;
+pub const MARBLE: u16 = 20;
+pub const BASALT: u16 = 21;
+pub const SLATE: u16 = 22;
+pub const TUFF: u16 = 23;
+pub const OBSIDIAN: u16 = 24;
+pub const COAL_ORE: u16 = 25;
+pub const IRON_ORE: u16 = 26;
+pub const COPPER_ORE: u16 = 27;
+pub const GOLD_ORE: u16 = 28;
+pub const RUBY_ORE: u16 = 29;
+pub const CRYSTAL_ORE: u16 = 30;
+pub const SAPPHIRE_ORE: u16 = 31;
+pub const MALACHITE_ORE: u16 = 32;
+pub const COAL_BLOCK: u16 = 33;
+pub const IRON_BLOCK: u16 = 34;
+pub const COPPER_BLOCK: u16 = 35;
+pub const GOLD_BLOCK: u16 = 36;
+pub const RUBY_BLOCK: u16 = 37;
+pub const CRYSTAL_BLOCK: u16 = 38;
+pub const SAPPHIRE_BLOCK: u16 = 39;
+pub const MALACHITE_BLOCK: u16 = 40;
+pub const OAK_LOG: u16 = 41;
+pub const OAK_PLANKS: u16 = 42;
+pub const OAK_LEAVES: u16 = 43;
+pub const SPRUCE_LOG: u16 = 44;
+pub const SPRUCE_PLANKS: u16 = 45;
+pub const SPRUCE_LEAVES: u16 = 46;
+pub const BIRCH_LOG: u16 = 47;
+pub const BIRCH_PLANKS: u16 = 48;
+pub const BIRCH_LEAVES: u16 = 49;
+pub const SAKURA_LOG: u16 = 50;
+pub const SAKURA_PLANKS: u16 = 51;
+pub const SAKURA_LEAVES: u16 = 52;
+pub const PALM_LOG: u16 = 53;
+pub const PALM_PLANKS: u16 = 54;
+pub const PALM_LEAVES: u16 = 55;
+pub const TALL_GRASS: u16 = 56;
+pub const FERN: u16 = 57;
+pub const DAISY: u16 = 58;
+pub const POPPY: u16 = 59;
+pub const CORNFLOWER: u16 = 60;
+pub const DANDELION: u16 = 61;
+pub const DEAD_BUSH: u16 = 62;
+pub const RED_MUSHROOM: u16 = 63;
+pub const BROWN_MUSHROOM: u16 = 64;
+pub const REEDS: u16 = 65;
+pub const CACTUS: u16 = 66;
+pub const WOOL0: u16 = 67;
+pub const CONCRETE0: u16 = 83;
+pub const GLASS: u16 = 99;
+pub const GLASS_RED: u16 = 100;
+pub const GLASS_BLUE: u16 = 101;
+pub const GLASS_GREEN: u16 = 102;
+pub const GLASS_YELLOW: u16 = 103;
+pub const BRICKS: u16 = 104;
+pub const STONE_BRICKS: u16 = 105;
+pub const MOSSY_STONE_BRICKS: u16 = 106;
+pub const SANDSTONE_BRICKS: u16 = 107;
+pub const DARK_BRICKS: u16 = 108;
+pub const BOOKSHELF: u16 = 109;
+pub const WORKBENCH: u16 = 110;
+pub const FURNACE: u16 = 111;
+pub const CHEST: u16 = 112;
+pub const PUMPKIN: u16 = 113;
+pub const MELON: u16 = 114;
+pub const HAY: u16 = 115;
+pub const GLOWSTONE: u16 = 116;
+pub const LANTERN: u16 = 117;
+pub const SPONGE: u16 = 118;
+pub const BEAM: u16 = 119;
+pub const COBWEB: u16 = 120;
+pub const TORCH: u16 = 121;
+pub const CLOUD: u16 = 122;
+pub const HEAVEN_GRASS: u16 = 123;
+pub const HEAVEN_DIRT: u16 = 124;
+pub const GOLDEN_LEAVES: u16 = 125;
+pub const LIGHT_LOG: u16 = 126;
+pub const LIGHT_PLANKS: u16 = 127;
+pub const HEAVEN_STONE: u16 = 128;
+pub const HEAVEN_CRYSTAL: u16 = 129;
+pub const PORTAL: u16 = 130;
+pub const PORTAL_FRAME: u16 = 131;
+pub const POLISHED_GRANITE: u16 = 132;
+pub const POLISHED_MARBLE: u16 = 133;
+pub const POLISHED_BASALT: u16 = 134;
+pub const SLATE_BRICKS: u16 = 135;
+pub const SLATE_TILES: u16 = 136;
+pub const TUFF_BRICKS: u16 = 137;
+pub const CHISELED_STONE: u16 = 138;
+pub const CHISELED_SANDSTONE: u16 = 139;
+pub const SMOOTH_SANDSTONE: u16 = 140;
+pub const CUT_RED_SANDSTONE: u16 = 141;
+pub const MARBLE_PILLAR: u16 = 142;
+pub const OBSIDIAN_BRICKS: u16 = 143;
+pub const CRACKED_STONE_BRICKS: u16 = 144;
+pub const ICE_BRICKS: u16 = 145;
+pub const SNOW_BRICKS: u16 = 146;
+pub const HEAVEN_BRICKS: u16 = 147;
+pub const GOLD_TILES: u16 = 148;
+pub const QUARTZ: u16 = 149;
+pub const QUARTZ_PILLAR: u16 = 150;
+pub const TERRACOTTA0: u16 = 151;
+pub const GLASS_EXTRA0: u16 = 167;
+pub const LAMP0: u16 = 179;
+pub const TULIP_RED: u16 = 187;
+pub const TULIP_ORANGE: u16 = 188;
+pub const TULIP_PINK: u16 = 189;
+pub const LAVENDER: u16 = 190;
+pub const BLUEBELL: u16 = 191;
+pub const SUNFLOWER: u16 = 192;
+pub const ROSE_BUSH: u16 = 193;
+pub const BERRY_BUSH: u16 = 194;
+pub const WHEAT_CROP: u16 = 195;
+pub const CARROT_CROP: u16 = 196;
+pub const SNOW_FLOWER: u16 = 197;
+pub const DESERT_ROSE: u16 = 198;
+pub const HEAVEN_LILY: u16 = 199;
+pub const GLOW_MUSHROOM: u16 = 200;
+pub const MUD: u16 = 201;
+pub const PEAT: u16 = 202;
+pub const MOSS_BLOCK: u16 = 203;
+pub const PODZOL: u16 = 204;
+pub const COARSE_DIRT: u16 = 205;
+pub const FARMLAND: u16 = 206;
+pub const SALT_BLOCK: u16 = 207;
+pub const AMBER_BLOCK: u16 = 208;
+pub const CORAL_RED: u16 = 209;
+pub const CORAL_BLUE: u16 = 210;
+pub const CORAL_YELLOW: u16 = 211;
+pub const SEA_STONE: u16 = 212;
+pub const SEA_LANTERN: u16 = 213;
+pub const MAGMA: u16 = 214;
+pub const PUMICE: u16 = 215;
+pub const ASH_BLOCK: u16 = 216;
+pub const RED_MUSHROOM_BLOCK: u16 = 217;
+pub const BROWN_MUSHROOM_BLOCK: u16 = 218;
+pub const MUSHROOM_STEM: u16 = 219;
+pub const BAMBOO_BLOCK: u16 = 220;
+pub const CRATE: u16 = 221;
+pub const BARREL: u16 = 222;
+pub const BEEHIVE: u16 = 223;
+pub const HONEY_BLOCK: u16 = 224;
+pub const JELLY_BLOCK: u16 = 225;
+pub const ANVIL: u16 = 226;
+pub const CAULDRON: u16 = 227;
+pub const CANDLE: u16 = 228;
+pub const IRON_BARS: u16 = 229;
+pub const LATTICE: u16 = 230;
+pub const LADDER: u16 = 231;
+pub const ROPE: u16 = 232;
+pub const HALO_STONE: u16 = 233;
+pub const SUN_BLOCK: u16 = 234;
+pub const CELESTIAL_GLASS: u16 = 235;
+pub const STARDUST_BLOCK: u16 = 236;
+pub const FEATHER_BLOCK: u16 = 237;
+pub const RAINBOW_BLOCK: u16 = 238;
+pub const ADOBE: u16 = 239;
+pub const MOSAIC: u16 = 240;
+pub const TURQUOISE_BLOCK: u16 = 241;
+pub const FROST_STONE: u16 = 242;
+pub const CONE_BLOCK: u16 = 243;
+pub const FUR_BLOCK: u16 = 244;
+pub const THATCH: u16 = 245;
+pub const PAVING: u16 = 246;
+pub const WHITEWASH: u16 = 247;
+pub const TIMBER_FRAME: u16 = 248;
+pub const BONE_BLOCK: u16 = 249;
+pub const MAPLE_LOG: u16 = 250;
+pub const MAPLE_PLANKS: u16 = 251;
+pub const MAPLE_LEAVES: u16 = 252;
+pub const EBONY_LOG: u16 = 253;
+pub const EBONY_PLANKS: u16 = 254;
+pub const EBONY_LEAVES: u16 = 255;
+pub const WILLOW_LOG: u16 = 256;
+pub const WILLOW_PLANKS: u16 = 257;
+pub const WILLOW_LEAVES: u16 = 258;
+pub const ACACIA_LOG: u16 = 259;
+pub const ACACIA_PLANKS: u16 = 260;
+pub const ACACIA_LEAVES: u16 = 261;
+pub const MANGROVE_LOG: u16 = 262;
+pub const MANGROVE_PLANKS: u16 = 263;
+pub const MANGROVE_LEAVES: u16 = 264;
+pub const CEDAR_LOG: u16 = 265;
+pub const CEDAR_PLANKS: u16 = 266;
+pub const CEDAR_LEAVES: u16 = 267;
+pub const STONE_TILES: u16 = 268;
+pub const GRANITE_TILES: u16 = 269;
+pub const MARBLE_TILES: u16 = 270;
+pub const BASALT_TILES: u16 = 271;
+pub const TUFF_TILES: u16 = 272;
+pub const OBSIDIAN_TILES: u16 = 273;
+pub const CHISELED_GRANITE: u16 = 274;
+pub const CHISELED_MARBLE: u16 = 275;
+pub const CHISELED_BASALT: u16 = 276;
+pub const CHISELED_SLATE: u16 = 277;
+pub const CHISELED_TUFF: u16 = 278;
+pub const CHISELED_OBSIDIAN: u16 = 279;
+pub const GRANITE_BRICKS: u16 = 280;
+pub const MARBLE_BRICKS: u16 = 281;
+pub const BASALT_BRICKS: u16 = 282;
+pub const SMOOTH_STONE: u16 = 283;
+pub const POLISHED_SLATE: u16 = 284;
+pub const POLISHED_TUFF: u16 = 285;
+pub const POLISHED_OBSIDIAN: u16 = 286;
+pub const GLAZED0: u16 = 287;
+pub const LAMP_EXTRA0: u16 = 303;
+pub const PAINTED_PLANKS0: u16 = 311;
+pub const CHISELED_METAL0: u16 = 327;
+pub const METAL_PILLAR0: u16 = 335;
+pub const COPPER_GRATE: u16 = 343;
+pub const GOLD_GRATE: u16 = 344;
+pub const HEAVEN_GRATE: u16 = 345;
+pub const MYCELIUM: u16 = 346;
+pub const CRACKED_EARTH: u16 = 347;
+pub const BLACK_SAND: u16 = 348;
+pub const ROOTED_DIRT: u16 = 349;
+pub const GLOW_MOSS: u16 = 350;
+pub const DRIPSTONE: u16 = 351;
+pub const CALCITE: u16 = 352;
+pub const LIMESTONE: u16 = 353;
+pub const CHALK: u16 = 354;
+pub const CORAL_PINK: u16 = 355;
+pub const CORAL_PURPLE: u16 = 356;
+pub const KELP_BLOCK: u16 = 357;
+pub const SNOW_PACKED: u16 = 358;
+pub const ORCHID: u16 = 359;
+pub const PEONY: u16 = 360;
+pub const CLOVER: u16 = 361;
+pub const CATTAIL: u16 = 362;
+pub const THISTLE: u16 = 363;
+pub const FIREFLOWER: u16 = 364;
+pub const BLUE_MUSHROOM: u16 = 365;
+pub const PARQUET: u16 = 366;
+pub const CHECKER_TILES: u16 = 367;
+pub const APPLE_CRATE: u16 = 368;
+pub const CARROT_CRATE: u16 = 369;
+pub const POTATO_CRATE: u16 = 370;
+pub const FISH_BARREL: u16 = 371;
+pub const JAR_SHELF: u16 = 372;
+pub const SCROLL_SHELF: u16 = 373;
+pub const SAFE: u16 = 374;
+pub const CLOCK_BLOCK: u16 = 375;
+pub const MAP_BLOCK: u16 = 376;
+pub const STAINED_WINDOW: u16 = 377;
+pub const PAPER_LANTERN: u16 = 378;
+pub const WEAPON_RACK: u16 = 379;
+pub const TAPESTRY: u16 = 380;
+pub const RUG_BLOCK: u16 = 381;
+pub const BLOCK_COUNT: usize = 382;
 
-pub fn is_climbable(b: u8) -> bool {
+pub fn is_leaves(b: u16) -> bool {
+    matches!(b, OAK_LEAVES | SPRUCE_LEAVES | BIRCH_LEAVES | SAKURA_LEAVES | PALM_LEAVES | GOLDEN_LEAVES | MAPLE_LEAVES | EBONY_LEAVES | WILLOW_LEAVES | ACACIA_LEAVES | MANGROVE_LEAVES | CEDAR_LEAVES)
+}
+
+pub fn is_climbable(b: u16) -> bool {
     b == LADDER || b == ROPE
 }
 
 // ---------- доступ к реестру ----------
 pub struct Registry {
     pub defs: Vec<BlockDef>,
-    pub opaque: [bool; 256],
-    pub solid: [bool; 256],
+    pub opaque: Vec<bool>,
+    pub solid: Vec<bool>,
 }
 
 static ALL: OnceLock<(Registry, Vec<u8>, Vec<u16>)> = OnceLock::new();
@@ -261,17 +346,17 @@ pub fn reg() -> &'static Registry {
 }
 
 #[inline]
-pub fn def(id: u8) -> &'static BlockDef {
+pub fn def(id: u16) -> &'static BlockDef {
     &reg().defs[id as usize]
 }
 
 #[inline]
-pub fn is_opaque(id: u8) -> bool {
+pub fn is_opaque(id: u16) -> bool {
     reg().opaque[id as usize]
 }
 
 #[inline]
-pub fn is_solid(id: u8) -> bool {
+pub fn is_solid(id: u16) -> bool {
     reg().solid[id as usize]
 }
 
@@ -653,6 +738,10 @@ pub const COLOR_NAMES_N: [&str; 16] = [
     "Белое", "Светло-серое", "Серое", "Чёрное", "Коричневое", "Красное", "Оранжевое", "Жёлтое",
     "Лаймовое", "Зелёное", "Бирюзовое", "Голубое", "Синее", "Фиолетовое", "Пурпурное", "Розовое",
 ];
+pub const COLOR_NAMES_P: [&str; 16] = [
+    "Белые", "Светло-серые", "Серые", "Чёрные", "Коричневые", "Красные", "Оранжевые", "Жёлтые",
+    "Лаймовые", "Зелёные", "Бирюзовые", "Голубые", "Синие", "Фиолетовые", "Пурпурные", "Розовые",
+];
 pub const COLOR_NAMES_M: [&str; 16] = [
     "Белый", "Светло-серый", "Серый", "Чёрный", "Коричневый", "Красный", "Оранжевый", "Жёлтый",
     "Лаймовый", "Зелёный", "Бирюзовый", "Голубой", "Синий", "Фиолетовый", "Пурпурный", "Розовый",
@@ -675,7 +764,7 @@ fn leak(s: String) -> &'static str {
 fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
     let mut a = Atlas { px: vec![0u8; ATLAS * ATLAS * 4], next: 0 };
     let mut defs: Vec<Option<BlockDef>> = vec![None; BLOCK_COUNT];
-    let mut put = |id: u8, name: &'static str, tex: [u16; 3], shape: Shape, hardness: f32, tool: ToolNeed, cat: Cat, light: u8| {
+    let mut put = |id: u16, name: &'static str, tex: [u16; 3], shape: Shape, hardness: f32, tool: ToolNeed, cat: Cat, light: u8| {
         let solid = matches!(shape, Shape::Cube | Shape::Cutout);
         defs[id as usize] = Some(BlockDef { name, tex, shape, solid, light, hardness, tool, cat });
     };
@@ -778,7 +867,7 @@ fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
     });
     put(OBSIDIAN, "Обсидиан", [t; 3], Cube, 8.0, Pickaxe, Building, 0);
 
-    let ores: [(u8, u8, &str, &str, Px); 8] = [
+    let ores: [(u16, u16, &str, &str, Px); 8] = [
         (COAL_ORE, COAL_BLOCK, "Угольная руда", "Угольный блок", rgb(40, 40, 44)),
         (IRON_ORE, IRON_BLOCK, "Железная руда", "Железный блок", rgb(214, 180, 150)),
         (COPPER_ORE, COPPER_BLOCK, "Медная руда", "Медный блок", rgb(214, 116, 70)),
@@ -797,7 +886,7 @@ fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
     }
 
     // породы деревьев: (бревно, доски, листва, имя, кора, древесина, листья, ягоды)
-    let woods: [(u8, &str, &str, &str, Px, Px, Px, Option<Px>); 5] = [
+    let woods: [(u16, &str, &str, &str, Px, Px, Px, Option<Px>); 5] = [
         (OAK_LOG, "Дубовое бревно", "Дубовые доски", "Дубовая листва", rgb(112, 80, 50), rgb(196, 152, 96), rgb(64, 140, 70), Some(rgb(232, 120, 96))),
         (SPRUCE_LOG, "Еловое бревно", "Еловые доски", "Хвоя", rgb(70, 50, 34), rgb(140, 100, 62), rgb(60, 122, 84), None),
         (BIRCH_LOG, "Берёзовое бревно", "Берёзовые доски", "Берёзовая листва", rgb(226, 222, 210), rgb(222, 204, 150), rgb(110, 168, 72), None),
@@ -869,11 +958,11 @@ fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
     });
     put(CACTUS, "Кактус", [t_ct, t_cs, t_ct], Cutout, 0.5, Any, Nature, 0);
 
-    for i in 0..16u8 {
+    for i in 0..16u16 {
         let t = a.add(t_wool(PALETTE16[i as usize]));
         put(WOOL0 + i, leak(format!("{} шерсть", COLOR_NAMES_F[i as usize])), [t; 3], Cube, 0.8, Any, Colored, 0);
     }
-    for i in 0..16u8 {
+    for i in 0..16u16 {
         let t = a.add(t_concrete(PALETTE16[i as usize]));
         put(CONCRETE0 + i, leak(format!("{} бетон", COLOR_NAMES_M[i as usize])), [t; 3], Cube, 1.8, Pickaxe, Colored, 0);
     }
@@ -1075,12 +1164,12 @@ fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
     let q_top = a.add(t_logtop(rgb(226, 222, 222), rgb(244, 242, 242)));
     let t = a.add(move |x, y| shade(rgb(244, 240, 240), if x == 1 || x == 14 { 0.85 } else { 0.98 + hash(x, y, 719) * 0.03 }));
     put(QUARTZ_PILLAR, "Кварцевая колонна", [q_top, t, q_top], Cube, 1.2, Pickaxe, Building, 0);
-    for i in 0..16u8 {
+    for i in 0..16u16 {
         let c = mix(PALETTE16[i as usize], rgb(160, 90, 60), 0.35);
         let t = a.add(t_noise(c, 0.05, 720 + i as u32));
         put(TERRACOTTA0 + i, leak(format!("{} терракота", COLOR_NAMES_F[i as usize])), [t; 3], Cube, 1.25, Pickaxe, Colored, 0);
     }
-    let mut gi = 0u8;
+    let mut gi = 0u16;
     for i in 0..16usize {
         if matches!(i, 5 | 7 | 9 | 12) {
             continue;
@@ -1096,9 +1185,9 @@ fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
             let frame = x == 0 || y == 0 || x == 15 || y == 15 || (x + y) % 8 == 0 && (x == 1 || x == 14);
             if frame { rgb(70, 60, 50) } else { mix(c, rgb(255, 255, 240), 0.35 + 0.3 * (1.0 - ((x as f32 - 7.5).abs() + (y as f32 - 7.5).abs()) / 15.0)) }
         });
-        put(LAMP0 + k as u8, leak(format!("{} лампа", COLOR_NAMES_F[i])), [t; 3], Cube, 0.4, Any, Decor, 15);
+        put(LAMP0 + k as u16, leak(format!("{} лампа", COLOR_NAMES_F[i])), [t; 3], Cube, 0.4, Any, Decor, 15);
     }
-    let flowers: [(u8, &str, Px, Px); 4] = [
+    let flowers: [(u16, &str, Px, Px); 4] = [
         (TULIP_RED, "Красный тюльпан", rgb(220, 40, 50), rgb(250, 120, 120)),
         (TULIP_ORANGE, "Оранжевый тюльпан", rgb(240, 130, 30), rgb(255, 200, 100)),
         (TULIP_PINK, "Розовый тюльпан", rgb(240, 140, 180), rgb(255, 210, 230)),
@@ -1234,6 +1323,359 @@ fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
     let t = a.add(move |x, y| shade(rgb(232, 226, 206), if x % 5 == 0 { 0.85 } else { 0.97 + hash(x, y, 791) * 0.04 }));
     put(BONE_BLOCK, "Костяной блок", [bt2, t, bt2], Cube, 1.5, Pickaxe, Decor, 0);
 
+    // ===================== v0.9: новые блоки =====================
+    let oak_pl = || t_planks(rgb(196, 152, 96), 510);
+    // породы деревьев: (бревно, имена, кора, древесина, листва, вкрапления)
+    let woods2: [(u16, &str, &str, &str, Px, Px, Px, Option<Px>); 6] = [
+        (MAPLE_LOG, "Кленовое бревно", "Кленовые доски", "Кленовая листва", rgb(98, 82, 70), rgb(206, 140, 96), rgb(214, 88, 40), Some(rgb(250, 190, 60))),
+        (EBONY_LOG, "Эбеновое бревно", "Эбеновые доски", "Эбеновая листва", rgb(44, 36, 34), rgb(74, 52, 44), rgb(44, 96, 58), None),
+        (WILLOW_LOG, "Ивовое бревно", "Ивовые доски", "Ивовая листва", rgb(102, 92, 70), rgb(190, 176, 128), rgb(120, 168, 84), Some(rgb(170, 210, 120))),
+        (ACACIA_LOG, "Акациевое бревно", "Акациевые доски", "Акациевая листва", rgb(110, 104, 96), rgb(206, 112, 58), rgb(120, 150, 50), None),
+        (MANGROVE_LOG, "Мангровое бревно", "Мангровые доски", "Мангровая листва", rgb(90, 56, 40), rgb(140, 60, 56), rgb(70, 130, 60), Some(rgb(110, 170, 80))),
+        (CEDAR_LOG, "Кедровое бревно", "Кедровые доски", "Кедровая хвоя", rgb(120, 70, 50), rgb(186, 110, 80), rgb(48, 104, 80), Some(rgb(130, 90, 50))),
+    ];
+    for (i, (log, nl, np, nv, bark, wood, leaf, dot)) in woods2.iter().enumerate() {
+        let (bark, seed) = (*bark, 900 + i as u32 * 5);
+        // кора с продольными трещинами и сучками
+        let side = a.add(move |x, y| {
+            let groove = (x + (hash(y / 5, x / 4, seed) * 2.0) as i32) % 4 == 0;
+            let knot = ((x - 9).pow(2) + (y - 6).pow(2)) <= 2 && hash(0, 0, seed) > 0.3;
+            let k = if knot { 0.5 } else if groove { 0.68 } else { 0.86 + hash(x, y / 2, seed) * 0.26 };
+            shade(bark, k)
+        });
+        let top = a.add(t_logtop(bark, *wood));
+        put(*log, nl, [top, side, top], Cube, 1.4, Axe, Nature, 0);
+        let t = a.add(t_planks(*wood, 910 + i as u32));
+        put(*log + 1, np, [t; 3], Cube, 1.2, Axe, Building, 0);
+        let t = a.add(t_leaves(*leaf, *dot, 920 + i as u32));
+        put(*log + 2, nv, [t; 3], Cutout, 0.2, Any, Nature, 0);
+    }
+
+    // камень: плитка, резной, кирпич, полированный
+    let stones: [(&str, &str, &str, Px); 7] = [
+        ("Каменная", "Резной камень", "камень", rgb(132, 136, 144)),
+        ("Гранитная", "Резной гранит", "гранит", rgb(172, 112, 96)),
+        ("Мраморная", "Резной мрамор", "мрамор", rgb(232, 230, 226)),
+        ("Базальтовая", "Резной базальт", "базальт", rgb(70, 70, 78)),
+        ("Туфовая", "Резной туф", "туф", rgb(112, 114, 100)),
+        ("Обсидиановая", "Резной обсидиан", "обсидиан", rgb(40, 30, 56)),
+        ("Сланцевая", "Резной сланец", "сланец", rgb(74, 78, 90)),
+    ];
+    let tile_ids = [STONE_TILES, GRANITE_TILES, MARBLE_TILES, BASALT_TILES, TUFF_TILES, OBSIDIAN_TILES];
+    for (i, &id) in tile_ids.iter().enumerate() {
+        let (adj, _, _, c) = stones[i];
+        let seed = 940 + i as u32;
+        let t = a.add(move |x, y| {
+            let (u, v) = (x % 8, y % 8);
+            let k = if u == 7 || v == 7 { 0.62 } else if u == 0 || v == 0 { 1.14 } else if u == 6 || v == 6 { 0.86 } else { 0.94 + blotch(x, y, seed) * 0.12 };
+            shade(c, k)
+        });
+        put(id, leak(format!("{adj} плитка")), [t; 3], Cube, 1.6, Pickaxe, Building, 0);
+    }
+    let chis_ids = [CHISELED_GRANITE, CHISELED_MARBLE, CHISELED_BASALT, CHISELED_TUFF, CHISELED_OBSIDIAN, CHISELED_SLATE];
+    for (k, &id) in chis_ids.iter().enumerate() {
+        let (_, name, _, c) = stones[k + 1];
+        let seed = 950 + k as u32;
+        let motif = k % 3;
+        let t = a.add(move |x, y| {
+            let frame = x == 0 || y == 0 || x == 15 || y == 15;
+            let inner = x == 2 || y == 2 || x == 13 || y == 13;
+            let (dx, dy) = ((x as f32 - 7.5).abs(), (y as f32 - 7.5).abs());
+            let carve = match motif {
+                0 => (dx + dy - 4.5).abs() < 0.8,                                  // ромб
+                1 => ((dx * dx + dy * dy).sqrt() - 4.0).abs() < 0.7 || (dx < 0.6 && dy < 3.0), // круг с осью
+                _ => (dx < 0.6 || dy < 0.6) && dx + dy < 5.0 || (dx - dy).abs() < 0.6 && dx < 4.0, // звезда
+            };
+            let k = if frame { 0.58 } else if inner && (2..=13).contains(&x) && (2..=13).contains(&y) { 0.78 } else if carve { 0.66 } else { 0.95 + blotch(x, y, seed) * 0.1 };
+            let k = if !frame && (x == 1 || y == 1) { 1.18 } else { k };
+            shade(c, k)
+        });
+        put(id, name, [t; 3], Cube, 1.8, Pickaxe, Building, 0);
+    }
+    for (k, &id) in [GRANITE_BRICKS, MARBLE_BRICKS, BASALT_BRICKS].iter().enumerate() {
+        let (_, _, n, c) = stones[k + 1];
+        let t = a.add(t_bricks(c, shade(c, 0.55), 8, 4, 960 + k as u32));
+        let adj = ["Гранитный", "Мраморный", "Базальтовый"][k];
+        let _ = n;
+        put(id, leak(format!("{adj} кирпич")), [t; 3], Cube, 1.8, Pickaxe, Building, 0);
+    }
+    let pol: [(u16, &str, Px); 4] = [
+        (SMOOTH_STONE, "Гладкий камень", rgb(150, 154, 160)),
+        (POLISHED_SLATE, "Полированный сланец", rgb(74, 78, 90)),
+        (POLISHED_TUFF, "Полированный туф", rgb(112, 114, 100)),
+        (POLISHED_OBSIDIAN, "Полированный обсидиан", rgb(40, 30, 56)),
+    ];
+    for (k, (id, n, c)) in pol.into_iter().enumerate() {
+        let seed = 970 + k as u32;
+        let t = a.add(move |x, y| {
+            let edge = x == 0 || y == 0 || x == 15 || y == 15;
+            let glint = x + y == 6 && x > 1 && y > 1;
+            shade(c, if edge { 0.7 } else if glint { 1.25 } else { 0.97 + hash(x, y, seed) * 0.05 + (y as f32) * -0.006 })
+        });
+        put(id, n, [t; 3], Cube, 1.6, Pickaxe, Building, 0);
+    }
+
+    // глазурованные изразцы — симметричный узор по четвертям
+    for i in 0..16u16 {
+        let c = PALETTE16[i as usize];
+        let accent = PALETTE16[[11, 0, 3, 0, 7, 7, 12, 4, 9, 7, 0, 0, 7, 7, 0, 14][i as usize]];
+        let seed = 980 + i as u32;
+        let t = a.add(move |x, y| {
+            let (qx, qy) = (if x < 8 { x } else { 15 - x }, if y < 8 { y } else { 15 - y });
+            let v = hash(qx.min(qy), qx.max(qy), seed);
+            let ring = qx + qy == 7 || qx + qy == 4;
+            let corner = qx < 2 && qy < 2;
+            if corner || ring { accent } else if v > 0.72 { mix(c, accent, 0.45) } else { shade(c, 0.9 + v * 0.18) }
+        });
+        put(GLAZED0 + i, leak(format!("{} изразец", COLOR_NAMES_M[i as usize])), [t; 3], Cube, 1.4, Pickaxe, Colored, 0);
+    }
+    // недостающие цветные лампы
+    for (k, &i) in [1usize, 2, 3, 4, 9, 10, 12, 14].iter().enumerate() {
+        let c = PALETTE16[i];
+        let t = a.add(move |x, y| {
+            let frame = x == 0 || y == 0 || x == 15 || y == 15 || (x + y) % 8 == 0 && (x == 1 || x == 14);
+            if frame { rgb(70, 60, 50) } else { mix(c, rgb(255, 255, 240), 0.35 + 0.3 * (1.0 - ((x as f32 - 7.5).abs() + (y as f32 - 7.5).abs()) / 15.0)) }
+        });
+        put(LAMP_EXTRA0 + k as u16, leak(format!("{} лампа", COLOR_NAMES_F[i])), [t; 3], Cube, 0.4, Any, Decor, 15);
+    }
+    // крашеные доски
+    for i in 0..16u16 {
+        let c = mix(PALETTE16[i as usize], rgb(170, 130, 90), 0.25);
+        let t = a.add(t_planks(c, 1000 + i as u32));
+        put(PAINTED_PLANKS0 + i, leak(format!("{} доски", COLOR_NAMES_P[i as usize])), [t; 3], Cube, 1.2, Axe, Colored, 0);
+    }
+    // металл и самоцветы: резные блоки и колонны
+    let metals: [(&str, &str, Px); 8] = [
+        ("Резной медный блок", "Медная колонна", rgb(214, 120, 70)),
+        ("Резной железный блок", "Железная колонна", rgb(214, 216, 222)),
+        ("Резной золотой блок", "Золотая колонна", rgb(248, 206, 60)),
+        ("Резной рубиновый блок", "Рубиновая колонна", rgb(220, 40, 70)),
+        ("Резной сапфировый блок", "Сапфировая колонна", rgb(50, 100, 230)),
+        ("Резной малахитовый блок", "Малахитовая колонна", rgb(40, 180, 120)),
+        ("Резной кристаллический блок", "Кристаллическая колонна", rgb(150, 110, 244)),
+        ("Резной небесный блок", "Небесная колонна", rgb(255, 236, 180)),
+    ];
+    for (k, (n1, n2, c)) in metals.into_iter().enumerate() {
+        let seed = 1020 + k as u32;
+        let t = a.add(move |x, y| {
+            let edge = x == 0 || y == 0 || x == 15 || y == 15;
+            let rivet = (x == 2 || x == 13) && (y == 2 || y == 13);
+            let (dx, dy) = ((x as f32 - 7.5).abs(), (y as f32 - 7.5).abs());
+            let groove = (dx.max(dy) - 4.0).abs() < 0.6 || (dx.max(dy) < 2.0 && (dx - dy).abs() < 0.7);
+            let k = if edge { 0.55 } else if rivet { 1.4 } else if groove { 0.72 } else if x == 1 || y == 1 { 1.25 } else { 0.95 + hash(x, y, seed) * 0.08 };
+            shade(c, k)
+        });
+        put(CHISELED_METAL0 + k as u16, n1, [t; 3], Cube, 3.0, Pickaxe, Ores, 0);
+        let side = a.add(move |x, y| {
+            let band = y < 2 || y > 13;
+            let flute = x % 4 == 0;
+            let k = if band { if y == 0 || y == 15 { 0.6 } else { 1.2 } } else if flute { 0.7 } else { 1.0 + (((x % 4) as f32 - 2.0).abs() * -0.06) + hash(x, y, seed) * 0.05 };
+            shade(c, k)
+        });
+        let top = a.add(move |x, y| {
+            let r = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+            shade(c, if r > 6.5 { 0.65 } else if (r - 4.0).abs() < 0.6 { 0.8 } else { 1.05 })
+        });
+        put(METAL_PILLAR0 + k as u16, n2, [top, side, top], Cube, 3.0, Pickaxe, Ores, 0);
+    }
+    for (id, n, c) in [(COPPER_GRATE, "Медная решётка", rgb(214, 120, 70)), (GOLD_GRATE, "Золотая решётка", rgb(248, 206, 60)), (HEAVEN_GRATE, "Небесная решётка", rgb(255, 236, 180))] {
+        let t = a.add(move |x, y| {
+            let bar = x % 5 == 0 || y % 5 == 0 || x == 15 || y == 15;
+            if bar { shade(c, if (x + y) % 3 == 0 { 1.2 } else { 0.85 }) } else { CLEAR }
+        });
+        put(id, n, [t; 3], Cutout, 2.0, Pickaxe, Decor, 0);
+    }
+
+    // природа
+    let my_top = a.add(move |x, y| if hash(x, y, 1040) > 0.85 { rgb(170, 140, 180) } else { shade(rgb(120, 96, 120), 0.82 + blotch(x, y, 1041) * 0.3) });
+    let my_side = a.add(t_grass_side(rgb(120, 96, 120), dirt_f, 1042));
+    put(MYCELIUM, "Мицелий", [my_top, my_side, t_dirt], Cube, 0.6, Shovel, Nature, 0);
+    let t = a.add(move |x, y| {
+        let (d1, d2, id) = cells(x, y, 1043, 4);
+        if d2 - d1 < 0.55 { rgb(96, 64, 40) } else { shade(rgb(176, 130, 86), 0.86 + hash(id, 1, 1044) * 0.2 - d1 * 0.02) }
+    });
+    put(CRACKED_EARTH, "Растрескавшаяся земля", [t; 3], Cube, 0.6, Shovel, Nature, 0);
+    let t = a.add(t_speck(rgb(52, 50, 56), 0.1, rgb(120, 120, 130), 0.06, 1045));
+    put(BLACK_SAND, "Чёрный песок", [t; 3], Cube, 0.5, Shovel, Nature, 0);
+    let t = a.add(move |x, y| {
+        let root = ((x as f32 + (y as f32 * 0.6).sin() * 2.0) as i32 % 6 == 0) && hash(x, y / 3, 1046) > 0.3;
+        if root { rgb(170, 130, 90) } else { dirt_f(x, y) }
+    });
+    put(ROOTED_DIRT, "Земля с корнями", [t; 3], Cube, 0.6, Shovel, Nature, 0);
+    let t = a.add(move |x, y| if hash(x, y, 1047) > 0.9 { rgb(200, 255, 170) } else { shade(rgb(70, 150, 90), 0.8 + blotch(x, y, 1048) * 0.4) });
+    put(GLOW_MOSS, "Светящийся мох", [t; 3], Cube, 0.3, Any, Nature, 10);
+    let t = a.add(move |x, y| {
+        let col = (x as f32 * 0.9 + (y as f32 * 0.3).sin()) as i32;
+        shade(rgb(150, 116, 96), 0.8 + hash(col, 0, 1049) * 0.3 - (y as f32) * 0.008)
+    });
+    put(DRIPSTONE, "Капельник", [t; 3], Cube, 1.5, Pickaxe, Nature, 0);
+    let t = a.add(move |x, y| if hash(x, y, 1050) > 0.93 { rgb(210, 210, 214) } else { shade(rgb(236, 236, 232), 0.95 + blotch(x, y, 1051) * 0.07) });
+    put(CALCITE, "Кальцит", [t; 3], Cube, 0.8, Pickaxe, Nature, 0);
+    let t = a.add(t_layers(rgb(214, 204, 176), 1052));
+    put(LIMESTONE, "Известняк", [t; 3], Cube, 1.0, Pickaxe, Building, 0);
+    let t = a.add(t_noise(rgb(246, 244, 236), 0.04, 1053));
+    put(CHALK, "Мел", [t; 3], Cube, 0.5, Pickaxe, Nature, 0);
+    for (id, n, c) in [(CORAL_PINK, "Розовый коралл", rgb(240, 120, 170)), (CORAL_PURPLE, "Фиолетовый коралл", rgb(150, 70, 200))] {
+        let t = a.add(move |x, y| {
+            let (d1, _, _) = cells(x, y, 1054, 4);
+            shade(c, if d1 < 0.9 { 1.25 } else if d1 < 1.6 { 0.75 } else { 0.95 + hash(x, y, 1055) * 0.1 })
+        });
+        put(id, n, [t; 3], Cube, 0.6, Any, Nature, 0);
+    }
+    let kelp_side = a.add(move |x, y| shade(rgb(60, 80, 46), if x % 3 == 0 { 0.7 } else { 0.92 + hash(x, y, 1056) * 0.15 }));
+    let kelp_top = a.add(move |x, y| shade(rgb(70, 92, 52), if (x + y) % 4 == 0 { 0.75 } else { 1.0 }));
+    put(KELP_BLOCK, "Блок сушёной ламинарии", [kelp_top, kelp_side, kelp_top], Cube, 0.5, Any, Nature, 0);
+    let t = a.add(move |x, y| shade(rgb(222, 234, 246), 0.9 + hash(x / 2, y / 2, 1057) * 0.1));
+    put(SNOW_PACKED, "Утоптанный снег", [t; 3], Cube, 0.4, Shovel, Nature, 0);
+    // растения
+    let t = a.add(t_flower(rgb(220, 140, 230), rgb(255, 240, 120)));
+    put(ORCHID, "Орхидея", [t; 3], Cross, 0.0, Any, Nature, 0);
+    let t = a.add(move |x, y| {
+        let r = ((x as f32 - 7.5).powi(2) + (y as f32 - 5.0).powi(2)).sqrt();
+        if r < 4.6 { shade(rgb(250, 150, 180), 0.8 + ((r * 2.4).sin() * 0.2) + hash(x, y, 1058) * 0.1) } else if (x == 7 || x == 8) && y > 8 { rgb(70, 130, 50) } else if y == 11 && (x == 5 || x == 10 || x == 6 || x == 9) { rgb(90, 160, 60) } else { CLEAR }
+    });
+    put(PEONY, "Пион", [t; 3], Cross, 0.0, Any, Nature, 0);
+    let t = a.add(move |x, y| {
+        let leaf = |cx: f32, cy: f32| ((x as f32 - cx).powi(2) + (y as f32 - cy).powi(2)) < 3.2;
+        if leaf(5.0, 9.0) || leaf(10.0, 9.0) || leaf(7.5, 6.5) { shade(rgb(80, 170, 70), 0.85 + hash(x, y, 1059) * 0.2) } else if x == 7 && y > 10 { rgb(60, 130, 50) } else if hash(x, y, 1060) > 0.97 && y < 6 { rgb(240, 240, 250) } else { CLEAR }
+    });
+    put(CLOVER, "Клевер", [t; 3], Cross, 0.0, Any, Nature, 0);
+    let t = a.add(move |x, y| {
+        let head = (x == 7 || x == 8) && (2..=6).contains(&y);
+        let stem = (x == 7 || x == 8) && y > 6;
+        let leaf = (x == 4 && y > 5) || (x == 11 && y > 7) || (x == 5 && y > 9);
+        if head { shade(rgb(110, 70, 40), 0.9 + hash(x, y, 1061) * 0.2) } else if stem || leaf { shade(rgb(100, 150, 70), 0.9 + hash(x, y, 1062) * 0.2) } else { CLEAR }
+    });
+    put(CATTAIL, "Рогоз", [t; 3], Cross, 0.0, Any, Nature, 0);
+    let t = a.add(move |x, y| {
+        let head = ((x as f32 - 7.5).powi(2) + (y as f32 - 4.0).powi(2)) < 7.0;
+        let spikes = y > 5 && (x - 8).abs() + (y - 9).abs() < 4 && (x + y) % 2 == 0;
+        if head { if y < 3 { rgb(170, 90, 200) } else { rgb(110, 140, 80) } } else if spikes || ((x == 7 || x == 8) && y > 6) { rgb(90, 130, 70) } else { CLEAR }
+    });
+    put(THISTLE, "Чертополох", [t; 3], Cross, 0.0, Any, Nature, 0);
+    let t = a.add(move |x, y| {
+        let r = ((x as f32 - 7.5).powi(2) + (y as f32 - 5.5).powi(2)).sqrt();
+        if r < 3.5 { mix(rgb(255, 80, 20), rgb(255, 230, 90), 1.0 - r / 3.5) } else if (x == 7 || x == 8) && y > 8 { rgb(80, 60, 50) } else { CLEAR }
+    });
+    put(FIREFLOWER, "Огнецвет", [t; 3], Cross, 0.0, Any, Nature, 9);
+    let t = a.add(mush(rgb(60, 110, 230), true));
+    put(BLUE_MUSHROOM, "Синий гриб", [t; 3], Cross, 0.0, Any, Nature, 6);
+
+    // декор
+    let t = a.add(move |x, y| {
+        let blk = ((x / 4) + (y / 4)) % 2 == 0;
+        let along = if blk { x % 4 } else { y % 4 };
+        let base = if blk { rgb(170, 120, 70) } else { rgb(150, 100, 58) };
+        shade(base, if along == 3 { 0.65 } else { 0.9 + hash(x / 2, y, 1063) * 0.15 })
+    });
+    put(PARQUET, "Паркет", [t; 3], Cube, 1.2, Axe, Building, 0);
+    let t = a.add(move |x, y| {
+        let w = ((x / 4) + (y / 4)) % 2 == 0;
+        if w { shade(rgb(236, 232, 224), 0.96 + hash(x, y, 1064) * 0.05) } else { shade(rgb(40, 40, 46), 0.9 + hash(x, y, 1065) * 0.15) }
+    });
+    put(CHECKER_TILES, "Шахматная плитка", [t; 3], Cube, 1.5, Pickaxe, Building, 0);
+    let crate_side = t_planks(rgb(170, 124, 72), 1066);
+    let crate_side_t = a.add(move |x, y| { let fr = x < 2 || x > 13 || y < 2 || y > 13; if fr { shade(rgb(120, 84, 48), 0.9 + hash(x, y, 1067) * 0.1) } else { crate_side(x, y) } });
+    let crate_top = |fruit: Px, fruit2: Px, seed: u32| {
+        move |x: i32, y: i32| {
+            let fr = x < 2 || x > 13 || y < 2 || y > 13;
+            if fr { return shade(rgb(120, 84, 48), 0.9 + hash(x, y, seed) * 0.1) }
+            let (d1, _, id) = cells(x, y, seed, 4);
+            if d1 < 1.5 { if d1 < 0.6 { shade(fruit, 1.3) } else if hash(id, 2, seed) > 0.5 { fruit } else { fruit2 } } else { rgb(70, 46, 26) }
+        }
+    };
+    let t = a.add(crate_top(rgb(200, 40, 40), rgb(160, 200, 60), 1068));
+    put(APPLE_CRATE, "Ящик яблок", [t, crate_side_t, crate_side_t], Cube, 1.0, Axe, Decor, 0);
+    let t = a.add(crate_top(rgb(240, 130, 30), rgb(220, 110, 20), 1069));
+    put(CARROT_CRATE, "Ящик моркови", [t, crate_side_t, crate_side_t], Cube, 1.0, Axe, Decor, 0);
+    let t = a.add(crate_top(rgb(200, 170, 110), rgb(170, 140, 90), 1070));
+    put(POTATO_CRATE, "Ящик картофеля", [t, crate_side_t, crate_side_t], Cube, 1.0, Axe, Decor, 0);
+    let fb_side = a.add(move |x, y| { let hoop = y == 2 || y == 13; if hoop { rgb(90, 90, 96) } else { shade(rgb(140, 96, 56), if x % 4 == 0 { 0.7 } else { 0.92 + hash(x, y, 1071) * 0.1 }) } });
+    let fb_top = a.add(move |x, y| {
+        let r = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+        if r > 6.8 { rgb(90, 90, 96) } else { let (d1, _, _) = cells(x, y, 1072, 3); if d1 < 1.6 { shade(rgb(150, 180, 200), 1.0 + (1.6 - d1) * 0.2) } else { rgb(50, 60, 70) } }
+    });
+    put(FISH_BARREL, "Бочка с рыбой", [fb_top, fb_side, fb_top], Cube, 1.2, Axe, Decor, 0);
+    let pl_top = a.add(t_planks(rgb(196, 152, 96), 510));
+    let op = oak_pl();
+    let t = a.add(move |x, y| {
+        if y < 2 || y > 13 || y == 7 || y == 8 { return op(x, y) }
+        let shelf_y = if y < 7 { 6 } else { 13 };
+        let jar = x / 4;
+        let cols = [rgb(220, 160, 40), rgb(180, 40, 60), rgb(120, 170, 70), rgb(200, 120, 200)];
+        let c = cols[(hash(jar, shelf_y, 1073) * 4.0) as usize % 4];
+        let lid = y == shelf_y - 4;
+        if x % 4 == 0 { rgb(60, 40, 24) } else if lid { rgb(150, 110, 70) } else if y < shelf_y - 4 { rgb(60, 40, 24) } else if x % 4 == 1 { shade(c, 1.3) } else { c }
+    });
+    put(JAR_SHELF, "Полка с банками", [pl_top, t, pl_top], Cube, 1.2, Axe, Decor, 0);
+    let op = oak_pl();
+    let t = a.add(move |x, y| {
+        if y < 2 || y > 13 || y == 7 || y == 8 { return op(x, y) }
+        let slot = (x / 3, if y < 7 { 0 } else { 1 });
+        let cy = if y < 7 { 4.5 } else { 11.0 };
+        let r = ((x % 3) as f32 - 1.0).abs() + (y as f32 - cy).abs() * 0.4;
+        if r < 1.3 && hash(slot.0, slot.1, 1074) > 0.15 { mix(rgb(236, 220, 180), rgb(190, 160, 110), (x % 3) as f32 / 3.0) } else { rgb(50, 34, 20) }
+    });
+    put(SCROLL_SHELF, "Полка со свитками", [pl_top, t, pl_top], Cube, 1.2, Axe, Decor, 0);
+    let safe_side = a.add(move |x, y| { let e = x == 0 || y == 0 || x == 15 || y == 15; shade(rgb(80, 86, 96), if e { 0.6 } else if x == 1 || y == 1 { 1.2 } else { 0.95 + hash(x, y, 1075) * 0.05 }) });
+    let safe_front = a.add(move |x, y| {
+        let e = x == 0 || y == 0 || x == 15 || y == 15;
+        let door = (2..=13).contains(&x) && (2..=13).contains(&y);
+        let r = ((x as f32 - 9.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+        if e { rgb(50, 54, 60) } else if r < 2.2 { if r < 1.0 { rgb(220, 200, 120) } else { rgb(180, 160, 90) } } else if x == 4 && (6..=9).contains(&y) { rgb(200, 200, 210) } else if door { shade(rgb(90, 96, 108), if x == 2 || y == 2 { 1.2 } else { 1.0 }) } else { rgb(70, 74, 84) }
+    });
+    put(SAFE, "Сейф", [safe_side, safe_front, safe_side], Cube, 6.0, Pickaxe, Decor, 0);
+    let op = oak_pl();
+    let t = a.add(move |x, y| {
+        let r = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt();
+        let hand1 = x == 7 && (3..=7).contains(&y);
+        let hand2 = y == 8 && (8..=11).contains(&x);
+        let tick = (r - 5.5).abs() < 0.6 && ((x - 7).abs() < 1 || (y - 7).abs() < 1 || (x - 8).abs() < 1 || (y - 8).abs() < 1);
+        if r > 7.2 { op(x, y) } else if r > 6.4 { rgb(200, 160, 60) } else if hand1 || hand2 { rgb(30, 30, 36) } else if tick { rgb(80, 80, 90) } else { rgb(244, 238, 222) }
+    });
+    put(CLOCK_BLOCK, "Настенные часы", [pl_top, t, pl_top], Cube, 1.0, Axe, Decor, 0);
+    let t = a.add(move |x, y| {
+        let e = x == 0 || y == 0 || x == 15 || y == 15;
+        let land = blotch(x + 3, y, 1076) > 0.55;
+        let grid = x % 5 == 2 || y % 5 == 2;
+        if e { rgb(110, 76, 46) } else if land { shade(rgb(150, 170, 90), if grid { 0.85 } else { 1.0 }) } else { shade(rgb(214, 200, 160), if grid { 0.9 } else { 1.0 + hash(x, y, 1077) * 0.05 }) }
+    });
+    put(MAP_BLOCK, "Карта мира", [pl_top, t, pl_top], Cube, 0.8, Axe, Decor, 0);
+    let t = a.add(move |x, y| {
+        let lead = x == 0 || y == 0 || x == 15 || y == 15 || x == 7 || y == 7 || (x - y).abs() == 0 || (x + y) == 15;
+        let cols = [rgb(220, 60, 60), rgb(60, 110, 220), rgb(240, 200, 60), rgb(70, 170, 90)];
+        if lead { rgb(40, 40, 46) } else { let q = (x > 7) as usize + 2 * (y > 7) as usize; shade(cols[(q + (x > y) as usize) % 4], 0.9 + hash(x, y, 1078) * 0.2) }
+    });
+    put(STAINED_WINDOW, "Витраж", [t; 3], Cutout, 0.3, Any, Decor, 0);
+    let t = a.add(move |x, y| {
+        let rib = y % 4 == 0;
+        let e = x == 0 || x == 15;
+        let d = ((x as f32 - 7.5).abs() / 8.0).powi(2);
+        if y < 1 || y > 14 { rgb(40, 30, 26) } else if e || rib { rgb(150, 50, 40) } else { mix(rgb(255, 120, 70), rgb(255, 220, 140), 1.0 - d) }
+    });
+    put(PAPER_LANTERN, "Бумажный фонарь", [t; 3], Cube, 0.3, Any, Decor, 14);
+    let op = oak_pl();
+    let t = a.add(move |x, y| {
+        let blade = |cx: i32| x == cx && (2..=11).contains(&y);
+        let hilt = |cx: i32| (x - cx).abs() <= 1 && y == 11;
+        if blade(4) || blade(8) || blade(12) { rgb(210, 214, 222) } else if hilt(4) || hilt(8) || hilt(12) { rgb(200, 160, 60) } else if y == 13 || y == 1 { rgb(90, 60, 34) } else { op(x, y) }
+    });
+    put(WEAPON_RACK, "Стойка с оружием", [pl_top, t, pl_top], Cube, 1.2, Axe, Decor, 0);
+    let t = a.add(move |x, y| {
+        let border = x < 2 || x > 13 || y < 2 || y > 13;
+        let (dx, dy) = ((x as f32 - 7.5).abs(), (y as f32 - 7.5).abs());
+        let emblem = dx + dy < 4.0 && (dx + dy) > 2.0 || dx < 0.6 && dy < 1.0;
+        if y == 0 { rgb(90, 60, 34) } else if border { if (x + y) % 2 == 0 { rgb(220, 180, 60) } else { rgb(130, 30, 40) } } else if emblem { rgb(240, 210, 90) } else { shade(rgb(150, 30, 44), 0.9 + hash(x, y, 1079) * 0.12) }
+    });
+    put(TAPESTRY, "Гобелен", [t; 3], Cube, 0.8, Any, Decor, 0);
+    let t = a.add(move |x, y| {
+        let (dx, dy) = ((x as f32 - 7.5).abs(), (y as f32 - 7.5).abs());
+        let m = (dx + dy) as i32;
+        let cols = [rgb(170, 40, 40), rgb(230, 200, 140), rgb(40, 60, 120), rgb(200, 120, 50)];
+        if x == 0 || y == 0 || x == 15 || y == 15 { rgb(120, 30, 30) } else { shade(cols[(m / 2) as usize % 4], 0.92 + hash(x, y, 1080) * 0.1) }
+    });
+    put(RUG_BLOCK, "Узорный ковёр", [t; 3], Cube, 0.8, Any, Decor, 0);
+
     // портал проходим насквозь
     let portal = defs[PORTAL as usize].as_mut().unwrap();
     portal.solid = false;
@@ -1244,8 +1686,8 @@ fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
     }
 
     let defs: Vec<BlockDef> = defs.into_iter().enumerate().map(|(i, d)| d.unwrap_or_else(|| panic!("блок {i} не описан"))).collect();
-    let mut opaque = [false; 256];
-    let mut solid = [false; 256];
+    let mut opaque = vec![false; BLOCK_COUNT];
+    let mut solid = vec![false; BLOCK_COUNT];
     for (i, d) in defs.iter().enumerate() {
         opaque[i] = d.shape == Shape::Cube;
         solid[i] = d.solid;
@@ -1284,5 +1726,20 @@ mod tests {
         assert!(!is_opaque(GLASS));
         assert!(!is_solid(WATER));
         assert_eq!(atlas_pixels().len(), ATLAS * ATLAS * 4);
+    }
+}
+
+#[cfg(test)]
+mod atlas_dump {
+    #[test]
+    #[ignore]
+    fn dump_atlas() {
+        if let Ok(p) = std::env::var("RK_ATLAS_OUT") {
+            std::fs::write(&p, super::atlas_pixels()).unwrap();
+            let blocks: Vec<String> = (250..super::BLOCK_COUNT as u16).map(|b| super::def(b).tex[1].to_string()).collect();
+            let weapons: Vec<String> = (70..130).map(|i| super::item_tile(i).to_string()).collect();
+            let things: Vec<String> = (crate::items::EXTRA0..crate::items::EXTRA0 + crate::items::EXTRA_COUNT).map(|t| super::item_tile(crate::items::THING_SPRITES + t as usize).to_string()).collect();
+            std::fs::write(format!("{p}.txt"), format!("{}\n{}\n{}\n", blocks.join(","), weapons.join(","), things.join(","))).unwrap();
+        }
     }
 }

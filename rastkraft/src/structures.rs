@@ -18,13 +18,13 @@ pub struct SB<'a, 'b> {
 }
 
 impl SB<'_, '_> {
-    fn p(&mut self, x: i32, y: i32, z: i32, b: u8) {
+    fn p(&mut self, x: i32, y: i32, z: i32, b: u16) {
         self.g.set(self.ox + x, self.oy + y, self.oz + z, b);
     }
-    fn get(&self, x: i32, y: i32, z: i32) -> u8 {
+    fn get(&self, x: i32, y: i32, z: i32) -> u16 {
         self.g.get(self.ox + x, self.oy + y, self.oz + z)
     }
-    fn fill(&mut self, x0: i32, y0: i32, z0: i32, x1: i32, y1: i32, z1: i32, b: u8) {
+    fn fill(&mut self, x0: i32, y0: i32, z0: i32, x1: i32, y1: i32, z1: i32, b: u16) {
         for y in y0.min(y1)..=y0.max(y1) {
             for z in z0.min(z1)..=z0.max(z1) {
                 for x in x0.min(x1)..=x0.max(x1) {
@@ -33,7 +33,7 @@ impl SB<'_, '_> {
             }
         }
     }
-    fn walls(&mut self, x0: i32, y0: i32, z0: i32, x1: i32, y1: i32, z1: i32, b: u8) {
+    fn walls(&mut self, x0: i32, y0: i32, z0: i32, x1: i32, y1: i32, z1: i32, b: u16) {
         for y in y0..=y1 {
             for z in z0..=z1 {
                 for x in x0..=x1 {
@@ -48,7 +48,7 @@ impl SB<'_, '_> {
         self.fill(x0, y0, z0, x1, y1, z1, AIR);
     }
     /// Фундамент: заполняет пустоту под площадкой до земли.
-    fn found(&mut self, x0: i32, z0: i32, x1: i32, z1: i32, b: u8) {
+    fn found(&mut self, x0: i32, z0: i32, x1: i32, z1: i32, b: u16) {
         for z in z0..=z1 {
             for x in x0..=x1 {
                 let mut y = -1;
@@ -64,7 +64,7 @@ impl SB<'_, '_> {
         }
     }
     /// Двускатная крыша вдоль X.
-    fn gable(&mut self, x0: i32, x1: i32, z0: i32, z1: i32, y: i32, b: u8) {
+    fn gable(&mut self, x0: i32, x1: i32, z0: i32, z1: i32, y: i32, b: u16) {
         let mut k = 0;
         while z0 + k <= z1 - k {
             self.fill(x0, y + k, z0 + k, x1, y + k, z0 + k, b);
@@ -72,7 +72,7 @@ impl SB<'_, '_> {
             k += 1;
         }
     }
-    fn pyramid(&mut self, x0: i32, z0: i32, x1: i32, z1: i32, y: i32, b: u8, hollow: bool) {
+    fn pyramid(&mut self, x0: i32, z0: i32, x1: i32, z1: i32, y: i32, b: u16, hollow: bool) {
         let mut k = 0;
         while x0 + k <= x1 - k && z0 + k <= z1 - k {
             if hollow {
@@ -83,7 +83,7 @@ impl SB<'_, '_> {
             k += 1;
         }
     }
-    fn cyl(&mut self, r: f32, y0: i32, y1: i32, b: u8, hollow: bool) {
+    fn cyl(&mut self, r: f32, y0: i32, y1: i32, b: u16, hollow: bool) {
         let ri = r.ceil() as i32;
         for z in -ri..=ri {
             for x in -ri..=ri {
@@ -94,7 +94,7 @@ impl SB<'_, '_> {
             }
         }
     }
-    fn dome(&mut self, r: f32, y: i32, b: u8) {
+    fn dome(&mut self, r: f32, y: i32, b: u16) {
         let ri = r.ceil() as i32;
         for dy in 0..=ri {
             for z in -ri..=ri {
@@ -803,7 +803,7 @@ fn heaven(s: &mut SB, kind: usize) {
     }
 }
 
-const SPRUCE_PLANKS_ID: u8 = SPRUCE_LOG + 1;
+const SPRUCE_PLANKS_ID: u16 = SPRUCE_LOG + 1;
 
 #[cfg(test)]
 mod tests {

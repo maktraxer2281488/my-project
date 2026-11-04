@@ -264,7 +264,7 @@ fn dim_code(d: Dim) -> u8 {
 }
 
 /// Изменение блока: мир, перестройка геометрии и (по сети) другим игрокам.
-fn edit_block(app: &mut App, dim: Dim, p: IVec3, b: u8, share: bool) {
+fn edit_block(app: &mut App, dim: Dim, p: IVec3, b: u16, share: bool) {
     let smooth = app.settings.smooth_light;
     let Some(g) = app.game.as_mut() else { return };
     let w = &mut g.worlds[dim as usize];
@@ -540,7 +540,7 @@ fn process_net(app: &mut App) {
     let Some(g) = app.game.as_mut() else { return };
     let Some(n) = g.net.take() else { return };
     let msgs = n.poll();
-    let mut edits: Vec<(Dim, IVec3, u8)> = Vec::new();
+    let mut edits: Vec<(Dim, IVec3, u16)> = Vec::new();
     let mut lost = false;
     for (from, m) in msgs {
         match m {
@@ -919,7 +919,7 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
     let invert = if app.settings.invert_mouse { -1.0 } else { 1.0 };
     let difficulty = app.settings.difficulty;
     let pvp = app.settings.pvp;
-    let mut edits: Vec<(IVec3, u8)> = Vec::new();
+    let mut edits: Vec<(IVec3, u16)> = Vec::new();
     let mut to_dim: Option<Dim> = None;
     let mut died = false;
     let mut open_inv = false;
@@ -1139,6 +1139,17 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                         g.mobs.list[mi].hurt_t = 0.3;
                     } else {
                         g.mobs.list[mi].damage(dmg, from);
+                        // секира, коса и алебарда при полном замахе задевают соседей цели
+                        if let Item::Tool(k, _) = held {
+                            if k.sweeps() && charge > 0.9 {
+                                let center = g.mobs.list[mi].body.pos;
+                                for (j, o) in g.mobs.list.iter_mut().enumerate() {
+                                    if j != mi && o.alive() && o.body.pos.distance(center) < 2.5 {
+                                        o.damage(dmg * 0.5, from);
+                                    }
+                                }
+                            }
+                        }
                     }
                     let m = &g.mobs.list[mi];
                     let d = m.d();
