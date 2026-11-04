@@ -4,7 +4,7 @@
 use std::sync::OnceLock;
 
 pub const TILE: usize = 16;
-pub const ATLAS_TILES: usize = 32;
+pub const ATLAS_TILES: usize = 64;
 pub const ATLAS: usize = TILE * ATLAS_TILES;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -283,6 +283,27 @@ pub fn atlas_pixels() -> &'static [u8] {
 /// Плитка спрайта предмета/интерфейса (индексы см. items.rs).
 pub fn item_tile(i: usize) -> u16 {
     all().2[i]
+}
+
+fn extra_base() -> usize {
+    crate::items::THING_SPRITES + crate::items::things().len()
+}
+
+/// Чисто белая плитка (для одноцветных моделей).
+pub fn white_tile() -> u16 {
+    all().2[extra_base()]
+}
+
+/// Мягкая круглая тень.
+pub fn shadow_tile() -> u16 {
+    all().2[extra_base() + 1]
+}
+
+/// Плитки шкуры существа: [тело, морда, лапы].
+pub fn mob_tiles(mob: usize) -> [u16; 3] {
+    let b = extra_base() + 2 + mob * 3;
+    let v = &all().2;
+    [v[b], v[b + 1], v[b + 2]]
 }
 
 pub fn tile_uv(tile: u16) -> (f32, f32, f32, f32) {
@@ -1230,7 +1251,18 @@ fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
         solid[i] = d.solid;
     }
 
-    let items = crate::items::item_sprites(&mut |f| a.add(f));
+    let mut items = crate::items::item_sprites(&mut |f| a.add(f));
+    // служебные плитки: белая, мягкая тень, частица
+    items.push(a.add(|_, _| [255, 255, 255, 255]));
+    items.push(a.add(|x, y| {
+        let r = ((x as f32 - 7.5).powi(2) + (y as f32 - 7.5).powi(2)).sqrt() / 8.0;
+        let al = ((1.0 - r).max(0.0) * 150.0) as u8;
+        [0, 0, 0, al]
+    }));
+    let skins = crate::skins::build(&mut |f| a.add(f));
+    for t in skins {
+        items.extend_from_slice(&t);
+    }
     (Registry { defs, opaque, solid }, a.px, items)
 }
 

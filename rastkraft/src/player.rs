@@ -43,6 +43,22 @@ impl Body {
         min.x < bmax.x && max.x > bmin.x && min.y < bmax.y && max.y > bmin.y && min.z < bmax.z && max.z > bmin.z
     }
 
+    /// Касается ли тело блока, удовлетворяющего условию (без выделения памяти).
+    pub fn touches(&self, world: &World, pad: f32, f: impl Fn(u8) -> bool) -> bool {
+        let min = self.pos - vec3(self.hw + pad, pad, self.hw + pad);
+        let max = self.pos + vec3(self.hw + pad, self.h + pad, self.hw + pad);
+        for y in min.y.floor() as i32..=max.y.floor() as i32 {
+            for z in min.z.floor() as i32..=max.z.floor() as i32 {
+                for x in min.x.floor() as i32..=max.x.floor() as i32 {
+                    if f(world.get(x, y, z)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
     /// Какие блоки касаются тела (с небольшим запасом).
     pub fn touching(&self, world: &World, pad: f32) -> Vec<u8> {
         let min = self.pos - vec3(self.hw + pad, pad, self.hw + pad);
@@ -279,11 +295,10 @@ impl Player {
         let at = |p: Vec3| world.get(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
         let feet_b = at(self.body.pos + vec3(0.0, 0.3, 0.0));
         self.in_water = feet_b == WATER || feet_b == LAVA;
-        let touch = self.body.touching(world, 0.0);
-        let in_lava = touch.contains(&LAVA);
-        let climbing = touch.iter().any(|&b| is_climbable(b));
+        let in_lava = self.body.touches(world, 0.0, |b| b == LAVA);
+        let climbing = self.body.touches(world, 0.0, is_climbable);
         self.eye_in_water = at(self.eye()) == WATER;
-        let in_web = touch.contains(&COBWEB);
+        let in_web = self.body.touches(world, 0.0, |b| b == COBWEB);
         let below = at(self.body.pos - vec3(0.0, 0.05, 0.0));
 
         let fwd = vec3(self.yaw.cos(), 0.0, self.yaw.sin());
@@ -410,7 +425,7 @@ impl Player {
             } else if below == MAGMA && !fire_res && !sneak {
                 self.hurt(1.0, Vec3::ZERO, true);
                 self.hazard_t = 0.5;
-            } else if self.body.touching(world, 0.05).contains(&CACTUS) {
+            } else if self.body.touches(world, 0.05, |b| b == CACTUS) {
                 self.hurt(1.0, Vec3::ZERO, false);
                 self.hazard_t = 0.5;
             }

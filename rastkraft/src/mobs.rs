@@ -13,6 +13,9 @@ use macroquad::prelude::*;
 
 pub const MAX_FRIENDLY: usize = 50;
 pub const MAX_HOSTILE: usize = 50;
+/// Злые существа слабее табличных значений.
+pub const HOSTILE_HP: f32 = 0.6;
+pub const HOSTILE_DMG: f32 = 0.55;
 
 pub struct Mob {
     pub def: usize,
@@ -29,6 +32,11 @@ pub struct Mob {
     pub dying: f32,
     pub angry: bool,
     pub home: Option<Vec3>,
+    /// Освещённость (обновляется не каждый кадр).
+    pub light: f32,
+    light_t: f32,
+    pub head_yaw: f32,
+    pub head_pitch: f32,
 }
 
 impl Mob {
@@ -49,7 +57,7 @@ impl Mob {
             def,
             body: Body::new(pos, hw * s, h * s),
             yaw: 0.0,
-            health: d.hp,
+            health: if d.friendly { d.hp } else { d.hp * HOSTILE_HP },
             hurt_t: 0.0,
             attack_cd: 1.0,
             attack_anim: 0.0,
@@ -60,6 +68,10 @@ impl Mob {
             dying: 0.0,
             angry: false,
             home: None,
+            light: 1.0,
+            light_t: 0.0,
+            head_yaw: 0.0,
+            head_pitch: 0.0,
         }
     }
 
@@ -256,7 +268,7 @@ impl Mobs {
             self.list.retain(|m| m.d().friendly || m.home.is_some());
         }
         let ppos = player.body.pos;
-        let dmg_k = [0.0, 0.5, 1.0, 1.5][difficulty.min(3) as usize];
+        let dmg_k = [0.0, 0.5, 1.0, 1.4][difficulty.min(3) as usize] * HOSTILE_DMG;
         let n = self.list.len();
         let rands: Vec<f32> = (0..n * 4).map(|_| self.rand()).collect();
 
@@ -275,7 +287,33 @@ impl Mobs {
             m.attack_anim = (m.attack_anim - dt * 3.0).max(0.0);
             m.think_t -= dt;
             m.flee_t -= dt;
+            m.light_t -= dt;
+            if m.light_t <= 0.0 {
+                m.light_t = 0.5 + rands[i * 4] * 0.3;
+                let (x, y, z) = (m.body.pos.x.floor() as i32, (m.body.pos.y + m.body.h * 0.6).floor() as i32, m.body.pos.z.floor() as i32);
+                m.light = if world.sky_exposed(x, y, z) { 1.0 } else { 0.0 };
+            }
             let to = ppos - m.body.pos;
+            // голова поворачивается к игроку, если он рядом
+            {
+                let eye = ppos + vec3(0.0, 1.5, 0.0) - (m.body.pos + vec3(0.0, m.body.h * 0.85, 0.0));
+                let (ty, tp) = if eye.length() < 9.0 {
+                    let ang = eye.z.atan2(eye.x);
+                    let mut dy = ang - m.yaw;
+                    while dy > std::f32::consts::PI {
+                        dy -= std::f32::consts::TAU;
+                    }
+                    while dy < -std::f32::consts::PI {
+                        dy += std::f32::consts::TAU;
+                    }
+                    (dy, (eye.y / eye.length().max(0.1)).asin())
+                } else {
+                    (0.0, 0.0)
+                };
+                let k = (dt * 6.0).min(1.0);
+                m.head_yaw += (ty.clamp(-1.0, 1.0) - m.head_yaw) * k;
+                m.head_pitch += (tp - m.head_pitch) * k;
+            }
             let flat = to.with_y(0.0);
             let dist = flat.length();
             let dir_to = flat.normalize_or_zero();
@@ -371,7 +409,7 @@ impl Mobs {
                     m.hurt_t = m.hurt_t.max(0.05);
                 }
             }
-            if m.body.touching(world, 0.0).contains(&LAVA) && d.flags & GLOW == 0 {
+            if d.flags & GLOW == 0 && m.body.touches(world, 0.0, |b| b == LAVA) {
                 m.health -= dt * 6.0;
             }
             if m.health <= 0.0 && m.dying <= 0.0 {
@@ -398,7 +436,7 @@ impl Mobs {
                         age: 0.0,
                         from_player: false,
                     });
-                    m.attack_cd = 2.2;
+                    m.attack_cd = 3.0;
                     m.attack_anim = 1.0;
                 }
             }
@@ -441,24 +479,21 @@ impl Mobs {
         });
         for (k, (it, n, p)) in drops.into_iter().enumerate() {
             ents.spawn_drop(it, n, p, k as f32 * 0.37);
+            if k == 0 {
+                let smoke = [Color::from_rgba(230, 230, 230, 255), Color::from_rgba(180, 180, 185, 255), Color::from_rgba(255, 255, 255, 255)];
+                ents.burst(p, 14, 0.8, &smoke, 0.13, 1.5);
+            }
         }
     }
 
-    pub fn draw(&self, world: &World, daylight: f32, t: f32, cam: Vec3) {
+    pub fn draw(&self, _world: &World, daylight: f32, t: f32, cam: Vec3) {
         for m in &self.list {
             let p = m.body.pos;
-            if (p - cam).length() > 90.0 {
+            if (p - cam).length() > 80.0 {
                 continue;
             }
             let d = m.d();
-            let (x, y, z) = (p.x.floor() as i32, (p.y + 1.0).floor() as i32, p.z.floor() as i32);
-            let light = if d.flags & GLOW != 0 {
-                1.0
-            } else if world.sky_exposed(x, y, z) {
-                daylight.max(0.25)
-            } else {
-                0.35
-            };
+            let light = if d.flags & GLOW != 0 { 1.0 } else { (m.light * daylight).max(0.3) };
             let a = Anim {
                 walk: m.phase,
                 speed: vec2(m.body.vel.x, m.body.vel.z).length() / 2.0 + if d.flags & FLY != 0 { 0.5 } else { 0.0 },
@@ -467,9 +502,17 @@ impl Mobs {
                 dying: m.dying,
                 t: t + m.def as f32,
                 light,
-                head_pitch: 0.0,
+                head_yaw: m.head_yaw,
+                head_pitch: m.head_pitch,
             };
-            model::draw_mob(d, p, m.yaw, &a);
+            if m.body.on_ground || d.flags & FLY != 0 {
+                let alpha = if d.flags & FLY != 0 { 0.35 } else { 0.6 };
+                let gy = if d.flags & FLY != 0 { p.y.floor() - 3.0 } else { p.y };
+                if d.flags & FLY == 0 {
+                    model::shadow(vec3(p.x, gy, p.z), m.body.hw * 1.6 + 0.2, alpha);
+                }
+            }
+            model::draw_mob(m.def, p, m.yaw, &a);
         }
     }
 }

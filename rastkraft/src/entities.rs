@@ -23,13 +23,83 @@ pub struct Projectile {
     pub from_player: bool,
 }
 
+pub struct Particle {
+    pub pos: Vec3,
+    pub vel: Vec3,
+    pub life: f32,
+    pub max: f32,
+    pub color: Color,
+    pub size: f32,
+    pub gravity: f32,
+}
+
 #[derive(Default)]
 pub struct Entities {
     pub drops: Vec<ItemDrop>,
     pub projectiles: Vec<Projectile>,
+    pub particles: Vec<Particle>,
+    seed: u32,
+}
+
+/// Цвет пикселя плитки атласа (для частиц).
+pub fn tile_color(tile: u16, k: u32) -> Color {
+    let px = blocks::atlas_pixels();
+    let (tx, ty) = (tile as usize % blocks::ATLAS_TILES, tile as usize / blocks::ATLAS_TILES);
+    let (x, y) = (4 + (k * 7 % 8) as usize, 4 + (k * 5 % 8) as usize);
+    let i = ((ty * blocks::TILE + y) * blocks::ATLAS + tx * blocks::TILE + x) * 4;
+    Color::from_rgba(px[i], px[i + 1], px[i + 2], 255)
 }
 
 impl Entities {
+    fn rnd(&mut self) -> f32 {
+        self.seed = self.seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        (self.seed >> 8) as f32 / 16_777_216.0
+    }
+
+    /// Россыпь частиц (обломки блока, кровь, искры).
+    pub fn burst(&mut self, at: Vec3, n: usize, spread: f32, colors: &[Color], size: f32, speed: f32) {
+        if self.particles.len() > 600 {
+            return;
+        }
+        for k in 0..n {
+            let (a, b, c) = (self.rnd(), self.rnd(), self.rnd());
+            let dir = vec3(a - 0.5, b * 0.8 + 0.2, c - 0.5).normalize_or_zero();
+            let life = 0.5 + self.rnd() * 0.6;
+            let sp = 0.5 + self.rnd();
+            let sz = 0.7 + self.rnd() * 0.6;
+            self.particles.push(Particle {
+                pos: at + vec3(a - 0.5, b - 0.5, c - 0.5) * spread,
+                vel: dir * speed * sp,
+                life,
+                max: life,
+                color: colors[k % colors.len().max(1)],
+                size: size * sz,
+                gravity: 14.0,
+            });
+        }
+    }
+
+    /// Обломки блока: цвета берутся из его текстуры.
+    pub fn block_burst(&mut self, at: Vec3, tile: u16) {
+        let cols: Vec<Color> = (0..6).map(|k| tile_color(tile, k)).collect();
+        self.burst(at, 16, 0.8, &cols, 0.11, 3.0);
+    }
+
+    pub fn update_particles(&mut self, world: &World, dt: f32) {
+        for p in self.particles.iter_mut() {
+            p.life -= dt;
+            p.vel.y -= p.gravity * dt;
+            let next = p.pos + p.vel * dt;
+            if blocks::is_solid(world.get(next.x.floor() as i32, next.y.floor() as i32, next.z.floor() as i32)) {
+                p.vel *= -0.2;
+                p.vel.x *= 0.5;
+            } else {
+                p.pos = next;
+            }
+        }
+        self.particles.retain(|p| p.life > 0.0);
+    }
+
     pub fn spawn_drop(&mut self, item: Item, count: u16, pos: Vec3, rnd: f32) {
         if item == Item::Empty || count == 0 {
             return;
@@ -122,7 +192,14 @@ impl Entities {
             }
         }
         for p in &self.projectiles {
-            model::cube(Mat4::from_translation(p.pos) * Mat4::from_scale(Vec3::splat(0.18)), p.color);
+            model::cube(Mat4::from_translation(p.pos) * Mat4::from_rotation_y(t * 9.0) * Mat4::from_scale(Vec3::splat(0.2)), p.color);
+        }
+        for p in &self.particles {
+            let s = p.size * (p.life / p.max).sqrt();
+            model::cube(Mat4::from_translation(p.pos) * Mat4::from_rotation_y(p.pos.x * 3.0) * Mat4::from_scale(Vec3::splat(s)), p.color);
+        }
+        for d in &self.drops {
+            model::shadow(vec3(d.body.pos.x, d.body.pos.y, d.body.pos.z), 0.22, 0.45);
         }
     }
 }

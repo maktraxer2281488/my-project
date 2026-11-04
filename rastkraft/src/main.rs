@@ -16,6 +16,7 @@ mod player;
 mod render;
 mod save;
 mod settings;
+mod skins;
 mod structures;
 mod ui;
 mod workers;
@@ -40,12 +41,17 @@ use world::{CS, Dim, World, chunk_of};
 const DAY_SECONDS: f32 = 720.0;
 const AUTOSAVE: f32 = 120.0;
 
-fn window_conf() -> Conf {
-    Conf {
-        window_title: "Расткрафт".to_owned(),
-        window_width: 1280,
-        window_height: 720,
-        window_resizable: true,
+fn window_conf() -> macroquad::conf::Conf {
+    macroquad::conf::Conf {
+        miniquad_conf: Conf {
+            window_title: "Расткрафт".to_owned(),
+            window_width: std::env::var("RK_W").ok().and_then(|v| v.parse().ok()).unwrap_or(1280),
+            window_height: std::env::var("RK_H").ok().and_then(|v| v.parse().ok()).unwrap_or(720),
+            window_resizable: true,
+            ..Default::default()
+        },
+        draw_call_vertex_capacity: 40_000,
+        draw_call_index_capacity: 120_000,
         ..Default::default()
     }
 }
@@ -216,6 +222,8 @@ struct App {
     fps: f32,
     status: Option<(String, f32)>,
     worlds_list: Vec<save::WorldInfo>,
+    /// Экран открыт в этом кадре — не закрывать его той же клавишей.
+    just_opened: bool,
 }
 
 fn set_grab(app: &mut App, grab: bool) {
@@ -252,9 +260,14 @@ fn edit_block(app: &mut App, dim: Dim, p: IVec3, b: u8, share: bool) {
         }
     }
     if dim == g.dim {
-        let ctx = unsafe { get_internal_gl() }.quad_context;
         let g = app.game.as_ref().unwrap();
-        app.loader.remesh_now(ctx, &g.worlds[dim as usize], cx, cz, smooth);
+        let w = &g.worlds[dim as usize];
+        // сначала сам чанк, затем соседи — всё в фоновых потоках вне очереди
+        for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1), (0, 0)] {
+            if w.chunks.contains_key(&(cx + dx, cz + dz)) && app.loader.has_mesh(cx + dx, cz + dz) {
+                app.loader.remesh_soon(&mut app.pool, w, cx + dx, cz + dz, smooth);
+            }
+        }
     }
 }
 
@@ -860,6 +873,7 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                     g.ents.spawn_drop(it, left, p, 0.5);
                 }
             }
+            g.ents.update_particles(world, dt);
             for (dmg, dir) in g.ents.update_projectiles(world, g.player.body.pos, dt) {
                 if !creative {
                     g.player.hurt(dmg, dir * 4.0 + vec3(0.0, 3.0, 0.0), false);
@@ -901,7 +915,7 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                 g.player.body.pos.y = 120.0;
             }
         }
-        if g.portal_cd <= 0.0 && g.player.body.touching(&g.worlds[dim as usize], -0.05).contains(&PORTAL) {
+        if g.portal_cd <= 0.0 && g.player.body.touches(&g.worlds[dim as usize], -0.05, |b| b == PORTAL) {
             to_dim = Some(if dim == Dim::Overworld { Dim::Heaven } else { Dim::Overworld });
         }
 
@@ -996,6 +1010,11 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                     let from = g.player.body.pos;
                     let dmg = held.damage() * g.player.damage_bonus();
                     g.mobs.list[mi].damage(dmg, from);
+                    let m = &g.mobs.list[mi];
+                    let d = m.d();
+                    let at = m.body.pos + vec3(0.0, m.body.h * 0.6, 0.0);
+                    let cols = [Color::from_rgba(d.c1.0, d.c1.1, d.c1.2, 255), Color::from_rgba(200, 30, 30, 255), Color::from_rgba(d.c2.0, d.c2.1, d.c2.2, 255)];
+                    g.ents.burst(at, if m.alive() { 8 } else { 22 }, 0.5, &cols, 0.09, 3.5);
                     g.attack_cd = held.cooldown();
                     g.player.exhaustion += 0.1;
                 }
@@ -1127,6 +1146,15 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
 
     let dim = app.game.as_ref().unwrap().dim;
     for (p, b) in edits {
+        if b == AIR {
+            if let Some(g) = app.game.as_mut() {
+                let old = g.world().get(p.x, p.y, p.z);
+                if old != AIR {
+                    let tile = def(old).tex[1];
+                    g.ents.block_burst(p.as_vec3() + Vec3::splat(0.5), tile);
+                }
+            }
+        }
         edit_block(app, dim, p, b, true);
         if b == AIR {
             let mut y = p.y + 1;
@@ -1144,6 +1172,7 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
     }
     if open_inv {
         app.screen = Screen::Inventory;
+        app.just_opened = true;
     }
     if let Some(d) = to_dim {
         switch_dimension(app, d);
@@ -1476,6 +1505,34 @@ fn settings_screen(app: &mut App) -> Option<Screen> {
     if ui.button(x1, y, cw, bh, &format!("PvP (урон по игрокам): {}", onoff(st.pvp))) {
         st.pvp = !st.pvp;
     }
+    let preset = if st.render_dist <= 5 && !st.smooth_light {
+        "Низкое"
+    } else if st.render_dist >= 12 && st.smooth_light && st.clouds {
+        "Высокое"
+    } else {
+        "Среднее"
+    };
+    if ui.button(x2, y, cw, bh, &format!("Качество графики: {preset}")) {
+        match preset {
+            "Низкое" => {
+                st.render_dist = 8;
+                st.smooth_light = true;
+                st.clouds = true;
+            }
+            "Среднее" => {
+                st.render_dist = 12;
+                st.smooth_light = true;
+                st.clouds = true;
+                st.fog = true;
+            }
+            _ => {
+                st.render_dist = 5;
+                st.smooth_light = false;
+                st.clouds = false;
+                st.fog = true;
+            }
+        }
+    }
     y += bh + gap * 2.0;
     let done = ui.button((w - cw) / 2.0, y, cw, bh, "Готово") || is_key_pressed(KeyCode::Escape);
     st.clamp();
@@ -1802,7 +1859,7 @@ fn inventory_screen(app: &mut App) -> Option<Screen> {
             cursor = Stack::EMPTY;
         }
     }
-    let close = is_key_pressed(KeyCode::E) || is_key_pressed(KeyCode::Escape);
+    let close = !app.just_opened && (is_key_pressed(KeyCode::E) || is_key_pressed(KeyCode::Escape));
     if close && !cursor.is_empty() {
         let left = g.player.inv.add(cursor.item, cursor.count);
         if left > 0 {
@@ -1988,14 +2045,24 @@ fn render_world(app: &mut App) {
             fog_range,
             daylight: if night_vision { 1.0 } else { g.daylight() },
             bright: if night_vision { 1.0 } else { app.settings.brightness },
+            time: app.time,
+            underground: {
+                let e = g.player.eye();
+                !g.world().sky_exposed(e.x.floor() as i32, e.y.floor() as i32 + 1, e.z.floor() as i32) && e.y < 70.0 || g.player.body.pos.y < 40.0
+            },
         };
         let clouds = if app.settings.clouds { Some((g.dim, app.time)) } else { None };
-        app.renderer.draw(gl.quad_context, &app.loader, &frame, clouds);
+        if std::env::var("RK_NOWORLD").is_err() {
+            app.renderer.draw(gl.quad_context, &app.loader, &frame, clouds);
+        }
     }
     let cam3 = Camera3D { position: eye, target: eye + dir, up: Vec3::Y, fovy, z_near: 0.05, z_far: 1500.0, ..Default::default() };
     set_camera(&cam3);
+    model::begin(&app.ui.atlas);
     let daylight = g.daylight();
-    g.mobs.draw(g.world(), daylight, app.time, eye);
+    if std::env::var("RK_NOMOBS").is_err() {
+        g.mobs.draw(g.world(), daylight, app.time, eye);
+    }
     let right = dir.cross(Vec3::Y).normalize_or_zero();
     g.ents.draw(&app.ui.atlas, app.time, right);
     // другие игроки
@@ -2014,6 +2081,7 @@ fn render_world(app: &mut App) {
         let sp = vec2(p.body.vel.x, p.body.vel.z).length() / 4.0;
         model::draw_player(&app.ui.atlas, p.body.pos, p.yaw, p.pitch, p.walk_phase, sp, g.swing_t, p.held(), &p.armor, &look, light, p.hurt_t > 0.0);
     }
+    model::flush();
     if app.screen == Screen::Playing && !app.hide_hud {
         if let Some((hit, _, _)) = g.world().raycast(g.player.eye(), dir, if g.creative { 6.0 } else { 5.0 }) {
             let c = hit.as_vec3() + Vec3::splat(0.5);
@@ -2038,6 +2106,7 @@ fn render_world(app: &mut App) {
         let hand_cam = Camera3D { position: g.player.eye() + bob, target: g.player.eye() + bob + dir, up: Vec3::Y, fovy: 70f32.to_radians(), z_near: 0.02, z_far: 10.0, ..Default::default() };
         set_camera(&hand_cam);
         model::draw_first_person(&app.ui.atlas, g.player.eye() + bob, dir, right, up, p.held(), g.swing_t, hb, p.eat_t, sleeve, look.skin, light);
+        model::flush();
     }
     set_default_camera();
     // имена игроков над головами
@@ -2055,6 +2124,21 @@ fn render_world(app: &mut App) {
             let hp = (r.st.health / MAX_HEALTH).clamp(0.0, 1.0);
             draw_rectangle(sx - 25.0, sy + 6.0, 50.0, 4.0, Color::new(0.2, 0.0, 0.0, 0.7));
             draw_rectangle(sx - 25.0, sy + 6.0, 50.0 * hp, 4.0, Color::new(0.9, 0.15, 0.15, 1.0));
+        }
+    }
+    // мягкое затемнение краёв экрана
+    {
+        let (w, h) = (screen_width(), screen_height());
+        let n = 14;
+        let band = h.min(w) * 0.16 / n as f32;
+        for i in 0..n {
+            let a = 0.035 * (1.0 - i as f32 / n as f32).powf(1.5);
+            let c = Color::new(0.0, 0.0, 0.0, a);
+            let o = i as f32 * band;
+            draw_rectangle(0.0, o, w, band, c);
+            draw_rectangle(0.0, h - o - band, w, band, c);
+            draw_rectangle(o, 0.0, band, h, c);
+            draw_rectangle(w - o - band, 0.0, band, h, c);
         }
     }
     if g.player.eye_in_water {
@@ -2112,11 +2196,14 @@ async fn main() {
         fps: 60.0,
         status: None,
         worlds_list: Vec::new(),
+        just_opened: false,
     };
 
     // режим для автоматических скриншотов и проверок
     let shot = std::env::var("RK_SHOT").ok();
     let mut shot_frames = 0;
+    let mut bench: (u32, f64, u32) = (0, 0.0, 0);
+    let mut prof: (f64, f64) = (0.0, 0.0);
     if let Ok(seed) = std::env::var("RK_SEED") {
         if let Ok(r) = std::env::var("RK_DIST") {
             app.settings.render_dist = r.parse().unwrap_or(8);
@@ -2175,8 +2262,10 @@ async fn main() {
             Screen::Playing => {
                 if is_key_pressed(KeyCode::Escape) {
                     app.screen = Screen::Paused;
+                    app.just_opened = true;
                 } else if is_key_pressed(KeyCode::E) {
                     app.screen = Screen::Inventory;
+                    app.just_opened = true;
                 }
                 if is_key_pressed(KeyCode::F3) {
                     app.show_debug = !app.show_debug;
@@ -2190,7 +2279,7 @@ async fn main() {
                     }
                 }
             }
-            Screen::Paused if is_key_pressed(KeyCode::Escape) => app.screen = Screen::Playing,
+            Screen::Paused if is_key_pressed(KeyCode::Escape) && !app.just_opened => app.screen = Screen::Playing,
             _ => {}
         }
         let want_grab = app.screen == Screen::Playing && shot.is_none();
@@ -2263,7 +2352,8 @@ async fn main() {
                         let ids: Vec<usize> = std::env::var("RK_MOBS").unwrap().split(',').filter_map(|s| s.parse().ok()).collect();
                         let n = ids.len() as f32;
                         for (i, id) in ids.into_iter().enumerate() {
-                            let at = p + f * 9.0 + side * (i as f32 - (n - 1.0) / 2.0) * 2.2;
+                            let md: f32 = std::env::var("RK_MOBDIST").ok().and_then(|v| v.parse().ok()).unwrap_or(9.0);
+                            let at = p + f * md + side * (i as f32 - (n - 1.0) / 2.0) * (md * 0.28).max(1.6);
                             let y = ground_spot(g.world(), at.x.floor() as i32, at.z.floor() as i32).map_or(p.y, |v| v.y);
                             let mut m = mobs::Mob::new(id.min(99), vec3(at.x, y, at.z));
                             m.yaw = (-f.z).atan2(-f.x);
@@ -2285,13 +2375,16 @@ async fn main() {
                 }
             }
             if matches!(app.screen, Screen::Playing | Screen::Inventory) {
+                let t0 = std::time::Instant::now();
                 update_game(&mut app, dt, md);
+                prof.0 += t0.elapsed().as_secs_f64();
             } else if app.screen == Screen::Paused && app.game.as_ref().is_some_and(|g| g.net.is_some()) {
                 // в сетевой игре мир не останавливается
                 update_game(&mut app, dt, Vec2::ZERO);
             }
         }
 
+        let t_render = std::time::Instant::now();
         if app.game.is_some() && app.screen != Screen::Loading {
             render_world(&mut app);
             if !app.hide_hud && matches!(app.screen, Screen::Playing | Screen::Paused | Screen::Inventory) {
@@ -2301,6 +2394,7 @@ async fn main() {
             clear_background(Color::new(0.08, 0.09, 0.11, 1.0));
         }
 
+        prof.1 += t_render.elapsed().as_secs_f64();
         let next = match app.screen {
             Screen::Title => draw_title(&mut app),
             Screen::Worlds => worlds_screen(&mut app),
@@ -2350,7 +2444,25 @@ async fn main() {
             app.ui.text_center(t, screen_width() / 2.0, screen_height() - 30.0 * s, 17.0, Color::new(1.0, 0.8, 0.5, life.min(1.0)));
         }
         app.ui.end();
+        app.just_opened = false;
 
+        if let Ok(b) = std::env::var("RK_BENCH") {
+            let n: u32 = b.parse().unwrap_or(300);
+            if app.screen == Screen::Playing {
+                bench.0 += 1;
+                if bench.0 > 60 {
+                    bench.1 += raw_dt as f64;
+                    bench.2 += 1;
+                }
+                if bench.2 >= n {
+                    let avg = bench.1 / bench.2 as f64;
+                    let (fr, ho) = app.game.as_ref().map_or((0, 0), |g| g.mobs.counts());
+                    let fr_n = bench.0 as f64;
+                    println!("BENCH frames={} avg_ms={:.2} fps={:.1} chunks={} mobs={} update_ms={:.2} render_cpu_ms={:.2} meshes_tris={:?}", bench.2, avg * 1000.0, 1.0 / avg, app.loader.gpu.len(), fr + ho, prof.0 * 1000.0 / fr_n, prof.1 * 1000.0 / fr_n, app.loader.stats());
+                    std::process::exit(0);
+                }
+            }
+        }
         if let Some(path) = &shot {
             let ready = match shot_screen.as_str() {
                 "title" | "worlds" | "multiplayer" => true,

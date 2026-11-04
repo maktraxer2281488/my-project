@@ -49,6 +49,13 @@ impl Pool {
         self.shared.cv.notify_one();
     }
 
+    /// Срочное задание — в начало очереди (перестройка после правки игрока).
+    pub fn submit_front(&mut self, job: Job) {
+        self.in_flight += 1;
+        self.shared.queue.lock().unwrap().push_front(job);
+        self.shared.cv.notify_one();
+    }
+
     /// Сколько ещё заданий можно поставить, чтобы очередь не разрасталась.
     pub fn capacity(&self) -> usize {
         (self.threads * 3).saturating_sub(self.in_flight)

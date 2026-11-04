@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 const VERTEX: &str = r#"#version 100
 attribute vec3 in_pos;
 attribute vec2 in_uv;
+attribute vec2 in_tile;
 attribute vec4 in_light;
 
 uniform mat4 mvp;
@@ -20,13 +21,29 @@ uniform vec4 fog_color;
 uniform vec2 fog_range;
 uniform float daylight;
 uniform float bright;
+uniform vec3 cam;
+uniform float time;
 
-varying lowp vec2 uv;
+varying highp vec2 uv;
+varying highp vec2 tile0;
 varying lowp vec4 col;
 varying mediump float fogf;
 
 void main() {
     vec3 p = in_pos + offset;
+    tile0 = in_tile;
+    vec3 w = p + cam;
+    float a = in_light.a;
+    // колыхание травы (250) и листвы (251)
+    if (a > 249.5 && a < 251.5) {
+        float k = a > 250.5 ? 0.025 : 0.07;
+        p.x += sin(time * 1.7 + w.x * 0.7 + w.z * 0.4) * k;
+        p.z += cos(time * 1.3 + w.x * 0.4 + w.z * 0.6) * k;
+    }
+    // волны на поверхности воды (183)
+    if (a > 182.5 && a < 183.5) {
+        p.y += sin(time * 1.6 + w.x * 0.55 + w.z * 0.35) * 0.045 + sin(time * 2.3 + w.z * 0.8) * 0.025 - 0.05;
+    }
     gl_Position = mvp * vec4(p, 1.0);
     uv = in_uv;
     vec4 l = in_light / 255.0;
@@ -35,14 +52,17 @@ void main() {
     float lt = max(max(sky, blk), 0.035);
     lt = mix(lt, sqrt(lt), bright);
     vec3 tint = mix(vec3(1.0), vec3(1.0, 0.86, 0.64), clamp((blk - sky) * 1.6, 0.0, 1.0));
-    col = vec4(tint * lt * l.b, l.a);
+    float alpha = a > 240.0 ? 1.0 : l.a;
+    col = vec4(tint * lt * l.b, alpha);
     float d = length(p);
     fogf = clamp((d - fog_range.x) / (fog_range.y - fog_range.x), 0.0, 1.0);
 }"#;
 
-const FRAGMENT: &str = r#"#version 100
-precision mediump float;
-varying lowp vec2 uv;
+/// Сплошные блоки: без discard — видеокарта может отбрасывать скрытое заранее.
+const FRAGMENT_OPAQUE: &str = r#"#version 100
+precision highp float;
+varying highp vec2 uv;
+varying highp vec2 tile0;
 varying lowp vec4 col;
 varying mediump float fogf;
 
@@ -50,7 +70,24 @@ uniform sampler2D tex;
 uniform vec4 fog_color;
 
 void main() {
-    vec4 t = texture2D(tex, uv);
+    vec2 t = tile0 + clamp(fract(uv), 0.002, 0.998) * (1.0 / 64.0);
+    vec4 c = texture2D(tex, t) * col;
+    gl_FragColor = vec4(mix(c.rgb, fog_color.rgb, fogf * fogf), 1.0);
+}"#;
+
+/// Листва, стекло, растения: прозрачные пиксели отбрасываются.
+const FRAGMENT_CUTOUT: &str = r#"#version 100
+precision highp float;
+varying highp vec2 uv;
+varying highp vec2 tile0;
+varying lowp vec4 col;
+varying mediump float fogf;
+
+uniform sampler2D tex;
+uniform vec4 fog_color;
+
+void main() {
+    vec4 t = texture2D(tex, tile0 + clamp(fract(uv), 0.002, 0.998) * (1.0 / 64.0));
     if (t.a < 0.5) discard;
     vec4 c = t * col;
     gl_FragColor = vec4(mix(c.rgb, fog_color.rgb, fogf * fogf), c.a);
@@ -64,6 +101,8 @@ pub struct Uniforms {
     pub fog_range: [f32; 2],
     pub daylight: f32,
     pub bright: f32,
+    pub cam: [f32; 3],
+    pub time: f32,
 }
 
 fn meta() -> ShaderMeta {
@@ -77,6 +116,8 @@ fn meta() -> ShaderMeta {
                 UniformDesc::new("fog_range", UniformType::Float2),
                 UniformDesc::new("daylight", UniformType::Float1),
                 UniformDesc::new("bright", UniformType::Float1),
+                UniformDesc::new("cam", UniformType::Float3),
+                UniformDesc::new("time", UniformType::Float1),
             ],
         },
     }
@@ -105,6 +146,9 @@ impl GpuMesh {
 
 pub struct ChunkGpu {
     opaque: Option<GpuMesh>,
+    cutout: Option<GpuMesh>,
+    detail: Option<GpuMesh>,
+    dark: Option<GpuMesh>,
     water: Option<GpuMesh>,
     version: u32,
     epoch: u32,
@@ -112,6 +156,7 @@ pub struct ChunkGpu {
 
 pub struct Renderer {
     pip_opaque: Pipeline,
+    pip_cutout: Pipeline,
     pip_blend: Pipeline,
     atlas: TextureId,
     clouds: Option<GpuMesh>,
@@ -125,18 +170,23 @@ pub struct Frame {
     pub fog_range: [f32; 2],
     pub daylight: f32,
     pub bright: f32,
+    pub time: f32,
+    pub underground: bool,
 }
 
 impl Renderer {
     pub fn new(ctx: &mut dyn RenderingBackend, atlas: TextureId) -> Self {
-        let shader = ctx.new_shader(ShaderSource::Glsl { vertex: VERTEX, fragment: FRAGMENT }, meta()).expect("шейдер мира");
+        let shader = ctx.new_shader(ShaderSource::Glsl { vertex: VERTEX, fragment: FRAGMENT_CUTOUT }, meta()).expect("шейдер мира");
+        let shader_opaque = ctx.new_shader(ShaderSource::Glsl { vertex: VERTEX, fragment: FRAGMENT_OPAQUE }, meta()).expect("шейдер мира");
         let attrs = [
             VertexAttribute::new("in_pos", VertexFormat::Float3),
             VertexAttribute::new("in_uv", VertexFormat::Float2),
+            VertexAttribute::new("in_tile", VertexFormat::Float2),
             VertexAttribute::new("in_light", VertexFormat::Byte4),
         ];
         let base = PipelineParams { depth_test: Comparison::LessOrEqual, depth_write: true, ..Default::default() };
-        let pip_opaque = ctx.new_pipeline(&[BufferLayout::default()], &attrs, shader, base);
+        let pip_opaque = ctx.new_pipeline(&[BufferLayout::default()], &attrs, shader_opaque, base);
+        let pip_cutout = ctx.new_pipeline(&[BufferLayout::default()], &attrs, shader, base);
         let pip_blend = ctx.new_pipeline(
             &[BufferLayout::default()],
             &attrs,
@@ -150,7 +200,7 @@ impl Renderer {
                 ..base
             },
         );
-        Renderer { pip_opaque, pip_blend, atlas, clouds: None, clouds_dim: None }
+        Renderer { pip_opaque, pip_cutout, pip_blend, atlas, clouds: None, clouds_dim: None }
     }
 
     fn uniforms(&self, f: &Frame, offset: Vec3) -> Uniforms {
@@ -161,6 +211,8 @@ impl Renderer {
             fog_range: f.fog_range,
             daylight: f.daylight,
             bright: f.bright,
+            cam: f.cam.to_array(),
+            time: f.time,
         }
     }
 
@@ -185,11 +237,31 @@ impl Renderer {
             }
             vis.push((d, min, g));
         }
+        // ближние чанки первыми: видеокарта не тратит время на закрытые пиксели
+        vis.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
         ctx.begin_default_pass(PassAction::Nothing);
         ctx.apply_pipeline(&self.pip_opaque);
-        for (_, off, g) in &vis {
+        for (d, off, g) in &vis {
             if let Some(m) = &g.opaque {
                 self.draw_mesh(ctx, m, &self.uniforms(f, *off));
+            }
+            // тёмные подземные грани: если игрок под землёй — все, иначе только рядом
+            if f.underground || *d < 40.0 {
+                if let Some(m) = &g.dark {
+                    self.draw_mesh(ctx, m, &self.uniforms(f, *off));
+                }
+            }
+        }
+        ctx.apply_pipeline(&self.pip_cutout);
+        for (d, off, g) in &vis {
+            if let Some(m) = &g.cutout {
+                self.draw_mesh(ctx, m, &self.uniforms(f, *off));
+            }
+            // трава и папоротники — только поблизости
+            if *d < DETAIL_DIST {
+                if let Some(m) = &g.detail {
+                    self.draw_mesh(ctx, m, &self.uniforms(f, *off));
+                }
             }
         }
         ctx.apply_pipeline(&self.pip_blend);
@@ -214,9 +286,20 @@ impl Renderer {
                 let drift = (t * 1.3) % period;
                 let base_x = (f.cam.x / period).floor() * period;
                 let base_z = (f.cam.z / period).floor() * period;
+                let reach = f.fog_range[1].min(320.0);
                 for kx in -1..=1 {
                     for kz in -1..=1 {
                         let o = vec3(base_x + kx as f32 * period + drift, y, base_z + kz as f32 * period) - f.cam;
+                        // копия облаков рисуется, только если попадает в поле видимости
+                        let nx = (0.0f32).clamp(o.x, o.x + period);
+                        let nz = (0.0f32).clamp(o.z, o.z + period);
+                        if nx * nx + nz * nz > reach * reach {
+                            continue;
+                        }
+                        let min = vec3(o.x, o.y, o.z);
+                        if !aabb_visible(&planes, min, min + vec3(period, 4.0, period)) {
+                            continue;
+                        }
                         self.draw_mesh(ctx, c, &self.uniforms(f, o));
                     }
                 }
@@ -227,6 +310,7 @@ impl Renderer {
 }
 
 const CLOUD_PERIOD: f32 = 384.0;
+const DETAIL_DIST: f32 = 56.0;
 
 fn build_clouds(dim: Dim) -> (Vec<V>, Vec<u32>) {
     const CELL: f32 = 12.0;
@@ -240,14 +324,16 @@ fn build_clouds(dim: Dim) -> (Vec<V>, Vec<u32>) {
             + crate::worldgen::noise2(b.cos() * 5.0 + 20.0, a.cos() * 2.0 + b.sin() * 5.0, seed ^ 0x55) * 0.4;
         v > if dim == Dim::Overworld { 0.57 } else { 0.5 }
     };
-    let (u0, v0, _, _) = blocks::tile_uv(blocks::def(blocks::CLOUD).tex[0]);
-    let uv = [u0 + 0.0005, v0 + 0.0005];
+    let t = blocks::def(blocks::CLOUD).tex[0];
+    let at = blocks::ATLAS_TILES as f32;
+    let tile = [(t as usize % blocks::ATLAS_TILES) as f32 / at, (t as usize / blocks::ATLAS_TILES) as f32 / at];
+    let uv = [0.5, 0.5];
     let mut vs: Vec<V> = Vec::new();
     let mut is: Vec<u32> = Vec::new();
     let mut quad = |p: [[f32; 3]; 4], k: f32| {
         let b = vs.len() as u32;
         for c in p {
-            vs.push(V { pos: c, uv, light: [255, 0, (k * 255.0) as u8, 210] });
+            vs.push(V { pos: c, uv, tile, light: [255, 0, (k * 255.0) as u8, 210] });
         }
         is.extend_from_slice(&[b, b + 1, b + 2, b, b + 2, b + 3]);
     };
@@ -306,11 +392,12 @@ pub struct Loader {
     pub epoch: u32,
     /// Жители построек из свежесозданных чанков.
     pub new_spawns: Vec<(u16, [i32; 3])>,
+    tick: u32,
 }
 
 impl Loader {
     pub fn new() -> Self {
-        Loader { gpu: HashMap::new(), pending_gen: HashSet::new(), pending_mesh: HashMap::new(), order: Vec::new(), order_r: -1, epoch: 0, new_spawns: Vec::new() }
+        Loader { gpu: HashMap::new(), pending_gen: HashSet::new(), pending_mesh: HashMap::new(), order: Vec::new(), order_r: -1, epoch: 0, new_spawns: Vec::new(), tick: 0 }
     }
 
     /// Выгрузить всё из видеопамяти (смена мира или измерения).
@@ -319,12 +406,33 @@ impl Loader {
             if let Some(m) = g.opaque {
                 m.delete(ctx);
             }
+            if let Some(m) = g.cutout {
+                m.delete(ctx);
+            }
+            if let Some(m) = g.detail {
+                m.delete(ctx);
+            }
+            if let Some(m) = g.dark {
+                m.delete(ctx);
+            }
             if let Some(m) = g.water {
                 m.delete(ctx);
             }
         }
         self.pending_gen.clear();
         self.pending_mesh.clear();
+    }
+
+    pub fn stats(&self) -> [usize; 5] {
+        let mut t = [0usize; 5];
+        for g in self.gpu.values() {
+            for (k, m) in [&g.opaque, &g.cutout, &g.water, &g.detail, &g.dark].into_iter().enumerate() {
+                if let Some(m) = m {
+                    t[k] += m.n as usize / 3;
+                }
+            }
+        }
+        t
     }
 
     pub fn has_mesh(&self, cx: i32, cz: i32) -> bool {
@@ -358,6 +466,14 @@ impl Loader {
         Some(Box::new(Nbhd { c }))
     }
 
+    /// Перестроить чанк в фоне, но вне очереди (после правки блока).
+    pub fn remesh_soon(&mut self, pool: &mut Pool, world: &World, cx: i32, cz: i32, smooth: bool) {
+        let Some(n) = Self::neighborhood(world, cx, cz) else { return };
+        let version = *world.versions.get(&(cx, cz)).unwrap_or(&0);
+        self.pending_mesh.insert((cx, cz), (version, self.epoch));
+        pool.submit_front(Job::Mesh { dim: world.dim, cx, cz, version, epoch: self.epoch, smooth, n });
+    }
+
     /// Перестроить чанк немедленно (после правки игроком) — без очереди.
     pub fn remesh_now(&mut self, ctx: &mut dyn RenderingBackend, world: &World, cx: i32, cz: i32, smooth: bool) {
         let Some(n) = Self::neighborhood(world, cx, cz) else { return };
@@ -369,12 +485,24 @@ impl Loader {
     fn upload(&mut self, ctx: &mut dyn RenderingBackend, cx: i32, cz: i32, version: u32, mesh: MeshData) {
         let g = ChunkGpu {
             opaque: GpuMesh::new(ctx, &mesh.opaque_v, &mesh.opaque_i),
+            cutout: GpuMesh::new(ctx, &mesh.cutout_v, &mesh.cutout_i),
+            detail: GpuMesh::new(ctx, &mesh.detail_v, &mesh.detail_i),
+            dark: GpuMesh::new(ctx, &mesh.dark_v, &mesh.dark_i),
             water: GpuMesh::new(ctx, &mesh.water_v, &mesh.water_i),
             version,
             epoch: self.epoch,
         };
         if let Some(old) = self.gpu.insert((cx, cz), g) {
             if let Some(m) = old.opaque {
+                m.delete(ctx);
+            }
+            if let Some(m) = old.cutout {
+                m.delete(ctx);
+            }
+            if let Some(m) = old.detail {
+                m.delete(ctx);
+            }
+            if let Some(m) = old.dark {
                 m.delete(ctx);
             }
             if let Some(m) = old.water {
@@ -454,6 +582,11 @@ impl Loader {
         }
         self.order = order;
 
+        // выгрузка — не каждый кадр
+        self.tick = self.tick.wrapping_add(1);
+        if self.tick % 30 != 0 {
+            return;
+        }
         // выгрузка дальних мешей
         let far: Vec<(i32, i32)> = self
             .gpu
@@ -467,6 +600,15 @@ impl Loader {
         for k in far {
             if let Some(g) = self.gpu.remove(&k) {
                 if let Some(m) = g.opaque {
+                    m.delete(ctx);
+                }
+                if let Some(m) = g.cutout {
+                    m.delete(ctx);
+                }
+                if let Some(m) = g.detail {
+                    m.delete(ctx);
+                }
+                if let Some(m) = g.dark {
                     m.delete(ctx);
                 }
                 if let Some(m) = g.water {
