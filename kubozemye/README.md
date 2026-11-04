@@ -17,6 +17,15 @@ cargo run --release
 - `KUBO_SHOT=shot.png`: сделать скриншот на 4-м кадре и выйти;
 - `KUBO_POSE="x,y,z,yaw,pitch"`: поставить камеру (вместе со скриншотом).
 
+### Сборка .exe для Windows (из Linux)
+
+```bash
+rustup target add x86_64-pc-windows-gnu
+sudo apt install gcc-mingw-w64-x86-64
+cargo build --release --target x86_64-pc-windows-gnu
+# файл: target/x86_64-pc-windows-gnu/release/kubozemye.exe
+```
+
 ## Управление
 
 | Клавиша | Действие |
