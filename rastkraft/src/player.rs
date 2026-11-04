@@ -200,6 +200,8 @@ impl Player {
             self.inv.add(Item::Thing(it::BREAD), 5);
             self.inv.add(Item::Block(TORCH), 8);
             self.inv.add(Item::Thing(it::APPLE), 3);
+            // книга рецептов — в последнюю ячейку панели
+            self.inv.slots[8] = crate::inventory::Stack::new(Item::Thing(it::RECIPE_BOOK), 1);
         }
     }
 

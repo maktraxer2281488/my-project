@@ -317,7 +317,8 @@ pub const COCOA_DRINK: u16 = EXTRA0 + 40;
 pub const HONEY_CAKE: u16 = EXTRA0 + 41;
 pub const HEAVEN_PIE: u16 = EXTRA0 + 42;
 pub const STAR_COOKIE: u16 = EXTRA0 + 43;
-pub const EXTRA_COUNT: u16 = 44;
+pub const RECIPE_BOOK: u16 = EXTRA0 + 44;
+pub const EXTRA_COUNT: u16 = 45;
 
 pub const POTIONS: [(Eff, f32, &str, (u8, u8, u8)); 10] = [
     (Eff::Heal, 0.0, "Зелье исцеления", (230, 50, 60)),
@@ -485,6 +486,7 @@ fn build_things() -> Vec<ThingDef> {
     t("Медовик", f(8), Cake, (230, 170, 80), (150, 90, 40));
     t("Небесный пирог", fe(12, Eff::Regen, 30.0), Pie, (255, 230, 160), (250, 210, 80));
     t("Звёздное печенье", fe(4, Eff::Night, 60.0), Cookie, (250, 230, 120), (130, 110, 240));
+    t("Книга рецептов", m, Book, (60, 110, 70), (230, 190, 70));
     v
 }
 
@@ -554,6 +556,7 @@ impl Item {
     pub fn max_stack(self) -> u16 {
         match self {
             Item::Tool(..) | Item::Armor(..) => 1,
+            Item::Thing(RECIPE_BOOK) => 1,
             Item::Thing(t) if matches!(thing(t).kind, TKind::Potion(..)) => 8,
             Item::Empty => 0,
             _ => 64,
@@ -678,7 +681,9 @@ impl Item {
                 }),
                 TKind::Potion(e, s) => Some(if s > 0.0 { format!("{} на {:.0} с", e.name(), s) } else { e.name().to_string() }),
                 TKind::Mat => {
-                    if (MOB_DROP0..EXTRA0).contains(&t) {
+                    if t == RECIPE_BOOK {
+                        Some("ПКМ или B — открыть. Все рецепты игры".into())
+                    } else if (MOB_DROP0..EXTRA0).contains(&t) {
                         Some(format!("Трофей: {}", MOBS[(t - MOB_DROP0) as usize].name))
                     } else {
                         Some("Материал для крафта".into())

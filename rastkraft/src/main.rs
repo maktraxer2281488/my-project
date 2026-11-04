@@ -69,6 +69,7 @@ enum Screen {
     Inventory,
     Dead,
     Chat,
+    RecipeBook,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -244,6 +245,11 @@ struct App {
     just_opened: bool,
     finder: Option<net::Finder>,
     chat_input: String,
+    book_tab: usize,
+    book_scroll: f32,
+    book_sel: Option<usize>,
+    book_back: Vec<usize>,
+    book_search: String,
     /// Текстура пониженного разрешения для 3D (масштаб рендера).
     rt: Option<(RenderTarget, u32, u32)>,
     /// Действующая дальность (при авто-настройке может быть меньше выбранной).
@@ -397,6 +403,7 @@ fn save_game(app: &mut App) -> bool {
     kv.set("inv", p.inv.slots.iter().map(|s| format!("{},{}", s.item.code(), s.count)).collect::<Vec<_>>().join(","));
     kv.set("armor", p.armor.iter().map(|a| a.code().to_string()).collect::<Vec<_>>().join(","));
     kv.set("selected", p.selected);
+    kv.set("book", 1);
     let set3 = |s: &HashSet<[i32; 3]>| s.iter().map(|v| format!("{},{},{}", v[0], v[1], v[2])).collect::<Vec<_>>().join(",");
     kv.set("opened", set3(&g.opened));
     kv.set("spawned", set3(&g.spawned));
@@ -454,6 +461,10 @@ fn load_game(app: &mut App, name: &str) -> bool {
         g.player.armor[i] = Item::from_code(*c as u32);
     }
     g.player.selected = (kv.u("selected", 0) as usize).min(8);
+    // миры до версии 0.10: выдать книгу рецептов один раз
+    if !g.creative && kv.get("book").is_none() && g.player.inv.count(Item::Thing(items::RECIPE_BOOK)) == 0 {
+        g.player.inv.add(Item::Thing(items::RECIPE_BOOK), 1);
+    }
     let to_set = |v: Vec<i64>| v.chunks_exact(3).map(|c| [c[0] as i32, c[1] as i32, c[2] as i32]).collect::<HashSet<_>>();
     g.opened = to_set(kv.ints("opened"));
     g.spawned = to_set(kv.ints("spawned"));
@@ -923,6 +934,7 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
     let mut to_dim: Option<Dim> = None;
     let mut died = false;
     let mut open_inv = false;
+    let mut open_book = false;
     {
         let g = app.game.as_mut().unwrap();
         g.time = (g.time + dt / DAY_SECONDS).fract();
@@ -1204,7 +1216,11 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
             // правая кнопка: сундук, станция, еда, установка блока, броня
             let target_block = block_hit.map(|(h, prev, _)| (h, prev, world.get(h.x, h.y, h.z)));
             let mut used = false;
-            if rmb_p {
+            if rmb_p && held == Item::Thing(items::RECIPE_BOOK) {
+                open_book = true;
+                used = true;
+            }
+            if rmb_p && !used {
                 if let Some((h, _, b)) = target_block {
                     if b == CHEST && !g.player.body.overlaps_block(h) {
                         let key = [h.x, h.y, h.z];
@@ -1322,6 +1338,9 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
     if open_inv {
         app.screen = Screen::Inventory;
         app.just_opened = true;
+    }
+    if open_book {
+        open_recipe_book(app);
     }
     if let Some(d) = to_dim {
         switch_dimension(app, d);
@@ -2620,6 +2639,11 @@ async fn main() {
         just_opened: false,
         finder: None,
         chat_input: String::new(),
+        book_tab: 0,
+        book_scroll: 0.0,
+        book_sel: None,
+        book_back: Vec::new(),
+        book_search: String::new(),
         rt: None,
         eff_dist: 4,
         auto_t: 0.0,
@@ -2701,6 +2725,15 @@ async fn main() {
                 if is_key_pressed(KeyCode::T) || is_key_pressed(KeyCode::Enter) {
                     app.screen = Screen::Chat;
                     app.just_opened = true;
+                }
+                // B — книга рецептов, если она есть в инвентаре (или в творчестве)
+                if is_key_pressed(KeyCode::B) && app.screen == Screen::Playing {
+                    let has = app.game.as_ref().is_some_and(|g| g.creative || g.player.inv.count(Item::Thing(items::RECIPE_BOOK)) > 0);
+                    if has {
+                        open_recipe_book(&mut app);
+                    } else if let Some(g) = app.game.as_mut() {
+                        g.toast = Some(("Нужна книга рецептов".into(), 1.5));
+                    }
                 }
                 if is_key_pressed(KeyCode::F3) {
                     app.show_debug = !app.show_debug;
@@ -2830,7 +2863,7 @@ async fn main() {
                     }
                 }
             }
-            if matches!(app.screen, Screen::Playing | Screen::Inventory | Screen::Chat) {
+            if matches!(app.screen, Screen::Playing | Screen::Inventory | Screen::Chat | Screen::RecipeBook) {
                 let t0 = std::time::Instant::now();
                 update_game(&mut app, dt, md);
                 prof.0 += t0.elapsed().as_secs_f64();
@@ -2843,7 +2876,7 @@ async fn main() {
         let t_render = std::time::Instant::now();
         if app.game.is_some() && app.screen != Screen::Loading {
             render_world(&mut app);
-            if !app.hide_hud && matches!(app.screen, Screen::Playing | Screen::Paused | Screen::Inventory | Screen::Chat) {
+            if !app.hide_hud && matches!(app.screen, Screen::Playing | Screen::Paused | Screen::Inventory | Screen::Chat | Screen::RecipeBook) {
                 draw_hud(&mut app);
             }
             if app.screen == Screen::Playing && is_key_down(KeyCode::Tab) {
@@ -2864,6 +2897,7 @@ async fn main() {
             Screen::Dead => dead_screen(&mut app),
             Screen::Inventory => inventory_screen(&mut app),
             Screen::Chat => chat_screen(&mut app),
+            Screen::RecipeBook => recipe_book_screen(&mut app),
             Screen::Loading => {
                 let (w, h) = (screen_width(), screen_height());
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.07, 0.08, 0.1, 1.0));
@@ -2932,6 +2966,22 @@ async fn main() {
                 shot_frames += 1;
                 if shot_frames == 2 {
                     match shot_screen.as_str() {
+                        "book" => {
+                            open_recipe_book(&mut app);
+                            if let Some(g) = app.game.as_mut() {
+                                if std::env::var("RK_RICH").is_ok() {
+                                    for it in [items::IRON_INGOT, items::STICK, items::COAL, items::FLOUR, items::EGG, items::MILK] {
+                                        g.player.inv.add(Item::Thing(it), 20);
+                                    }
+                                    g.player.inv.add(Item::Block(OAK_PLANKS), 30);
+                                }
+                            }
+                            app.book_tab = std::env::var("RK_TAB").ok().and_then(|t| t.parse().ok()).unwrap_or(0);
+                            app.book_sel = std::env::var("RK_BOOKSEL").ok().and_then(|t| t.parse().ok());
+                            if let Ok(q) = std::env::var("RK_BOOKQ") {
+                                app.book_search = q;
+                            }
+                        }
                         "inventory" => {
                             app.screen = Screen::Inventory;
                             app.inv_tab = std::env::var("RK_TAB").ok().and_then(|t| t.parse().ok()).unwrap_or(0);
@@ -2996,4 +3046,320 @@ mod tests {
         assert_eq!(w.get(p.x + 1, p.y, p.z), PORTAL);
         assert_eq!(w.get(p.x, p.y, p.z), PORTAL_FRAME);
     }
+}
+
+fn open_recipe_book(app: &mut App) {
+    app.screen = Screen::RecipeBook;
+    app.just_opened = true;
+    app.book_search.clear();
+    app.book_back.clear();
+}
+
+/// Разделы книги рецептов.
+const BOOK_TABS: [&str; 8] = ["Все", "Можно сделать", "Блоки", "Оружие", "Броня", "Еда", "Зелья", "Прочее"];
+
+fn book_tab_of(r: &crafting::Recipe) -> usize {
+    match r.out.0 {
+        Item::Block(_) => 2,
+        Item::Tool(..) => 3,
+        Item::Armor(..) => 4,
+        Item::Thing(t) => match items::thing(t).kind {
+            items::TKind::Food(..) => 5,
+            items::TKind::Potion(..) => 6,
+            _ => 7,
+        },
+        Item::Empty => 7,
+    }
+}
+
+/// Книга рецептов: поиск, разделы, страница рецепта с ингредиентами и «где используется».
+fn recipe_book_screen(app: &mut App) -> Option<Screen> {
+    let (w, h) = (screen_width(), screen_height());
+    let s = app.ui.s;
+    draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+
+    // ввод поиска; латинская E при пустом поиске закрывает книгу
+    let mut close = false;
+    if app.just_opened {
+        while get_char_pressed().is_some() {}
+    } else {
+        while let Some(c) = get_char_pressed() {
+            if (c == 'e' || c == 'E') && app.book_search.is_empty() {
+                close = true;
+            } else if !c.is_control() && app.book_search.chars().count() < 24 {
+                app.book_search.push(c);
+                app.book_scroll = 0.0;
+            }
+        }
+        if is_key_pressed(KeyCode::Backspace) {
+            app.book_search.pop();
+            app.book_scroll = 0.0;
+        }
+        if is_key_pressed(KeyCode::Delete) {
+            app.book_search.clear();
+            app.book_scroll = 0.0;
+        }
+    }
+
+    // обложка и два листа
+    let bw = (w - 24.0 * s).min(1120.0 * s);
+    let bh = (h - 24.0 * s).min(680.0 * s);
+    let (bx, by) = ((w - bw) / 2.0, (h - bh) / 2.0);
+    draw_rectangle(bx - 10.0 * s, by - 10.0 * s, bw + 20.0 * s, bh + 20.0 * s, Color::from_rgba(70, 40, 24, 255));
+    draw_rectangle_lines(bx - 6.0 * s, by - 6.0 * s, bw + 12.0 * s, bh + 12.0 * s, 2.0 * s, Color::from_rgba(214, 170, 70, 255));
+    let paper = Color::from_rgba(238, 226, 196, 255);
+    let paper2 = Color::from_rgba(230, 216, 182, 255);
+    let half = bw / 2.0;
+    draw_rectangle(bx, by, half - 4.0 * s, bh, paper);
+    draw_rectangle(bx + half + 4.0 * s, by, half - 4.0 * s, bh, paper2);
+    draw_rectangle(bx + half - 4.0 * s, by, 8.0 * s, bh, Color::from_rgba(150, 120, 80, 255));
+    let ink = Color::from_rgba(52, 36, 24, 255);
+    let faded = Color::from_rgba(120, 100, 76, 255);
+    let good = Color::from_rgba(40, 120, 50, 255);
+    let bad = Color::from_rgba(170, 40, 40, 255);
+
+    let g = app.game.as_mut().unwrap();
+    let stations = stations_near(g);
+    let all = crafting::recipes();
+    let ready = |r: &crafting::Recipe| r.can_craft(&g.player.inv) && stations.contains(&r.station);
+
+    // ---------- левый лист: поиск, разделы, сетка ----------
+    let lx = bx + 18.0 * s;
+    let lw = half - 40.0 * s;
+    app.ui.text("Книга рецептов", lx, by + 34.0 * s, 24.0, ink);
+    let sy = by + 50.0 * s;
+    draw_rectangle(lx, sy, lw, 28.0 * s, Color::from_rgba(250, 244, 226, 255));
+    draw_rectangle_lines(lx, sy, lw, 28.0 * s, 1.5 * s, faded);
+    let caret = if (app.time * 2.0).fract() < 0.5 { "|" } else { "" };
+    if app.book_search.is_empty() {
+        app.ui.text(&format!("Поиск: начните печатать название{caret}"), lx + 8.0 * s, sy + 19.0 * s, 13.0, faded);
+    } else {
+        app.ui.text(&format!("{}{caret}", app.book_search), lx + 8.0 * s, sy + 19.0 * s, 14.0, ink);
+    }
+    let tab_w = (lw - 3.0 * 6.0 * s) / 4.0;
+    for (i, name) in BOOK_TABS.iter().enumerate() {
+        let x = lx + (i % 4) as f32 * (tab_w + 6.0 * s);
+        let y = sy + 36.0 * s + (i / 4) as f32 * 30.0 * s;
+        let hov = app.ui.hover(x, y, tab_w, 25.0 * s);
+        let on = app.book_tab == i;
+        draw_rectangle(x, y, tab_w, 25.0 * s, if on { Color::from_rgba(120, 80, 46, 255) } else if hov { Color::from_rgba(214, 196, 156, 255) } else { Color::from_rgba(224, 208, 170, 255) });
+        app.ui.text_center(name, x + tab_w / 2.0, y + 17.0 * s, 12.0, if on { paper } else { ink });
+        if hov && app.ui.pressed {
+            app.book_tab = i;
+            app.book_scroll = 0.0;
+        }
+    }
+    let q = app.book_search.to_lowercase();
+    let list: Vec<usize> = (0..all.len())
+        .filter(|&i| {
+            let r = &all[i];
+            let tab_ok = match app.book_tab {
+                0 => true,
+                1 => ready(r),
+                t => book_tab_of(r) == t,
+            };
+            tab_ok && (q.is_empty() || r.out.0.name().to_lowercase().contains(&q))
+        })
+        .collect();
+    let cell = 42.0 * s;
+    let gap = 4.0 * s;
+    let cols = ((lw + gap) / (cell + gap)).floor().max(1.0) as usize;
+    let grid_top = sy + 104.0 * s;
+    let grid_h = by + bh - 34.0 * s - grid_top;
+    let vis_rows = (grid_h / (cell + gap)).floor().max(1.0) as usize;
+    let rows = list.len().div_ceil(cols);
+    let max_scroll = rows.saturating_sub(vis_rows) as f32;
+    let (_, wheel) = mouse_wheel();
+    if app.ui.hover(lx, grid_top, lw, grid_h) {
+        app.book_scroll = (app.book_scroll - wheel.signum()).clamp(0.0, max_scroll);
+    }
+    app.book_scroll = app.book_scroll.min(max_scroll);
+    let first = app.book_scroll as usize * cols;
+    let mut pick: Option<(usize, bool)> = None;
+    for (k, &ri) in list.iter().enumerate().skip(first).take(vis_rows * cols) {
+        let i = k - first;
+        let r = &all[ri];
+        let x = lx + (i % cols) as f32 * (cell + gap);
+        let y = grid_top + (i / cols) as f32 * (cell + gap);
+        let hov = app.ui.hover(x, y, cell, cell);
+        let can = ready(r);
+        let has = r.can_craft(&g.player.inv);
+        let bg = if app.book_sel == Some(ri) {
+            Color::from_rgba(250, 210, 110, 255)
+        } else if hov {
+            Color::from_rgba(214, 196, 156, 255)
+        } else {
+            Color::from_rgba(226, 212, 176, 255)
+        };
+        draw_rectangle(x, y, cell, cell, bg);
+        let frame = if can { good } else if has { Color::from_rgba(200, 150, 30, 255) } else { Color::from_rgba(180, 160, 120, 255) };
+        draw_rectangle_lines(x, y, cell, cell, if can || has { 2.5 * s } else { 1.0 * s }, frame);
+        app.ui.item_icon(r.out.0, x + 2.0 * s, y + 2.0 * s, cell - 4.0 * s);
+        if r.out.1 > 1 {
+            let t = r.out.1.to_string();
+            app.ui.text(&t, x + cell - app.ui.measure(&t, 11.0) - 3.0 * s, y + cell - 3.0 * s, 11.0, WHITE);
+        }
+        if hov {
+            app.ui.set_tooltip(r.out.0.name(), Some(format!("{} · {}", r.station.name(), if can { "можно сделать" } else if has { "нужна станция" } else { "не хватает материалов" })));
+            if app.ui.pressed {
+                pick = Some((ri, false));
+            }
+        }
+    }
+    let footer = if list.is_empty() {
+        "Ничего не найдено".to_string()
+    } else if max_scroll > 0.0 {
+        format!("Найдено: {} · колесо — листать ({}/{})", list.len(), app.book_scroll as usize + 1, max_scroll as usize + 1)
+    } else {
+        format!("Найдено: {}", list.len())
+    };
+    app.ui.text(&footer, lx, by + bh - 14.0 * s, 12.0, faded);
+
+    // ---------- правый лист: страница рецепта ----------
+    let rx = bx + half + 24.0 * s;
+    let rw = half - 48.0 * s;
+    let mut ry = by + 34.0 * s;
+    let mut craft_times = 0;
+    if let Some(ri) = app.book_sel {
+        let r = &all[ri];
+        if !app.book_back.is_empty() && app.ui.button_small(rx + rw - 90.0 * s, by + 14.0 * s, 90.0 * s, 26.0 * s, "← Назад") {
+            app.book_sel = app.book_back.pop();
+            return None;
+        }
+        let big = 72.0 * s;
+        draw_rectangle(rx, ry, big, big, Color::from_rgba(224, 208, 170, 255));
+        app.ui.item_icon(r.out.0, rx + 4.0 * s, ry + 4.0 * s, big - 8.0 * s);
+        let title = if r.out.1 > 1 { format!("{} ×{}", r.out.0.name(), r.out.1) } else { r.out.0.name() };
+        app.ui.text(&title, rx + big + 14.0 * s, ry + 26.0 * s, 18.0, ink);
+        if let Some(d) = r.out.0.description() {
+            app.ui.text(&d, rx + big + 14.0 * s, ry + 48.0 * s, 12.0, faded);
+        }
+        let st_ok = stations.contains(&r.station);
+        let where_ = if r.station == crafting::Station::Hand { "Делается в руках".to_string() } else { format!("Нужна станция: {}", r.station.name()) };
+        app.ui.text(&where_, rx + big + 14.0 * s, ry + 68.0 * s, 13.0, if st_ok { good } else { bad });
+        ry += big + 26.0 * s;
+        app.ui.text("Ингредиенты", rx, ry, 16.0, ink);
+        ry += 10.0 * s;
+        for (it, n) in &r.ins {
+            let have = g.player.inv.count(*it);
+            let row = 34.0 * s;
+            let hov = app.ui.hover(rx, ry, rw, row);
+            if hov {
+                draw_rectangle(rx, ry, rw, row, Color::from_rgba(214, 196, 156, 255));
+            }
+            app.ui.item_icon(*it, rx + 2.0 * s, ry + 2.0 * s, row - 4.0 * s);
+            app.ui.text(&it.name(), rx + row + 8.0 * s, ry + 22.0 * s, 14.0, ink);
+            let cnt = format!("{have} / {n}");
+            app.ui.text(&cnt, rx + rw - app.ui.measure(&cnt, 14.0) - 4.0 * s, ry + 22.0 * s, 14.0, if have >= *n as u32 { good } else { bad });
+            // переход к рецепту ингредиента
+            let src = all.iter().position(|x| x.out.0 == *it);
+            if hov {
+                app.ui.set_tooltip(it.name(), Some(if src.is_some() { "Щёлкните — открыть рецепт".into() } else { "Добывается в мире".into() }));
+                if app.ui.pressed {
+                    if let Some(si) = src {
+                        pick = Some((si, true));
+                    }
+                }
+            }
+            ry += row + 2.0 * s;
+        }
+        // кнопки крафта
+        ry += 10.0 * s;
+        let ok = ready(r);
+        let bwid = (rw - 10.0 * s) / 2.0;
+        if ok {
+            if app.ui.button_small(rx, ry, bwid, 32.0 * s, "Сделать") {
+                craft_times = 1;
+            }
+            if app.ui.button_small(rx + bwid + 10.0 * s, ry, bwid, 32.0 * s, "Сделать ×8") {
+                craft_times = 8;
+            }
+        } else {
+            let why = if !r.can_craft(&g.player.inv) { "Не хватает материалов" } else { "Подойдите к нужной станции" };
+            draw_rectangle(rx, ry, rw, 32.0 * s, Color::from_rgba(214, 196, 156, 255));
+            app.ui.text_center(why, rx + rw / 2.0, ry + 21.0 * s, 13.0, bad);
+        }
+        ry += 50.0 * s;
+        // где используется
+        let uses: Vec<usize> = (0..all.len()).filter(|&i| all[i].ins.iter().any(|(it, _)| *it == r.out.0)).collect();
+        app.ui.text(&format!("Используется в рецептах: {}", uses.len()), rx, ry, 15.0, ink);
+        ry += 8.0 * s;
+        let uc = 36.0 * s;
+        let ucols = ((rw + gap) / (uc + gap)).floor().max(1.0) as usize;
+        let urows = ((by + bh - 16.0 * s - ry) / (uc + gap)).floor().max(0.0) as usize;
+        for (k, &ui) in uses.iter().take(ucols * urows).enumerate() {
+            let x = rx + (k % ucols) as f32 * (uc + gap);
+            let y = ry + (k / ucols) as f32 * (uc + gap);
+            let hov = app.ui.hover(x, y, uc, uc);
+            draw_rectangle(x, y, uc, uc, if hov { Color::from_rgba(214, 196, 156, 255) } else { Color::from_rgba(224, 208, 170, 255) });
+            app.ui.item_icon(all[ui].out.0, x + 2.0 * s, y + 2.0 * s, uc - 4.0 * s);
+            if hov {
+                app.ui.set_tooltip(all[ui].out.0.name(), Some("Щёлкните — открыть рецепт".into()));
+                if app.ui.pressed {
+                    pick = Some((ui, true));
+                }
+            }
+        }
+    } else {
+        // титульная страница
+        let total = all.len();
+        let can = all.iter().filter(|r| ready(r)).count();
+        let lines = [
+            ("Как пользоваться", 18.0, ink),
+            ("", 8.0, ink),
+            ("Выберите предмет слева, чтобы увидеть рецепт.", 14.0, ink),
+            ("Зелёная рамка — можно сделать прямо сейчас.", 14.0, good),
+            ("Жёлтая рамка — материалы есть, нужна станция.", 14.0, Color::from_rgba(170, 120, 20, 255)),
+            ("Щелчок по ингредиенту открывает его рецепт.", 14.0, ink),
+            ("Печатайте на клавиатуре, чтобы искать по названию.", 14.0, ink),
+            ("Backspace стирает поиск.", 14.0, ink),
+            ("", 8.0, ink),
+            ("Станции", 18.0, ink),
+            ("Верстак, печь, котёл и наковальня работают,", 14.0, ink),
+            ("если стоят в 4 блоках от вас.", 14.0, ink),
+            ("", 8.0, ink),
+        ];
+        for (t, size, c) in lines {
+            if !t.is_empty() {
+                app.ui.text(t, rx, ry, size, c);
+            }
+            ry += (size + 10.0) * s;
+        }
+        let near: Vec<&str> = stations.iter().skip(1).map(|s| s.name()).collect();
+        app.ui.text(&format!("Рядом: {}", if near.is_empty() { "нет станций".to_string() } else { near.join(", ") }), rx, ry, 14.0, faded);
+        ry += 30.0 * s;
+        app.ui.text(&format!("Всего рецептов: {total}"), rx, ry, 16.0, ink);
+        ry += 24.0 * s;
+        app.ui.text(&format!("Можно сделать сейчас: {can}"), rx, ry, 16.0, good);
+        app.ui.text("Esc — закрыть книгу (или E, если поиск пуст)", rx, by + bh - 14.0 * s, 12.0, faded);
+    }
+    if let Some(ri) = app.book_sel {
+        if craft_times > 0 {
+            let r = &all[ri];
+            let mut made = 0;
+            for _ in 0..craft_times {
+                if crafting::craft(r, &mut g.player.inv) {
+                    made += 1;
+                }
+            }
+            if made > 0 {
+                g.toast = Some((format!("Сделано: {} ×{}", r.out.0.name(), r.out.1 as u32 * made), 1.5));
+            }
+        }
+    }
+    if let Some((p, link)) = pick {
+        if link {
+            // переход по ссылке: запомнить страницу для кнопки «Назад»
+            if let Some(cur) = app.book_sel {
+                app.book_back.push(cur);
+            }
+        } else {
+            app.book_back.clear();
+        }
+        app.book_sel = Some(p);
+    }
+    if !app.just_opened && (close || is_key_pressed(KeyCode::Escape)) {
+        return Some(Screen::Playing);
+    }
+    None
 }
