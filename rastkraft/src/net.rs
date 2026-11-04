@@ -51,6 +51,7 @@ pub struct MobSnap {
     pub hurt: bool,
     pub attack: u8,
     pub dying: u8,
+    pub hp: u8,
 }
 
 /// Отправитель удара «существо» в сообщении Hit.
@@ -196,6 +197,7 @@ pub fn encode(m: &Msg) -> Vec<u8> {
                 w.u8(m.hurt as u8);
                 w.u8(m.attack);
                 w.u8(m.dying);
+                w.u8(m.hp);
             }
         }
         Msg::MobHit { uid, dmg } => {
@@ -258,6 +260,7 @@ pub fn decode(b: &[u8]) -> Option<Msg> {
                     hurt: r.u8()? == 1,
                     attack: r.u8()?,
                     dying: r.u8()?,
+                    hp: r.u8()?,
                 });
             }
             Msg::Mobs { time, list }
@@ -464,7 +467,7 @@ mod tests {
             Msg::Hit { target: 2, from: 0, dmg: 7.5, knock: [1.0, 0.5, 0.0] },
             Msg::Chat { text: "привет".into() },
             Msg::Leave { id: 2 },
-            Msg::Mobs { time: 0.3, list: vec![MobSnap { uid: 7, def: 12, pos: [1.0, 2.0, 3.0], yaw: 0.4, hurt: true, attack: 128, dying: 0 }] },
+            Msg::Mobs { time: 0.3, list: vec![MobSnap { uid: 7, def: 12, pos: [1.0, 2.0, 3.0], yaw: 0.4, hurt: true, attack: 128, dying: 0, hp: 200 }] },
             Msg::MobHit { uid: 9, dmg: 3.5 },
             Msg::Give { item: 0x0400_0010, count: 3 },
         ];

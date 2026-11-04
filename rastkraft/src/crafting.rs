@@ -423,6 +423,15 @@ fn build() -> Vec<Recipe> {
     r((t(it::CHERRIES), 4), &[(b(SAKURA_LEAVES + 0), 4)], Hand);
     r((t(it::GRAPES), 2), &[(b(WILLOW_LEAVES), 4)], Hand);
     r((t(it::LEMON), 2), &[(b(ACACIA_LEAVES), 4)], Hand);
+    // ===== v0.11: призыв боссов =====
+    use crate::mobdefs::by_name;
+    let tr = |name: &str| t(items::mob_drop(by_name(name)));
+    r((t(items::SUMMON0), 1), &[(t(it::SLIME), 16), (tr("Прыгун"), 3), (t(it::GOLD_INGOT), 2)], Cauldron);
+    r((t(items::SUMMON0 + 1), 1), &[(tr("Каменный голем"), 1), (b(STONE_BRICKS), 16), (t(it::IRON_INGOT), 4)], Anvil);
+    r((t(items::SUMMON0 + 2), 1), &[(tr("Пещерный паук"), 4), (t(it::THREAD), 12), (t(it::SLIME), 2)], Cauldron);
+    r((t(items::SUMMON0 + 3), 1), &[(tr("Мумия"), 4), (tr("Страж пирамиды"), 1), (t(it::GOLD_INGOT), 4)], Anvil);
+    r((t(items::SUMMON0 + 4), 1), &[(tr("Морозный дух"), 2), (tr("Снежный йети"), 2), (t(it::SAPPHIRE), 2)], Anvil);
+    r((t(items::SUMMON0 + 5), 1), &[(tr("Падший ангел"), 4), (tr("Падший рыцарь"), 1), (t(it::HEAVEN_INGOT), 4)], Anvil);
     v
 }
 

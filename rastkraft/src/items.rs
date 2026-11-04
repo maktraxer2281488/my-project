@@ -319,6 +319,32 @@ pub const HEAVEN_PIE: u16 = EXTRA0 + 42;
 pub const STAR_COOKIE: u16 = EXTRA0 + 43;
 pub const RECIPE_BOOK: u16 = EXTRA0 + 44;
 pub const EXTRA_COUNT: u16 = 45;
+/// Трофеи существ с номером 100 и больше (v0.11) идут после вещей v0.9.
+pub const MOB_DROP2: u16 = EXTRA0 + EXTRA_COUNT;
+/// Предметы призыва боссов (по одному на босса).
+pub const SUMMON0: u16 = MOB_DROP2 + (crate::mobdefs::MOBS.len() as u16 - 100);
+pub const SUMMON_COUNT: u16 = 6;
+
+/// Трофей существа.
+pub fn mob_drop(def: usize) -> u16 {
+    if def < 100 { MOB_DROP0 + def as u16 } else { MOB_DROP2 + (def - 100) as u16 }
+}
+
+/// Существо, чей это трофей.
+pub fn drop_owner(t: u16) -> Option<usize> {
+    if (MOB_DROP0..EXTRA0).contains(&t) {
+        Some((t - MOB_DROP0) as usize)
+    } else if (MOB_DROP2..SUMMON0).contains(&t) {
+        Some((t - MOB_DROP2) as usize + 100)
+    } else {
+        None
+    }
+}
+
+/// Какого босса призывает предмет.
+pub fn summon_boss(t: u16) -> Option<usize> {
+    (SUMMON0..SUMMON0 + SUMMON_COUNT).contains(&t).then(|| crate::mobdefs::BOSS0 + (t - SUMMON0) as usize)
+}
 
 pub const POTIONS: [(Eff, f32, &str, (u8, u8, u8)); 10] = [
     (Eff::Heal, 0.0, "Зелье исцеления", (230, 50, 60)),
@@ -432,7 +458,7 @@ fn build_things() -> Vec<ThingDef> {
         t(name, TKind::Potion(e, s), Bottle, c, (150, 110, 70));
     }
     // трофеи существ
-    for mob in MOBS.iter() {
+    for mob in MOBS[..100].iter() {
         let kind = match mob.drop_kind {
             DropKind::Mat => TKind::Mat,
             DropKind::Food(h, e, s) => TKind::Food(h, e, s),
@@ -487,6 +513,23 @@ fn build_things() -> Vec<ThingDef> {
     t("Небесный пирог", fe(12, Eff::Regen, 30.0), Pie, (255, 230, 160), (250, 210, 80));
     t("Звёздное печенье", fe(4, Eff::Night, 60.0), Cookie, (250, 230, 120), (130, 110, 240));
     t("Книга рецептов", m, Book, (60, 110, 70), (230, 190, 70));
+    // v0.11: трофеи новых существ и боссов
+    for mob in MOBS[100..].iter() {
+        let kind = match mob.drop_kind {
+            DropKind::Mat => TKind::Mat,
+            DropKind::Food(h, e, s) => TKind::Food(h, e, s),
+        };
+        let c = mob.drop_col;
+        let dark = ((c.0 as f32 * 0.6) as u8, (c.1 as f32 * 0.6) as u8, (c.2 as f32 * 0.6) as u8);
+        t(mob.drop_name, kind, mob.drop_icon, c, dark);
+    }
+    // предметы призыва боссов
+    t("Слизневый тотем", m, Blob, (90, 210, 80), (250, 220, 60));
+    t("Руна титана", m, Gem, (255, 140, 40), (90, 90, 100));
+    t("Паучье яйцо", m, Egg, (60, 40, 60), (220, 40, 80));
+    t("Проклятый анкх", m, Horn, (250, 200, 60), (40, 90, 160));
+    t("Кристалл вечной зимы", m, Gem, (140, 220, 255), (60, 120, 255));
+    t("Чёрный нимб", m, Orb, (60, 50, 70), (255, 60, 60));
     v
 }
 
@@ -557,6 +600,7 @@ impl Item {
         match self {
             Item::Tool(..) | Item::Armor(..) => 1,
             Item::Thing(RECIPE_BOOK) => 1,
+            Item::Thing(t) if summon_boss(t).is_some() => 1,
             Item::Thing(t) if matches!(thing(t).kind, TKind::Potion(..)) => 8,
             Item::Empty => 0,
             _ => 64,
@@ -681,10 +725,13 @@ impl Item {
                 }),
                 TKind::Potion(e, s) => Some(if s > 0.0 { format!("{} на {:.0} с", e.name(), s) } else { e.name().to_string() }),
                 TKind::Mat => {
-                    if t == RECIPE_BOOK {
+                    if let Some(b) = summon_boss(t) {
+                        Some(format!("ПКМ — призвать босса: {}", MOBS[b].name))
+                    } else if t == RECIPE_BOOK {
                         Some("ПКМ или B — открыть. Все рецепты игры".into())
-                    } else if (MOB_DROP0..EXTRA0).contains(&t) {
-                        Some(format!("Трофей: {}", MOBS[(t - MOB_DROP0) as usize].name))
+                    } else if let Some(o) = drop_owner(t) {
+                        let boss = if MOBS[o].flags & crate::mobdefs::BOSS != 0 { "Трофей босса" } else { "Трофей" };
+                        Some(format!("{boss}: {}", MOBS[o].name))
                     } else {
                         Some("Материал для крафта".into())
                     }
@@ -1156,9 +1203,9 @@ pub fn catalog(tab: usize) -> Vec<Item> {
         3 => by_cat(Cat::Ores),
         4 => by_cat(Cat::Decor),
         5 => by_cat(Cat::Heaven),
-        6 => (0..MOB_DROP0).chain(EXTRA0..n).filter(|&t| matches!(thing(t).kind, TKind::Food(..))).map(Item::Thing).collect(),
-        7 => (0..MOB_DROP0).chain(EXTRA0..n).filter(|&t| thing(t).kind == TKind::Mat).map(Item::Thing).collect(),
-        8 => (MOB_DROP0..EXTRA0).map(Item::Thing).collect(),
+        6 => (0..MOB_DROP0).chain(EXTRA0..MOB_DROP2).filter(|&t| matches!(thing(t).kind, TKind::Food(..))).map(Item::Thing).collect(),
+        7 => (0..MOB_DROP0).chain(EXTRA0..MOB_DROP2).chain(SUMMON0..n).filter(|&t| thing(t).kind == TKind::Mat).map(Item::Thing).collect(),
+        8 => (MOB_DROP0..EXTRA0).chain(MOB_DROP2..SUMMON0).map(Item::Thing).collect(),
         9 => TOOL_KINDS.iter().flat_map(|&k| TOOL_MATS.iter().map(move |&m| Item::Tool(k, m))).collect(),
         10 => ARMOR_MATS.iter().flat_map(|&m| SLOTS.iter().map(move |&s| Item::Armor(s, m))).collect(),
         _ => (0..10).map(|i| Item::Thing(POTION0 + i)).collect(),

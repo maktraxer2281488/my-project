@@ -20,6 +20,8 @@ pub struct MobEvents {
     pub hurts: Vec<(u8, f32, Vec3)>,
     /// (игрок, предмет, количество) — трофеи за убийство
     pub gives: Vec<(u8, Item, u16)>,
+    /// Сообщения в чат (пробуждение и гибель боссов).
+    pub say: Vec<String>,
 }
 
 pub const MAX_FRIENDLY: usize = 50;
@@ -54,6 +56,15 @@ pub struct Mob {
     light_t: f32,
     pub head_yaw: f32,
     pub head_pitch: f32,
+    /// Боссы: таймеры особых атак, вторая фаза, сколько раз делился/звал помощь.
+    pub skill_t: f32,
+    pub skill2_t: f32,
+    pub enraged: bool,
+    pub splits: u8,
+    pub slam: bool,
+    pub stuck_t: f32,
+    /// Доля здоровья из снимка хоста (у клиента).
+    pub hp_net: Option<f32>,
 }
 
 impl Mob {
@@ -92,7 +103,28 @@ impl Mob {
             light_t: 0.0,
             head_yaw: 0.0,
             head_pitch: 0.0,
+            skill_t: 4.0,
+            skill2_t: 9.0,
+            enraged: false,
+            splits: 0,
+            slam: false,
+            stuck_t: 0.0,
+            hp_net: None,
         }
+    }
+
+    pub fn is_boss(&self) -> bool {
+        self.d().flags & BOSS != 0
+    }
+
+    pub fn max_health(&self) -> f32 {
+        let d = self.d();
+        if d.friendly { d.hp } else { d.hp * HOSTILE_HP }
+    }
+
+    /// Доля оставшегося здоровья (0..1).
+    pub fn health_frac(&self) -> f32 {
+        self.hp_net.unwrap_or((self.health / self.max_health()).clamp(0.0, 1.0))
     }
 
     pub fn d(&self) -> &'static MobDef {
@@ -124,8 +156,13 @@ impl Mob {
         self.health -= amount;
         self.hurt_t = 0.3;
         let dir = (self.body.pos - from).with_y(0.0).normalize_or_zero();
-        self.body.vel += dir * 6.0 + vec3(0.0, 4.5, 0.0);
-        self.flee_t = 4.0;
+        if self.is_boss() {
+            // босса почти не отбросить, и он не убегает
+            self.body.vel += dir * 0.8;
+        } else {
+            self.body.vel += dir * 6.0 + vec3(0.0, 4.5, 0.0);
+            self.flee_t = 4.0;
+        }
         self.angry = true;
         if self.health <= 0.0 {
             self.dying = 0.01;
@@ -160,11 +197,12 @@ pub struct Mobs {
     pub list: Vec<Mob>,
     spawn_t: f32,
     rng: u32,
+    pending_say: Vec<String>,
 }
 
 impl Mobs {
     pub fn new() -> Self {
-        Mobs { frame: 0, list: Vec::new(), spawn_t: 0.0, rng: 0x1234_5678 }
+        Mobs { frame: 0, list: Vec::new(), spawn_t: 0.0, rng: 0x1234_5678, pending_say: Vec::new() }
     }
 
     fn rand(&mut self) -> f32 {
@@ -175,7 +213,7 @@ impl Mobs {
     }
 
     fn pick(&mut self, filter: impl Fn(&MobDef) -> bool) -> Option<usize> {
-        let ids: Vec<usize> = (0..MOBS.len()).filter(|&i| filter(&MOBS[i])).collect();
+        let ids: Vec<usize> = (0..MOBS.len()).filter(|&i| MOBS[i].flags & BOSS == 0 && filter(&MOBS[i])).collect();
         if ids.is_empty() {
             return None;
         }
@@ -185,6 +223,37 @@ impl Mobs {
     pub fn counts(&self) -> (usize, usize) {
         let f = self.list.iter().filter(|m| m.d().friendly).count();
         (f, self.list.len() - f)
+    }
+
+    pub fn boss_alive(&self) -> bool {
+        self.list.iter().any(|m| m.is_boss() && m.alive())
+    }
+
+    /// Призвать босса рядом с точкой (предметом призыва или изредка сам).
+    pub fn summon_boss(&mut self, world: &World, def: usize, near: Vec3, dir: Vec3) -> Option<String> {
+        let flat = dir.with_y(0.0).normalize_or_zero();
+        let base = near + flat * 8.0;
+        let (x, z) = (base.x.floor() as i32, base.z.floor() as i32);
+        // ищем землю не дальше 20 блоков вниз; если чанк не загружен — на уровне игрока
+        let top = (near.y as i32 + 10).min(124);
+        let mut y = top;
+        while y > top - 30 && y > 2 && !is_solid(world.get(x, y - 1, z)) {
+            y -= 1;
+        }
+        if !world.is_loaded(x, z) || y <= top - 30 || y <= 2 {
+            y = near.y as i32 + 1;
+        }
+        // не застревать в стене: поднимаемся, пока над ногами не будет свободно
+        while y < 124 && (is_solid(world.get(x, y, z)) || is_solid(world.get(x, y + 1, z))) {
+            y += 1;
+        }
+        let fly = MOBS[def].flags & FLY != 0;
+        let pos = vec3(x as f32 + 0.5, y as f32 + if fly { 3.0 } else { 0.2 }, z as f32 + 0.5);
+        let mut m = Mob::new(def, pos);
+        m.angry = true;
+        m.yaw = (-flat.z).atan2(-flat.x);
+        self.list.push(m);
+        Some(format!("{} пробуждается!", MOBS[def].name))
     }
 
     fn try_spawn(&mut self, world: &World, anchor: Vec3, daylight: f32, difficulty: u8) {
@@ -265,6 +334,28 @@ impl Mobs {
                     self.list.push(Mob::new(id, pos));
                 }
             }
+            // очень редко сам пробуждается босс своего края
+            if difficulty > 0 && !water && self.rand() < 0.00003 && !self.boss_alive() {
+                let want = if world.dim == Dim::Heaven {
+                    Some(BOSS0 + 5)
+                } else if !exposed {
+                    Some(if y < 40 { BOSS0 + 1 } else { BOSS0 + 2 })
+                } else {
+                    match biome {
+                        Biome::Desert if night => Some(BOSS0 + 3),
+                        Biome::Taiga => Some(BOSS0 + 4),
+                        Biome::Ocean => None,
+                        _ if night => Some(BOSS0),
+                        _ => None,
+                    }
+                };
+                if let Some(b) = want {
+                    let mut m = Mob::new(b, pos + vec3(0.0, if MOBS[b].flags & FLY != 0 { 3.0 } else { 0.0 }, 0.0));
+                    m.angry = true;
+                    self.list.push(m);
+                    self.pending_say.push(format!("Где-то рядом пробудился босс: {}!", MOBS[b].name));
+                }
+            }
             return;
         }
     }
@@ -298,6 +389,9 @@ impl Mobs {
 
         self.frame = self.frame.wrapping_add(1);
         let frame = self.frame;
+        ev.say.append(&mut self.pending_say);
+        let mut new_mobs: Vec<(usize, Vec3)> = Vec::new();
+        let minions = self.list.len();
         for (i, m) in self.list.iter_mut().enumerate() {
             // далёкие существа думают и двигаются реже (каждый 3-й кадр)
             let mut near = (player.body.pos - m.body.pos).length_squared();
@@ -365,7 +459,8 @@ impl Mobs {
             let flat = to.with_y(0.0);
             let dist = flat.length();
             let dir_to = flat.normalize_or_zero();
-            let chase = m.hostile() && !tgt_creative && dist < 22.0 && to.y.abs() < 10.0;
+            let boss = d.flags & BOSS != 0;
+            let chase = m.hostile() && !tgt_creative && dist < if boss { 48.0 } else { 22.0 } && to.y.abs() < if boss { 24.0 } else { 10.0 };
             let fly = d.flags & FLY != 0;
             let swim = d.flags & SWIM != 0;
             let in_water = world.get(m.body.pos.x.floor() as i32, (m.body.pos.y + 0.3).floor() as i32, m.body.pos.z.floor() as i32) == WATER;
@@ -395,6 +490,9 @@ impl Mobs {
             }
 
             let mut speed = if chase { d.speed } else { d.speed * 0.45 };
+            if m.enraged {
+                speed *= 1.3;
+            }
             if m.flee_t > 0.0 && !m.hostile() {
                 speed = d.speed * 1.4;
             }
@@ -464,6 +562,24 @@ impl Mobs {
                 m.dying = 0.01;
             }
 
+            if boss && std::env::var("RK_BOSSLOG").is_ok() && frame % 30 == 0 {
+                eprintln!("BOSS {} pos={:?} vel={:?} ground={} chase={} hp={:.0} dist={:.1} stuck={:.1} wall={}", d.name, m.body.pos, m.body.vel, m.body.on_ground, chase, m.health, dist, m.stuck_t, m.body.hit_wall);
+            }
+            // особые атаки боссов
+            if boss && chase {
+                let boss_dmg = d.dmg * dmg_k * if m.enraged { 1.25 } else { 1.0 };
+                let (r, sk) = boss_skill(m, i, dist, dir_to, ppos, tgt.0, boss_dmg, dt, minions, ents, &mut ev, &mut new_mobs);
+                if let Some((dmg, knock)) = r {
+                    match tgt.0 {
+                        None => {
+                            player.hurt(dmg, knock, false);
+                        }
+                        Some(rid) => ev.hurts.push((rid, dmg, knock)),
+                    }
+                }
+                let _ = sk;
+            }
+
             // атака
             if m.hostile() && !tgt_creative && m.attack_cd <= 0.0 {
                 let reach = 1.2 + m.body.hw;
@@ -504,6 +620,7 @@ impl Mobs {
         let mut drops: Vec<(Item, u16, Vec3)> = Vec::new();
         let mut gives: Vec<(u8, Item, u16)> = Vec::new();
         let mut smoke_at: Vec<Vec3> = Vec::new();
+        let mut boss_dead: Vec<&'static str> = Vec::new();
         let ppos = player.body.pos;
         self.list.retain(|m| {
             if m.dying >= 1.0 {
@@ -512,7 +629,7 @@ impl Mobs {
                 let r = crate::blocks::hash(m.body.pos.x as i32, m.body.pos.z as i32, m.def as u32);
                 let p = m.body.pos + vec3(0.0, 0.5, 0.0);
                 if r < 0.75 {
-                    out.push((Item::Thing(items::MOB_DROP0 + m.def as u16), 1 + (r < 0.2) as u16));
+                    out.push((Item::Thing(items::mob_drop(m.def)), 1 + (r < 0.2) as u16));
                 }
                 let extra = match d.extra {
                     Extra::None => None,
@@ -534,6 +651,10 @@ impl Mobs {
                 if let Some(e) = extra {
                     out.push((Item::Thing(e), 1 + (r * 2.5) as u16));
                 }
+                if d.flags & BOSS != 0 {
+                    out.extend(boss_loot(m.def, r));
+                    boss_dead.push(d.name);
+                }
                 smoke_at.push(p);
                 for (it, n) in out {
                     match m.killer {
@@ -547,8 +668,16 @@ impl Mobs {
             for &(_, rp) in remotes {
                 dd = dd.min((m.body.pos - rp).length());
             }
-            dd < 120.0 && m.body.pos.y > -30.0
+            dd < if m.is_boss() { 260.0 } else { 120.0 } && m.body.pos.y > -30.0
         });
+        for name in boss_dead {
+            ev.say.push(format!("Босс {name} повержен!"));
+        }
+        for (def, pos) in new_mobs {
+            let mut m = Mob::new(def, pos);
+            m.angry = true;
+            self.list.push(m);
+        }
         for (k, (it, n, p)) in drops.into_iter().enumerate() {
             ents.spawn_drop(it, n, p, k as f32 * 0.37);
         }
@@ -573,6 +702,7 @@ impl Mobs {
                 hurt: m.hurt_t > 0.0,
                 attack: (m.attack_anim.clamp(0.0, 1.0) * 255.0) as u8,
                 dying: (m.dying.clamp(0.0, 1.0) * 255.0) as u8,
+                hp: (m.health_frac() * 255.0) as u8,
             })
             .collect()
     }
@@ -596,6 +726,7 @@ impl Mobs {
             m.hurt_t = if s.hurt { 0.1 } else { 0.0 };
             m.attack_anim = s.attack as f32 / 255.0;
             m.dying = s.dying as f32 / 255.0;
+            m.hp_net = Some(s.hp as f32 / 255.0);
             keep.push(m);
         }
         self.list = keep;
@@ -667,6 +798,252 @@ impl Mobs {
                 }
             }
             model::draw_mob(m.def, p, m.yaw, &a);
+            if d.flags & BOSS != 0 && m.dying <= 0.0 {
+                // парящая корона над боссом
+                let top = p + vec3(0.0, m.body.h + 0.35 + (t * 2.0).sin() * 0.08, 0.0);
+                let r = (m.body.hw * 0.55).max(0.35);
+                let gold = if m.enraged { Color::new(1.0, 0.35, 0.25, 1.0) } else { Color::new(1.0, 0.82, 0.25, 1.0) };
+                let spin = t * 0.8;
+                for k in 0..10 {
+                    let ang = spin + k as f32 / 10.0 * std::f32::consts::TAU;
+                    let c = top + vec3(ang.cos() * r, 0.0, ang.sin() * r);
+                    let h = if k % 2 == 0 { 0.32 } else { 0.16 };
+                    let mm = Mat4::from_translation(c + vec3(0.0, h * 0.5, 0.0)) * Mat4::from_rotation_y(-ang) * Mat4::from_scale(vec3(0.12, h, 0.12));
+                    model::cube(mm, gold);
+                    if k % 2 == 0 {
+                        let gem = Mat4::from_translation(c + vec3(0.0, h + 0.05, 0.0)) * Mat4::from_scale(Vec3::splat(0.07));
+                        model::cube(gem, Color::from_rgba(d.c3.0, d.c3.1, d.c3.2, 255));
+                    }
+                }
+            }
         }
     }
+}
+
+
+fn shoot(ents: &mut Entities, from: Vec3, dir: Vec3, speed: f32, damage: f32, color: Color) {
+    ents.projectiles.push(Projectile { pos: from + dir * 0.8, vel: dir * speed + vec3(0.0, 1.0, 0.0), damage, color, age: 0.0, from_player: false });
+}
+
+/// Поворот направления вокруг вертикали.
+fn rot_y(v: Vec3, a: f32) -> Vec3 {
+    let (s, c) = a.sin_cos();
+    vec3(v.x * c - v.z * s, v.y, v.x * s + v.z * c)
+}
+
+/// Особые атаки боссов. Возвращает удар по цели (урон, отбрасывание), если он был.
+#[allow(clippy::too_many_arguments)]
+fn boss_skill(
+    m: &mut Mob,
+    _i: usize,
+    dist: f32,
+    dir_to: Vec3,
+    ppos: Vec3,
+    remote: Option<u8>,
+    dmg: f32,
+    dt: f32,
+    minions: usize,
+    ents: &mut Entities,
+    ev: &mut MobEvents,
+    new_mobs: &mut Vec<(usize, Vec3)>,
+) -> (Option<(f32, Vec3)>, ()) {
+    let d = m.d();
+    let kind = m.def - BOSS0;
+    let col = Color::from_rgba(d.c3.0, d.c3.1, d.c3.2, 255);
+    let col2 = Color::from_rgba(d.c1.0, d.c1.1, d.c1.2, 255);
+    let center = m.body.pos + vec3(0.0, m.body.h * 0.6, 0.0);
+    let mut hit: Option<(f32, Vec3)> = None;
+    // ярость на половине здоровья
+    if !m.enraged && m.health < m.max_health() * 0.5 {
+        m.enraged = true;
+        ev.say.push(format!("{} в ярости!", d.name));
+        ents.burst(center, 40, m.body.hw * 1.5, &[col, col2, WHITE], 0.16, 6.0);
+        if kind == 5 {
+            m.health += m.max_health() * 0.2;
+        }
+    }
+    m.skill_t -= dt;
+    m.skill2_t -= dt;
+    // огромное тело цепляется за деревья: сначала большой прыжок, потом рывок к игроку
+    let hspeed = vec2(m.body.vel.x, m.body.vel.z).length();
+    if d.flags & FLY == 0 && dist > 3.0 && (hspeed < 0.5 || m.body.hit_wall) {
+        m.stuck_t += dt;
+    } else {
+        m.stuck_t = (m.stuck_t - dt * 0.5).max(0.0);
+    }
+    if m.stuck_t > 1.5 && m.stuck_t < 1.5 + dt * 2.0 + 0.05 && m.body.on_ground {
+        m.body.vel = dir_to * 7.0 + vec3(0.0, 15.0, 0.0);
+    }
+    if m.stuck_t > 4.0 {
+        m.stuck_t = 0.0;
+        ents.burst(center, 30, m.body.hw, &[col, col2], 0.14, 4.0);
+        m.body.pos = ppos - dir_to * 3.0 + vec3(0.0, 1.0, 0.0);
+        m.body.vel = Vec3::ZERO;
+    }
+    let fast = if m.enraged { 0.65 } else { 1.0 };
+    let aim = |from: Vec3| ((ppos + vec3(0.0, 1.0, 0.0)) - from).normalize_or_zero();
+    // по сетевому игроку снаряды не долетят — бьём напрямую с меньшим уроном
+    let ranged = |ents: &mut Entities, hit: &mut Option<(f32, Vec3)>, dirs: &[Vec3], speed: f32, k: f32| {
+        if remote.is_some() {
+            if dist < 24.0 {
+                *hit = Some((dmg * k * 0.6, dir_to * 3.0 + vec3(0.0, 2.0, 0.0)));
+            }
+        } else {
+            for dd in dirs {
+                shoot(ents, center, *dd, speed, dmg * k, col);
+            }
+        }
+    };
+    match kind {
+        0 => {
+            // Король слизней: делится при потере здоровья и прыгает с ударной волной
+            let want = (((1.0 - m.health / m.max_health()) * 4.0) as u8).min(3);
+            while m.splits < want {
+                m.splits += 1;
+                for k in 0..3 {
+                    let a = k as f32 * 2.1;
+                    new_mobs.push((by_name("Прыгун"), m.body.pos + vec3(a.cos() * 2.0, 1.0, a.sin() * 2.0)));
+                }
+                ents.burst(center, 30, 1.5, &[col2, col], 0.14, 5.0);
+            }
+            if m.slam && m.body.on_ground && m.body.vel.y <= 0.0 {
+                m.slam = false;
+                ents.burst(m.body.pos + vec3(0.0, 0.3, 0.0), 40, 3.0, &[col2, WHITE], 0.12, 7.0);
+                if dist < 5.0 {
+                    hit = Some((dmg * 1.1, dir_to * 9.0 + vec3(0.0, 8.0, 0.0)));
+                }
+            }
+            if m.skill_t <= 0.0 && m.body.on_ground {
+                m.skill_t = 5.0 * fast;
+                m.body.vel = dir_to * (dist.min(12.0) * 0.9 + 3.0) + vec3(0.0, 13.0, 0.0);
+                m.slam = true;
+                m.attack_anim = 1.0;
+            }
+        }
+        1 => {
+            // Каменный титан: удар о землю и брошенные валуны
+            if m.skill_t <= 0.0 && dist < 9.0 {
+                m.skill_t = 6.0 * fast;
+                m.attack_anim = 1.0;
+                for k in 0..24 {
+                    let a = k as f32 / 24.0 * std::f32::consts::TAU;
+                    let p = m.body.pos + vec3(a.cos() * 3.5, 0.3, a.sin() * 3.5);
+                    ents.burst(p, 2, 0.4, &[col2, Color::from_rgba(90, 80, 70, 255)], 0.18, 4.0);
+                }
+                if dist < 7.0 {
+                    hit = Some((dmg * 1.2, dir_to * 6.0 + vec3(0.0, 11.0, 0.0)));
+                }
+            }
+            if m.skill2_t <= 0.0 && dist > 8.0 {
+                m.skill2_t = 4.0 * fast;
+                m.attack_anim = 1.0;
+                let a = aim(center);
+                ranged(ents, &mut hit, &[a], 20.0, 0.9);
+            }
+        }
+        2 => {
+            // Королева пауков: зовёт пауков и плюётся ядом
+            if m.skill_t <= 0.0 {
+                m.skill_t = 9.0 * fast;
+                if minions < 95 {
+                    for k in 0..2 {
+                        let a = k as f32 * 3.1 + m.phase;
+                        new_mobs.push((by_name("Пещерный паук"), m.body.pos + vec3(a.cos() * 2.5, 0.5, a.sin() * 2.5)));
+                    }
+                    ents.burst(center, 20, 1.5, &[col, col2], 0.12, 3.0);
+                }
+            }
+            if m.skill2_t <= 0.0 && dist > 4.0 {
+                m.skill2_t = 2.5 * fast;
+                m.attack_anim = 1.0;
+                let a = aim(center);
+                ranged(ents, &mut hit, &[rot_y(a, -0.15), a, rot_y(a, 0.15)], 17.0, 0.6);
+            }
+        }
+        3 => {
+            // Фараон: веер проклятых снарядов, телепорт за спину, мумии
+            if m.skill_t <= 0.0 {
+                m.skill_t = 6.0 * fast;
+                m.attack_anim = 1.0;
+                let a = aim(center);
+                let dirs: Vec<Vec3> = (-2..=2).map(|k| rot_y(a, k as f32 * 0.18)).collect();
+                ranged(ents, &mut hit, &dirs, 18.0, 0.7);
+            }
+            if m.skill2_t <= 0.0 {
+                m.skill2_t = 13.0 * fast;
+                ents.burst(center, 30, 1.2, &[col, col2], 0.14, 4.0);
+                m.body.pos = ppos - dir_to * 4.0 + vec3(0.0, 0.5, 0.0);
+                m.body.vel = Vec3::ZERO;
+                for k in 0..2 {
+                    let a = k as f32 * 3.1;
+                    new_mobs.push((by_name("Мумия"), ppos + vec3(a.cos() * 4.0, 0.5, a.sin() * 4.0)));
+                }
+            }
+        }
+        4 => {
+            // Ледяной дракон: залп ледяных осколков и пикирование
+            if m.skill_t <= 0.0 {
+                m.skill_t = 5.0 * fast;
+                m.attack_anim = 1.0;
+                let a = aim(center);
+                let dirs: Vec<Vec3> = (-3..=3).map(|k| rot_y(a, k as f32 * 0.12)).collect();
+                ranged(ents, &mut hit, &dirs, 20.0, 0.55);
+            }
+            if m.enraged && m.skill2_t <= 0.0 {
+                m.skill2_t = 7.0;
+                m.body.vel = (ppos + vec3(0.0, 1.0, 0.0) - center).normalize_or_zero() * 18.0;
+            }
+        }
+        _ => {
+            // Падший серафим: кольцо света и прицельные лучи
+            if m.skill_t <= 0.0 {
+                m.skill_t = 6.0 * fast;
+                m.attack_anim = 1.0;
+                let n = if m.enraged { 16 } else { 12 };
+                let dirs: Vec<Vec3> = (0..n).map(|k| {
+                    let a = k as f32 / n as f32 * std::f32::consts::TAU;
+                    vec3(a.cos(), -0.12, a.sin())
+                }).collect();
+                if remote.is_none() {
+                    for dd in &dirs {
+                        shoot(ents, center, *dd, 14.0, dmg * 0.6, col);
+                    }
+                } else if dist < 16.0 {
+                    hit = Some((dmg * 0.5, dir_to * 3.0 + vec3(0.0, 2.0, 0.0)));
+                }
+            }
+            if m.skill2_t <= 0.0 {
+                m.skill2_t = 2.2 * fast;
+                let a = aim(center);
+                ranged(ents, &mut hit, &[a], 24.0, 0.7);
+            }
+        }
+    }
+    (hit, ())
+}
+
+/// Добыча с босса (кроме трофея).
+fn boss_loot(def: usize, r: f32) -> Vec<(Item, u16)> {
+    use crate::items::{Mat, ToolKind, Slot};
+    let t = Item::Thing;
+    let n = |k: f32| 2 + (r * k) as u16;
+    let mut v = match def - BOSS0 {
+        0 => vec![(t(items::SLIME), 24), (Item::Block(JELLY_BLOCK), n(4.0)), (t(items::GOLD_INGOT), n(5.0)), (t(items::MALACHITE), n(4.0))],
+        1 => vec![(t(items::IRON_INGOT), 16), (t(items::RUBY), n(4.0)), (Item::Block(OBSIDIAN), 8), (t(items::STEEL_INGOT), n(6.0))],
+        2 => vec![(t(items::THREAD), 32), (t(items::SILK), n(8.0)), (t(items::CRYSTAL), n(3.0)), (t(items::PEARL), n(3.0))],
+        3 => vec![(t(items::GOLD_INGOT), 16), (t(items::SAPPHIRE), n(4.0)), (t(items::AMBER), n(6.0)), (t(items::GEM_DUST), n(6.0))],
+        4 => vec![(t(items::SAPPHIRE), n(6.0)), (Item::Block(PACKED_ICE), 16), (t(items::CRYSTAL), n(4.0)), (t(items::GEM_DUST), n(6.0))],
+        _ => vec![(t(items::HEAVEN_INGOT), n(6.0)), (t(items::HEAVEN_DUST), 24), (t(items::CRYSTAL), n(5.0)), (t(items::STARFRUIT), n(4.0))],
+    };
+    // и одна редкая вещь
+    let kinds = [ToolKind::Katana, ToolKind::Battleaxe, ToolKind::Warhammer, ToolKind::Scythe, ToolKind::Halberd, ToolKind::Rapier];
+    let mat = if def - BOSS0 >= 4 { Mat::Heaven } else { Mat::Crystal };
+    let k = kinds[((r * 977.0) as usize + def) % kinds.len()];
+    if r < 0.6 {
+        v.push((Item::Tool(k, mat), 1));
+    } else {
+        let s = [Slot::Helmet, Slot::Chest, Slot::Legs, Slot::Boots][((r * 131.0) as usize) % 4];
+        v.push((Item::Armor(s, mat), 1));
+    }
+    v
 }

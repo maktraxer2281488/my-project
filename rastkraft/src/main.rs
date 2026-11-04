@@ -944,6 +944,21 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
         let creative = g.creative;
         let daylight = g.daylight();
         let dim = g.dim;
+        // отладка: RK_BOSS=N призывает босса через несколько секунд после входа
+        {
+            use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+            static DONE: AtomicBool = AtomicBool::new(false);
+            static FRAMES: AtomicU32 = AtomicU32::new(0);
+            if !DONE.load(Ordering::Relaxed) {
+                if let Some(b) = std::env::var("RK_BOSS").ok().and_then(|v| v.parse::<usize>().ok()) {
+                    if FRAMES.fetch_add(1, Ordering::Relaxed) > 60 {
+                        DONE.store(true, Ordering::Relaxed);
+                        let (p, d) = (g.player.body.pos, g.player.forward());
+                        let _ = g.mobs.summon_boss(&g.worlds[dim as usize], mobdefs::BOSS0 + b, p, d);
+                    }
+                }
+            }
+        }
         {
             let world = &g.worlds[dim as usize];
             g.player.update(world, dt, creative, playing, difficulty);
@@ -960,6 +975,16 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                     Vec::new()
                 };
                 let ev = g.mobs.update(world, &mut g.player, &mut g.ents, dt, daylight, difficulty, creative, &others);
+                for text in &ev.say {
+                    g.chat.push((text.clone(), 10.0));
+                    if g.chat.len() > 8 {
+                        g.chat.remove(0);
+                    }
+                    g.toast = Some((text.clone(), 3.5));
+                    if let Some(n) = &g.net {
+                        n.broadcast(&Msg::Chat { text: text.clone() }, None);
+                    }
+                }
                 if let Some(n) = &g.net {
                     for (id, dmg, knock) in ev.hurts {
                         n.send_to(id, &Msg::Hit { target: id, from: net::FROM_MOB, dmg, knock: knock.to_array() });
@@ -1219,6 +1244,26 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
             if rmb_p && held == Item::Thing(items::RECIPE_BOOK) {
                 open_book = true;
                 used = true;
+            }
+            if let Item::Thing(st) = held {
+                if let (true, Some(boss)) = (rmb_p, items::summon_boss(st)) {
+                    used = true;
+                    if g.net.as_ref().is_some_and(|n| !n.host) {
+                        g.toast = Some(("Призывать боссов может только хозяин мира".into(), 2.5));
+                    } else if g.mobs.boss_alive() {
+                        g.toast = Some(("Другой босс ещё жив".into(), 2.0));
+                    } else if let Some(text) = g.mobs.summon_boss(world, boss, g.player.body.pos, dir) {
+                        if !creative {
+                            let sel = g.player.selected;
+                            g.player.inv.slots[sel] = Stack::EMPTY;
+                        }
+                        g.chat.push((text.clone(), 10.0));
+                        g.toast = Some((text.clone(), 3.0));
+                        if let Some(n) = &g.net {
+                            n.broadcast(&Msg::Chat { text }, None);
+                        }
+                    }
+                }
             }
             if rmb_p && !used {
                 if let Some((h, _, b)) = target_block {
@@ -2250,6 +2295,24 @@ fn draw_hud(app: &mut App) {
         }
     }
 
+    // полоска здоровья ближайшего босса
+    let ppos = g.player.body.pos;
+    if let Some(b) = g.mobs.list.iter().filter(|m| m.is_boss() && m.alive() && (m.body.pos - ppos).length() < 64.0).min_by(|a, b| (a.body.pos - ppos).length().total_cmp(&(b.body.pos - ppos).length())) {
+        let bw = (w * 0.5).min(520.0 * s);
+        let bx = (w - bw) / 2.0;
+        let by = 34.0 * s;
+        let f = b.health_frac();
+        app.ui.text_center(b.d().name, w / 2.0, by - 8.0 * s, 17.0, if b.enraged { Color::new(1.0, 0.45, 0.35, 1.0) } else { WHITE });
+        draw_rectangle(bx - 2.0 * s, by - 2.0 * s, bw + 4.0 * s, 14.0 * s, Color::new(0.0, 0.0, 0.0, 0.7));
+        draw_rectangle(bx, by, bw, 10.0 * s, Color::new(0.25, 0.05, 0.08, 0.9));
+        let c = if b.enraged { Color::new(0.95, 0.25, 0.15, 1.0) } else { Color::new(0.75, 0.2, 0.85, 1.0) };
+        draw_rectangle(bx, by, bw * f, 10.0 * s, c);
+        draw_rectangle(bx, by, bw * f, 3.0 * s, Color::new(1.0, 1.0, 1.0, 0.25));
+        for k in 1..4 {
+            draw_rectangle(bx + bw * k as f32 / 4.0 - s, by, 2.0 * s, 10.0 * s, Color::new(0.0, 0.0, 0.0, 0.5));
+        }
+    }
+
     let slot = 46.0 * s;
     let gap = 5.0 * s;
     let total = 9.0 * (slot + gap) - gap;
@@ -2840,7 +2903,7 @@ async fn main() {
                             let md: f32 = std::env::var("RK_MOBDIST").ok().and_then(|v| v.parse().ok()).unwrap_or(9.0);
                             let at = p + f * md + side * (i as f32 - (n - 1.0) / 2.0) * (md * 0.28).max(1.6);
                             let y = ground_spot(g.world(), at.x.floor() as i32, at.z.floor() as i32).map_or(p.y, |v| v.y);
-                            let mut m = mobs::Mob::new(id.min(99), vec3(at.x, y, at.z));
+                            let mut m = mobs::Mob::new(id.min(mobdefs::MOBS.len() - 1), vec3(at.x, y, at.z));
                             m.yaw = (-f.z).atan2(-f.x);
                             m.home = Some(m.body.pos);
                             g.mobs.list.push(m);
