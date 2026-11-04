@@ -144,7 +144,8 @@ pub fn held_item(atlas: &Texture2D, m: Mat4, item: Item, tint: Color) {
         other => {
             let s = if matches!(other, Item::Tool(..)) { 0.75 } else { 0.5 };
             let r = Mat4::from_translation(vec3(0.0, 0.18, 0.0)) * Mat4::from_rotation_y(std::f32::consts::FRAC_PI_2) * Mat4::from_rotation_z(-0.8);
-            sprite(atlas, m * r * Mat4::from_scale(Vec3::splat(s)), item_tile(other), tint);
+            let _ = atlas;
+            extruded(m * r * Mat4::from_scale(Vec3::splat(s)), item_tile(other), tint);
         }
     }
 }
@@ -446,25 +447,155 @@ pub fn draw_player(atlas: &Texture2D, pos: Vec3, yaw: f32, pitch: f32, walk: f32
     }
 }
 
-/// Рука и предмет от первого лица.
+/// Параметры анимации руки от первого лица.
+pub struct HandAnim {
+    /// Прогресс взмаха 0..1 (1 — покой).
+    pub swing: f32,
+    /// 1 — рука опущена (смена предмета), 0 — поднята.
+    pub equip: f32,
+    /// Сколько секунд уже едим (0 — не едим).
+    pub eat: f32,
+    /// Запаздывание руки за поворотом камеры (рад).
+    pub lag: Vec2,
+    /// Фаза ходьбы и сила покачивания.
+    pub walk: f32,
+    pub bob: f32,
+}
+
+thread_local! {
+    static EXTRUDED: RefCell<std::collections::HashMap<u16, Vec<([Vec3; 4], Vec2)>>> = RefCell::new(std::collections::HashMap::new());
+}
+
+/// «Объёмный» спрайт: каждый непрозрачный пиксель плитки получает боковые грани
+/// толщиной 1/16 — как вырезанный из картона предмет.
+fn extruded_sides(tile: u16) -> Vec<([Vec3; 4], Vec2)> {
+    let px = blocks::atlas_pixels();
+    let (tx, ty) = (tile as usize % blocks::ATLAS_TILES, tile as usize / blocks::ATLAS_TILES);
+    let alpha = |x: i32, y: i32| -> bool {
+        if !(0..16).contains(&x) || !(0..16).contains(&y) {
+            return false;
+        }
+        let i = ((ty * blocks::TILE + y as usize) * blocks::ATLAS + tx * blocks::TILE + x as usize) * 4;
+        px[i + 3] > 127
+    };
+    let (u0, v0, u1, v1) = tile_uv(tile);
+    let d = 0.5 / 16.0;
+    let mut out = Vec::new();
+    for y in 0..16 {
+        for x in 0..16 {
+            if !alpha(x, y) {
+                continue;
+            }
+            let uv = vec2(u0 + (u1 - u0) * (x as f32 + 0.5) / 16.0, v0 + (v1 - v0) * (y as f32 + 0.5) / 16.0);
+            // пиксель (x, y) в плоскости XY: x слева направо, y сверху вниз
+            let (xl, xr) = (x as f32 / 16.0 - 0.5, (x + 1) as f32 / 16.0 - 0.5);
+            let (yt, yb) = (0.5 - y as f32 / 16.0, 0.5 - (y + 1) as f32 / 16.0);
+            if !alpha(x - 1, y) {
+                out.push(([vec3(xl, yb, -d), vec3(xl, yb, d), vec3(xl, yt, d), vec3(xl, yt, -d)], uv));
+            }
+            if !alpha(x + 1, y) {
+                out.push(([vec3(xr, yb, d), vec3(xr, yb, -d), vec3(xr, yt, -d), vec3(xr, yt, d)], uv));
+            }
+            if !alpha(x, y - 1) {
+                out.push(([vec3(xl, yt, d), vec3(xr, yt, d), vec3(xr, yt, -d), vec3(xl, yt, -d)], uv));
+            }
+            if !alpha(x, y + 1) {
+                out.push(([vec3(xl, yb, -d), vec3(xr, yb, -d), vec3(xr, yb, d), vec3(xl, yb, d)], uv));
+            }
+        }
+    }
+    out
+}
+
+/// Объёмный предмет (спрайт с толщиной), центр в начале координат, размер 1.
+pub fn extruded(m: Mat4, tile: u16, tint: Color) {
+    let d = 0.5 / 16.0;
+    let (u0, v0, u1, v1) = tile_uv(tile);
+    let uv = [vec2(u0, v1), vec2(u1, v1), vec2(u1, v0), vec2(u0, v0)];
+    let front = [vec3(-0.5, -0.5, d), vec3(0.5, -0.5, d), vec3(0.5, 0.5, d), vec3(-0.5, 0.5, d)].map(|p| m.transform_point3(p));
+    quad(front, uv, tint, false);
+    let back = [vec3(0.5, -0.5, -d), vec3(-0.5, -0.5, -d), vec3(-0.5, 0.5, -d), vec3(0.5, 0.5, -d)].map(|p| m.transform_point3(p));
+    quad(back, [uv[1], uv[0], uv[3], uv[2]], scale_c(tint, 0.85), false);
+    EXTRUDED.with(|e| {
+        let mut e = e.borrow_mut();
+        let sides = e.entry(tile).or_insert_with(|| extruded_sides(tile));
+        let side_tint = scale_c(tint, 0.7);
+        for (p, uvp) in sides.iter() {
+            quad(p.map(|v| m.transform_point3(v)), [*uvp; 4], side_tint, false);
+        }
+    });
+}
+
+/// Рука и предмет от первого лица — классическая анимация взмаха блочных игр.
 #[allow(clippy::too_many_arguments)]
-pub fn draw_first_person(atlas: &Texture2D, eye: Vec3, fwd: Vec3, right: Vec3, up: Vec3, held: Item, swing: f32, bob: Vec2, eat: f32, sleeve: Color, skin: Color, light: f32) {
-    let atk = (swing * std::f32::consts::PI).sin();
-    let eat_bob = if eat > 0.0 { (eat * 22.0).sin().abs() * 0.05 } else { 0.0 };
-    let base = eye + fwd * 0.5 + right * (0.3 - atk * 0.12 - if eat > 0.0 { 0.2 } else { 0.0 }) + up * (-0.26 + bob.y + eat_bob + atk * 0.08) + right * bob.x;
-    let cam = Mat4::from_cols(fwd.extend(0.0), up.extend(0.0), right.extend(0.0), base.extend(1.0));
-    let tilt = rz(-0.25 - atk * 1.1) * ry(0.35 + atk * 0.3);
-    let m = cam * tilt * Mat4::from_scale(Vec3::splat(0.42));
+pub fn draw_first_person(_atlas: &Texture2D, eye: Vec3, fwd: Vec3, right: Vec3, up: Vec3, held: Item, a: &HandAnim, sleeve: Color, skin: Color, light: f32) {
+    use std::f32::consts::PI;
+    let deg = |d: f32| d.to_radians();
+    // пространство камеры: x — вправо, y — вверх, z — назад
+    let cam = Mat4::from_cols(right.extend(0.0), up.extend(0.0), (-fwd).extend(0.0), eye.extend(1.0));
+    // покачивание при ходьбе и запаздывание руки за поворотом
+    let bob = cam
+        * t((a.walk).sin() * 0.04 * a.bob, -(a.walk).cos().abs() * 0.05 * a.bob, 0.0)
+        * rz((a.walk).sin() * 0.03 * a.bob)
+        * rx(a.lag.y * 0.35)
+        * ry(-a.lag.x * 0.35);
     let k = light;
+    let tint = Color::new(k, k, k, 1.0);
     let sl = Color::new(sleeve.r * k, sleeve.g * k, sleeve.b * k, 1.0);
     let sk = Color::new(skin.r * k, skin.g * k, skin.b * k, 1.0);
+    let p = a.swing.clamp(0.0, 1.0);
+    let p = if p >= 1.0 { 0.0 } else { p };
+    let sq = p.sqrt();
+    let f = (p * p * PI).sin();
+    let f1 = (sq * PI).sin();
+
     if held == Item::Empty {
-        cube(m * t(0.0, -0.25, 0.0) * s3(0.16, 0.5, 0.16), sl);
-        cube(m * t(0.0, 0.05, 0.0) * s3(0.17, 0.14, 0.17), sk);
+        // пустая рука: выходит из правого нижнего угла, при ударе выбрасывается вперёд
+        let m = bob
+            * t(-0.3 * f1, 0.4 * (sq * 2.0 * PI).sin(), -0.4 * (p * PI).sin())
+            * t(0.64, -0.6 - a.equip * 0.6, -0.72)
+            * ry(deg(45.0 + f1 * 70.0))
+            * rz(deg(-f * 20.0))
+            * t(-1.0, 3.6, 3.5)
+            * rz(deg(120.0))
+            * rx(deg(200.0))
+            * ry(deg(-135.0))
+            * t(5.6, 0.0, 0.0);
+        // рука 4×12×4 пикселя, плечо в точке (-5, 2, 0)
+        let px = 1.0 / 16.0;
+        cube(m * t(-6.0 * px, 4.0 * px, 0.0) * s3(4.2 * px, 8.0 * px, 4.2 * px), sl);
+        cube(m * t(-6.0 * px, 10.0 * px, 0.0) * s3(4.0 * px, 4.0 * px, 4.0 * px), sk);
+        return;
+    }
+
+    // поедание: предмет у рта, покачивается
+    let m;
+    if a.eat > 0.0 {
+        let e = (a.eat / 1.2).min(1.0);
+        let shake = if e > 0.2 { (a.eat * 30.0).sin().abs() * 0.04 } else { 0.0 };
+        m = bob * t(0.56 - 0.5 * e.min(0.25) * 2.0, -0.52 + shake + e.min(0.25) * 0.4, -0.72) * ry(deg(-e.min(0.25) * 4.0 * 45.0)) * rx(deg(e.min(0.25) * 4.0 * 10.0));
     } else {
-        cube(m * t(-0.05, -0.3, 0.05) * s3(0.15, 0.45, 0.15), sl);
-        cube(m * t(-0.05, -0.03, 0.05) * s3(0.16, 0.12, 0.16), sk);
-        held_item(atlas, m * t(0.05, 0.05, 0.0), held, Color::new(k, k, k, 1.0));
+        // взмах: смещение по дуге + повороты (ease по квадрату и корню)
+        m = bob
+            * t(-0.4 * f1, 0.2 * (sq * 2.0 * PI).sin(), -0.2 * (p * PI).sin())
+            * t(0.56, -0.52 - a.equip * 0.6, -0.72)
+            * ry(deg(45.0))
+            * ry(deg(-f * 20.0))
+            * rz(deg(-f1 * 20.0))
+            * rx(deg(-f1 * 80.0))
+            * ry(deg(-45.0));
+    }
+    match held {
+        Item::Block(b) if blocks::def(b).shape != Shape::Cross => {
+            let d = blocks::def(b);
+            tex_box(m * ry(deg(45.0)) * Mat4::from_scale(Vec3::splat(0.4)), [d.tex[0], d.tex[1], d.tex[2], d.tex[1]], tint);
+        }
+        other => {
+            // плоский предмет толщиной в пиксель: рукоять в ладони, остриё вперёд к прицелу
+            let k = if matches!(other, Item::Tool(..)) { 0.36 } else { 0.3 };
+            let mm = m * Mat4::from_scale(Vec3::splat(k)) * t(0.0, 0.25, 0.125) * ry(deg(135.0)) * rz(deg(25.0)) * Mat4::from_scale(Vec3::splat(1.7));
+            extruded(mm, item_tile(other), tint);
+        }
     }
 }
 

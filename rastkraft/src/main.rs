@@ -99,6 +99,13 @@ struct Game {
     use_cd: f32,
     attack_cd: f32,
     swing_t: f32,
+    /// Прогресс взмаха руки 0..1 (1 — покой).
+    swing_p: f32,
+    /// Опущенность руки при смене предмета.
+    equip: f32,
+    last_held: Item,
+    /// Направление взгляда «с запаздыванием» — для инерции руки.
+    lag_look: Vec2,
     portal_cd: f32,
     label_t: f32,
     toast: Option<(String, f32)>,
@@ -139,6 +146,10 @@ impl Game {
             use_cd: 0.0,
             attack_cd: 0.0,
             swing_t: 0.0,
+            swing_p: 1.0,
+            equip: 0.0,
+            last_held: Item::Empty,
+            lag_look: Vec2::ZERO,
             portal_cd: 2.0,
             label_t: 2.0,
             toast: Some(("Добро пожаловать в Расткрафт!".into(), 4.0)),
@@ -971,7 +982,19 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
         g.label_t -= dt;
         g.use_cd -= dt;
         g.attack_cd -= dt;
-        g.swing_t = (g.swing_t - dt * 3.5).max(0.0);
+        // взмах длится 0.3 с; смена предмета — рука опускается и поднимается
+        g.swing_p = (g.swing_p + dt / 0.3).min(1.0);
+        let held_now = g.player.held();
+        if held_now != g.last_held {
+            g.last_held = held_now;
+            g.equip = 0.8;
+        }
+        g.equip = (g.equip - dt * 4.0).max(0.0);
+        let look = vec2(g.player.yaw, g.player.pitch);
+        if (look - g.lag_look).length() > 1.5 {
+            g.lag_look = look;
+        }
+        g.lag_look += (look - g.lag_look) * (dt * 14.0).min(1.0);
         g.portal_cd -= dt;
         if let Some((_, t)) = &mut g.toast {
             *t -= dt;
@@ -1059,8 +1082,8 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
             let lmb_p = is_mouse_button_pressed(MouseButton::Left);
             let rmb = is_mouse_button_down(MouseButton::Right);
             let rmb_p = is_mouse_button_pressed(MouseButton::Right);
-            if lmb_p {
-                g.swing_t = 1.0;
+            if lmb_p && (g.swing_p >= 0.5) {
+                g.swing_p = 0.0;
             }
 
             if let Some((rid, _)) = player_hit {
@@ -1119,7 +1142,9 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                             g.break_progress = 0.0;
                         }
                         g.break_progress += if bt <= 0.0 { 1.0 } else { dt / bt };
-                        g.swing_t = g.swing_t.max(0.6);
+                        if g.swing_p >= 1.0 {
+                            g.swing_p = 0.0;
+                        }
                         if g.break_progress >= 1.0 {
                             edits.push((hit, AIR));
                             let r = xr(&mut g.rng);
@@ -1205,7 +1230,7 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                     let blocked = is_solid(nb) && (g.player.body.overlaps_block(prev) || g.mobs.list.iter().any(|m| m.body.overlaps_block(prev)));
                     if replace && !blocked {
                         edits.push((prev, nb));
-                        g.swing_t = 1.0;
+                        g.swing_p = 0.0;
                         if nb == CHEST {
                             g.opened.insert([prev.x, prev.y, prev.z]);
                         }
@@ -1229,6 +1254,7 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
             died = true;
         }
         g.autosave_t -= dt;
+        g.swing_t = if g.swing_p < 1.0 { g.swing_p } else { 0.0 };
     }
 
     let dim = app.game.as_ref().unwrap().dim;
@@ -2291,12 +2317,19 @@ fn render_world(app: &mut App) {
     } else {
         clear_background(hor);
     }
-    let bob = if app.settings.view_bob && !g.player.flying && g.player.body.on_ground {
-        vec3(0.0, (g.player.walk_phase * 2.0).sin().abs() * 0.06, 0.0)
-    } else {
-        Vec3::ZERO
-    };
     let dir = g.player.forward();
+    let right0 = dir.cross(Vec3::Y).normalize_or_zero();
+    let walk_amp = if app.settings.view_bob && !g.player.flying && g.player.body.on_ground {
+        (vec2(g.player.body.vel.x, g.player.body.vel.z).length() / 4.4).min(1.3)
+    } else {
+        0.0
+    };
+    // покачивание «восьмёркой» при ходьбе
+    let wp = g.player.walk_phase;
+    let bob = right0 * wp.sin() * 0.05 * walk_amp + Vec3::Y * (-(wp.cos().abs()) * 0.07 * walk_amp + 0.035 * walk_amp);
+    // лёгкий крен при ходьбе и при получении урона
+    let roll = wp.sin() * 0.012 * walk_amp + (g.player.hurt_t * 9.0).sin() * g.player.hurt_t * 0.25;
+    let cam_up = (Vec3::Y * roll.cos() + right0 * roll.sin()).normalize();
     let mut eye = g.player.eye() + bob;
     if g.third_person {
         // камера позади игрока, не заходит в стены
@@ -2307,7 +2340,7 @@ fn render_world(app: &mut App) {
     let fovy = app.settings.fov.to_radians() * if zoom { 0.35 } else { 1.0 };
     let aspect = screen_width() / screen_height().max(1.0);
     let proj = Mat4::perspective_rh_gl(fovy, aspect, 0.05, 1500.0);
-    let view = Mat4::look_to_rh(Vec3::ZERO, dir, Vec3::Y);
+    let view = Mat4::look_to_rh(Vec3::ZERO, dir, cam_up);
     let vp = proj * view;
     match &rt {
         Some(t) => set_camera(&Camera2D { render_target: Some(t.clone()), ..Camera2D::from_display_rect(Rect::new(0.0, 0.0, sw, sh)) }),
@@ -2344,7 +2377,7 @@ fn render_world(app: &mut App) {
             app.renderer.draw(gl.quad_context, &app.loader, &frame, clouds, pass);
         }
     }
-    let cam3 = Camera3D { position: eye, target: eye + dir, up: Vec3::Y, fovy, z_near: 0.05, z_far: 1500.0, render_target: rt.clone(), aspect: Some(sw / sh.max(1.0)), ..Default::default() };
+    let cam3 = Camera3D { position: eye, target: eye + dir, up: cam_up, fovy, z_near: 0.05, z_far: 1500.0, render_target: rt.clone(), aspect: Some(sw / sh.max(1.0)), ..Default::default() };
     set_camera(&cam3);
     model::begin(&app.ui.atlas);
     let daylight = g.daylight();
@@ -2387,13 +2420,17 @@ fn render_world(app: &mut App) {
         gl.quad_context.begin_pass(pass, miniquad::PassAction::Clear { color: None, depth: Some(1.0), stencil: None });
         gl.quad_context.end_render_pass();
         let p = &g.player;
-        let up = right.cross(dir).normalize_or_zero();
-        let hb = if app.settings.view_bob { vec2(p.walk_phase.sin() * 0.03, -(p.walk_phase * 2.0).sin().abs() * 0.025) } else { Vec2::ZERO };
         let look = model::look_for(hash_seed(&app.settings.name));
         let sleeve = model::armor_color(p.armor[1]).unwrap_or(look.shirt);
-        let hand_cam = Camera3D { position: g.player.eye() + bob, target: g.player.eye() + bob + dir, up: Vec3::Y, fovy: 70f32.to_radians(), z_near: 0.02, z_far: 10.0, render_target: rt.clone(), aspect: Some(sw / sh.max(1.0)), ..Default::default() };
+        let hand_eye = g.player.eye() + bob;
+        let hand_cam = Camera3D { position: hand_eye, target: hand_eye + dir, up: cam_up, fovy: 70f32.to_radians(), z_near: 0.02, z_far: 10.0, render_target: rt.clone(), aspect: Some(sw / sh.max(1.0)), ..Default::default() };
         set_camera(&hand_cam);
-        model::draw_first_person(&app.ui.atlas, g.player.eye() + bob, dir, right, up, p.held(), g.swing_t, hb, p.eat_t, sleeve, look.skin, light);
+        let lag = vec2(g.player.yaw, g.player.pitch) - g.lag_look;
+        let swing = std::env::var("RK_SWING").ok().and_then(|v| v.parse().ok()).unwrap_or(g.swing_p);
+        let anim = model::HandAnim { swing, equip: g.equip, eat: p.eat_t, lag: lag.clamp(Vec2::splat(-0.5), Vec2::splat(0.5)), walk: wp, bob: walk_amp };
+        let hr = dir.cross(cam_up).normalize_or_zero();
+        let hu = hr.cross(dir).normalize_or_zero();
+        model::draw_first_person(&app.ui.atlas, hand_eye, dir, hr, hu, p.held(), &anim, sleeve, look.skin, light);
         model::flush();
     }
     set_default_camera();
@@ -2729,6 +2766,10 @@ async fn main() {
                     }
                     if let Ok(t) = std::env::var("RK_TIME") {
                         g.time = t.parse().unwrap_or(g.time);
+                    }
+                    if let Some(slot) = std::env::var("RK_SLOT").ok().and_then(|v| v.parse::<usize>().ok()) {
+                        g.player.selected = slot.min(8);
+                        g.last_held = g.player.held();
                     }
                     if std::env::var("RK_THIRD").is_ok() {
                         g.third_person = true;
