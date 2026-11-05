@@ -26,6 +26,12 @@ pub struct Settings {
     pub fps_limit: u32,
     /// Вертикальная синхронизация (применяется после перезапуска).
     pub vsync: bool,
+    /// Стиль текстур: 0 — классический, 1 — чистый (после перезапуска).
+    pub tex_style: u8,
+    /// Небо: 0 — голубое, 1 — розовое.
+    pub sky: u8,
+    /// Текстур-пак (имя PNG в папке textures), пусто — встроенные.
+    pub tex_pack: String,
     /// Громкость музыки и звуков (0–1).
     pub music_vol: f32,
     pub sound_vol: f32,
@@ -63,6 +69,9 @@ impl Default for Settings {
             opt_level: 1,
             fps_limit: 0,
             vsync: false,
+            tex_style: 1,
+            sky: 1,
+            tex_pack: String::new(),
             music_vol: 0.6,
             sound_vol: 0.8,
             tex_res: 16,
@@ -124,6 +133,9 @@ impl Settings {
                 "opt_level" => s.opt_level = v.parse().unwrap_or(s.opt_level),
                 "fps_limit" => s.fps_limit = v.parse().unwrap_or(s.fps_limit),
                 "vsync" => s.vsync = b,
+                "tex_style" => s.tex_style = v.parse().unwrap_or(s.tex_style),
+                "sky" => s.sky = v.parse().unwrap_or(s.sky),
+                "tex_pack" => s.tex_pack = v.to_string(),
                 "music_vol" => s.music_vol = v.parse().unwrap_or(s.music_vol),
                 "sound_vol" => s.sound_vol = v.parse().unwrap_or(s.sound_vol),
                 "tex_res" => s.tex_res = v.parse().unwrap_or(s.tex_res),
@@ -165,7 +177,7 @@ impl Settings {
 
     pub fn save(&self) {
         let text = format!(
-            "render_dist={}\nfov={}\nsensitivity={}\nbrightness={}\nfog={}\nclouds={}\nsmooth_light={}\nview_bob={}\nshow_fps={}\ngui_scale={}\ndifficulty={}\ninvert_mouse={}\npvp={}\nname={}\nrender_scale={}\nauto_dist={}\nopt_level={}\nfps_limit={}\nvsync={}\nmusic_vol={}\nsound_vol={}\ntex_res={}\nminimap={}\nlook={},{},{},{}\nrelay={}\ntouch={}\ntouch_layout={}\n",
+            "render_dist={}\nfov={}\nsensitivity={}\nbrightness={}\nfog={}\nclouds={}\nsmooth_light={}\nview_bob={}\nshow_fps={}\ngui_scale={}\ndifficulty={}\ninvert_mouse={}\npvp={}\nname={}\nrender_scale={}\nauto_dist={}\nopt_level={}\nfps_limit={}\nvsync={}\ntex_style={}\nsky={}\ntex_pack={}\nmusic_vol={}\nsound_vol={}\ntex_res={}\nminimap={}\nlook={},{},{},{}\nrelay={}\ntouch={}\ntouch_layout={}\n",
             self.render_dist,
             self.fov,
             self.sensitivity,
@@ -185,6 +197,9 @@ impl Settings {
             self.opt_level,
             self.fps_limit,
             self.vsync as u8,
+            self.tex_style,
+            self.sky,
+            self.tex_pack,
             self.music_vol,
             self.sound_vol,
             self.tex_res,

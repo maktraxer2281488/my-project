@@ -28,6 +28,7 @@ mod shapes;
 mod skins;
 mod structures;
 mod touch;
+mod packs;
 mod ui;
 mod workers;
 mod world;
@@ -94,6 +95,7 @@ enum Screen {
     Enchant,
     Achievements,
     Look,
+    Textures,
     Relay,
     Controls,
 }
@@ -384,6 +386,11 @@ struct App {
     trade: Option<(usize, u32)>,
     /// Разрешение текстур, с которым игра запущена.
     tex_res_active: u32,
+    /// Стиль текстур и пак, с которыми запущена игра.
+    style_active: u8,
+    pack_active: String,
+    /// Найденные текстур-паки (для экрана «Текстуры и небо»).
+    pack_list: Vec<String>,
     /// Звуки, накопленные за кадр (проигрываются после обновления мира).
     sfx: Vec<(music::Sfx, f32)>,
     export_rx: Option<std::sync::mpsc::Receiver<String>>,
@@ -1060,6 +1067,9 @@ fn ground_spot(w: &World, x: i32, z: i32) -> Option<Vec3> {
     })
 }
 
+/// Небо: 0 — обычное голубое, 1 — розово-фиолетовое (из настроек).
+static SKY_STYLE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(1);
+
 fn sky_colors(g: &Game) -> (Color, Color) {
     if g.dim == Dim::Heaven {
         return (Color::new(0.98, 0.78, 0.58, 1.0), Color::new(1.0, 0.94, 0.84, 1.0));
@@ -1069,11 +1079,24 @@ fn sky_colors(g: &Game) -> (Color, Color) {
     }
     let d = g.daylight();
     let lerp = |a: Color, b: Color, t: f32| Color::new(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, 1.0);
-    let top = lerp(Color::new(0.01, 0.02, 0.06, 1.0), Color::new(0.28, 0.52, 0.88, 1.0), d);
-    let mut hor = lerp(Color::new(0.04, 0.06, 0.13, 1.0), Color::new(0.72, 0.85, 0.98, 1.0), d);
+    let pink = SKY_STYLE.load(std::sync::atomic::Ordering::Relaxed) == 1;
+    let (top, mut hor, dusk_c) = if pink {
+        // розово-фиолетовое небо: сиреневый верх, розовый горизонт, ночью — тёмно-фиолетовое
+        (
+            lerp(Color::new(0.06, 0.02, 0.12, 1.0), Color::new(0.62, 0.46, 0.93, 1.0), d),
+            lerp(Color::new(0.13, 0.05, 0.2, 1.0), Color::new(0.96, 0.72, 0.93, 1.0), d),
+            Color::new(1.0, 0.52, 0.66, 1.0),
+        )
+    } else {
+        (
+            lerp(Color::new(0.01, 0.02, 0.06, 1.0), Color::new(0.28, 0.52, 0.88, 1.0), d),
+            lerp(Color::new(0.04, 0.06, 0.13, 1.0), Color::new(0.72, 0.85, 0.98, 1.0), d),
+            Color::new(0.98, 0.56, 0.32, 1.0),
+        )
+    };
     let sunh = g.sun_dir().y;
     let dusk = (-(sunh / 0.2).powi(2)).exp();
-    hor = lerp(hor, Color::new(0.98, 0.56, 0.32, 1.0), dusk * 0.7);
+    hor = lerp(hor, dusk_c, dusk * 0.7);
     // непогода: серое небо, в пустыне — песчаная мгла
     let k = g.rain_k;
     if k > 0.0 {
@@ -2707,7 +2730,6 @@ fn settings_screen(app: &mut App) -> Option<Screen> {
     let mut y = h * 0.095;
     let old_smooth = app.settings.smooth_light;
     let old_fast = opt::get().fast_leaves;
-    let active_res = app.tex_res_active;
     let st = &mut app.settings;
     let ui = &mut app.ui;
     let rd = ui.slider(1, x1, y, cw, bh, &format!("Дальность прорисовки: {} чанков", st.render_dist), st.render_dist as f32, 2.0, 32.0);
@@ -2800,16 +2822,7 @@ fn settings_screen(app: &mut App) -> Option<Screen> {
     st.music_vol = ui.slider(7, x1, y, cw, bh, &format!("Музыка: {:.0}%", st.music_vol * 100.0), st.music_vol, 0.0, 1.0);
     st.sound_vol = ui.slider(8, x2, y, cw, bh, &format!("Звуки: {:.0}%", st.sound_vol * 100.0), st.sound_vol, 0.0, 1.0);
     y += bh + gap;
-    let note = if st.tex_res != active_res {
-        "после перезапуска".to_string()
-    } else {
-        let mb = blocks::ATLAS_TILES * st.tex_res as usize * blocks::atlas_rows() * st.tex_res as usize * 4 / 1_000_000;
-        format!("~{} МБ", mb.max(1))
-    };
-    if ui.button(x1, y, cw, bh, &format!("Текстуры: x{} ({note})", st.tex_res)) {
-        let i = blocks::TEX_RES.iter().position(|&r| r == st.tex_res as usize).unwrap_or(1);
-        st.tex_res = blocks::TEX_RES[(i + 1) % blocks::TEX_RES.len()] as u32;
-    }
+    let open_tex = ui.button(x1, y, cw, bh, "Текстуры и небо…");
     let vs_note = if Some(&st.vsync) != VSYNC_AT_START.get() { " (после перезапуска)" } else { "" };
     if ui.button(x2, y, cw, bh, &format!("Верт. синхронизация: {}{vs_note}", onoff(st.vsync))) {
         st.vsync = !st.vsync;
@@ -2852,6 +2865,11 @@ fn settings_screen(app: &mut App) -> Option<Screen> {
     }
     if open_look {
         return Some(Screen::Look);
+    }
+    if open_tex {
+        app.settings.save();
+        app.pack_list = packs::list();
+        return Some(Screen::Textures);
     }
     if open_controls {
         app.settings.save();
@@ -3757,6 +3775,10 @@ fn main() {
 
 async fn amain() {
     let font = load_ttf_font_from_bytes(include_bytes!("../assets/DejaVuSans-Bold.ttf")).expect("шрифт");
+    // стиль текстур нужен до постройки атласа
+    let boot = Settings::load();
+    let style = std::env::var("RK_STYLE").ok().and_then(|v| v.parse().ok()).unwrap_or(boot.tex_style);
+    blocks::set_style(style);
     // тяжёлая подготовка (атлас, рецепты) — в фоне, пока идёт заставка
     let prep = std::thread::spawn(|| {
         let _ = atlas_pixels();
@@ -3783,8 +3805,23 @@ async fn amain() {
     if res != want_res {
         startup_note = Some(format!("Видеокарта не тянет текстуры {want_res}×{want_res}: включено {res}×{res}"));
     }
+    // текстур-пак поверх встроенных текстур (если выбран и читается)
+    let pack = std::env::var("RK_PACK").unwrap_or(boot.tex_pack.clone());
+    let mut pack_active = String::new();
+    let mut built = None;
+    if !pack.is_empty() {
+        match packs::load(&pack) {
+            Ok((px, w, h, tr)) if w <= max_tex => {
+                built = Some((px, w, h));
+                pack_active = pack.clone();
+                res = tr;
+            }
+            Ok(_) => startup_note = Some(format!("Пак «{pack}» слишком большой для видеокарты")),
+            Err(e) => startup_note = Some(format!("Пак «{pack}»: {e}")),
+        }
+    }
     let atlas = {
-        let (px, w, h) = display_atlas(res);
+        let (px, w, h) = built.unwrap_or_else(|| display_atlas(res));
         Texture2D::from_rgba8(w as u16, h as u16, &px)
     };
     atlas.set_filter(FilterMode::Nearest);
@@ -3832,6 +3869,9 @@ async fn amain() {
         keyboard_shown: false,
         trade: None,
         tex_res_active: 16,
+        style_active: 1,
+        pack_active: String::new(),
+        pack_list: Vec::new(),
         sfx: Vec::new(),
         export_rx: None,
         book_tab: 0,
@@ -3846,6 +3886,8 @@ async fn amain() {
 
     app.eff_dist = app.settings.render_dist;
     app.tex_res_active = res as u32;
+    app.style_active = style;
+    app.pack_active = pack_active;
     if let Some(n) = startup_note {
         app.status = Some((n, 6.0));
     }
@@ -3913,6 +3955,7 @@ async fn amain() {
         app.time += dt;
         app.fps += (1.0 / raw_dt.max(1e-4) - app.fps) * 0.05;
         app.ui.begin(app.settings.gui_scale);
+        SKY_STYLE.store(app.settings.sky.min(1), std::sync::atomic::Ordering::Relaxed);
         let mouse: Vec2 = mouse_position().into();
         // касания: джойстик, обзор и кнопки (в меню касания работают как мышь)
         {
@@ -4151,6 +4194,7 @@ async fn amain() {
             Screen::Enchant => enchant_screen(&mut app),
             Screen::Achievements => achievements_screen(&mut app),
             Screen::Look => look_screen(&mut app),
+            Screen::Textures => textures_screen(&mut app),
             Screen::Relay => relay_screen(&mut app),
             Screen::Controls => controls_screen(&mut app),
             Screen::Loading => {
@@ -4269,6 +4313,11 @@ async fn amain() {
                             app.screen = Screen::Worlds;
                         }
                         "multiplayer" => app.screen = Screen::Multiplayer,
+                        "textures" => {
+                            app.settings_back = Screen::Playing;
+                            app.pack_list = packs::list();
+                            app.screen = Screen::Textures;
+                        }
                         "controls" => {
                             app.settings_back = Screen::Playing;
                             app.touch_edit = Some(touch::Act::Attack);
@@ -4975,6 +5024,83 @@ fn look_screen(app: &mut App) -> Option<Screen> {
     draw_rectangle(px - 0.6 * u, py + 4.0 * u, 1.6 * u, 4.5 * u, l.shirt);
     draw_rectangle(px + 5.0 * u, py + 4.0 * u, 1.6 * u, 4.5 * u, l.shirt);
     draw_rectangle(px + u, py + 9.0 * u, 4.0 * u, 4.5 * u, l.pants);
+    if app.ui.button((w - 240.0 * s) / 2.0, h - 60.0 * s, 240.0 * s, 42.0 * s, "Готово") || is_key_pressed(KeyCode::Escape) {
+        app.settings.save();
+        return Some(Screen::Settings);
+    }
+    None
+}
+
+/// «Текстуры и небо»: стиль, разрешение, текстур-пак, небо, шаблон для своего пака.
+fn textures_screen(app: &mut App) -> Option<Screen> {
+    let (w, h) = (screen_width(), screen_height());
+    let s = app.ui.s;
+    draw_rectangle(0.0, 0.0, w, h, Color::new(0.05, 0.06, 0.08, 0.92));
+    app.ui.text_center("Текстуры и небо", w / 2.0, 60.0 * s, 28.0, WHITE);
+    let bw = (520.0 * s).min(w - 32.0);
+    let x = (w - bw) / 2.0;
+    let bh = 38.0 * s;
+    let gap = 8.0 * s;
+    let mut y = 86.0 * s;
+    let restart = |changed: bool| if changed { " (после перезапуска)" } else { "" };
+    let st = &mut app.settings;
+    let lab = format!("Стиль: {}{}", blocks::STYLE_NAMES[st.tex_style.min(1) as usize], restart(st.tex_style != app.style_active));
+    if app.ui.button(x, y, bw, bh, &lab) {
+        st.tex_style = 1 - st.tex_style.min(1);
+    }
+    y += bh + gap;
+    let pack_on = !st.tex_pack.is_empty();
+    let res_note = if pack_on { " (задаёт пак)".to_string() } else { restart(st.tex_res != app.tex_res_active).to_string() };
+    if app.ui.button(x, y, bw, bh, &format!("Разрешение: x{0} ({0}×{0} пикс.){res_note}", st.tex_res)) {
+        let i = blocks::TEX_RES.iter().position(|&r| r == st.tex_res as usize).unwrap_or(1);
+        st.tex_res = blocks::TEX_RES[(i + 1) % blocks::TEX_RES.len()] as u32;
+    }
+    y += bh + gap;
+    let pname = if pack_on { st.tex_pack.clone() } else { "встроенные".to_string() };
+    let lab = format!("Текстур-пак: {pname}{}", restart(st.tex_pack != app.pack_active));
+    if app.ui.button(x, y, bw, bh, &lab) {
+        // по кругу: встроенные → паки из папки
+        let mut opts = vec![String::new()];
+        opts.extend(app.pack_list.iter().cloned());
+        let i = opts.iter().position(|p| *p == st.tex_pack).unwrap_or(0);
+        st.tex_pack = opts[(i + 1) % opts.len()].clone();
+    }
+    y += bh + gap;
+    let sky = ["голубое", "розовое"][st.sky.min(1) as usize];
+    if app.ui.button(x, y, bw, bh, &format!("Небо: {sky}")) {
+        st.sky = 1 - st.sky.min(1);
+    }
+    y += bh + gap;
+    let half = (bw - gap) / 2.0;
+    let export = app.ui.button(x, y, half, bh, "Сохранить шаблон");
+    let refresh = app.ui.button(x + half + gap, y, half, bh, "Обновить список паков");
+    y += bh + gap * 2.0;
+    let dir = packs::dir();
+    let lines = [
+        "Свой пак: нажмите «Сохранить шаблон», перерисуйте template.png".to_string(),
+        "в любом редакторе и сохраните под своим именем (например, mypack.png).".to_string(),
+        "Плитки можно увеличить: 32, 64… пикселей — картинку растянуть целиком.".to_string(),
+        "Прозрачные плитки берутся из встроенных текстур.".to_string(),
+        format!("Папка: {}", dir.display()),
+        format!("Найдено паков: {}", app.pack_list.len()),
+    ];
+    for l in &lines {
+        app.ui.text_center(l, w / 2.0, y + 14.0 * s, 13.0, Color::new(0.85, 0.85, 0.8, 1.0));
+        y += 20.0 * s;
+    }
+    if export {
+        app.status = Some((
+            match packs::export_template() {
+                Ok(p) => format!("Шаблон сохранён: {}", p.display()),
+                Err(e) => format!("Не удалось сохранить шаблон: {e}"),
+            },
+            8.0,
+        ));
+        app.pack_list = packs::list();
+    }
+    if refresh {
+        app.pack_list = packs::list();
+    }
     if app.ui.button((w - 240.0 * s) / 2.0, h - 60.0 * s, 240.0 * s, 42.0 * s, "Готово") || is_key_pressed(KeyCode::Escape) {
         app.settings.save();
         return Some(Screen::Settings);

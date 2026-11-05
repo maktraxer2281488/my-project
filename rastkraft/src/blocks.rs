@@ -556,7 +556,7 @@ pub fn display_atlas(res: usize) -> (Vec<u8>, usize, usize) {
                             continue; // прозрачность остаётся чёткой
                         }
                         // мягкий переход к соседу у края исходного пикселя
-                        let soft = (0.5 / k).min(0.35);
+                        let soft = if style() == STYLE_CLEAN { 0.0001 } else { (0.5 / k).min(0.35) };
                         let blend = |r: f32| -> (i64, f32) {
                             if r < soft {
                                 (-1, (soft - r) / soft * 0.5)
@@ -580,9 +580,11 @@ pub fn display_atlas(res: usize) -> (Vec<u8>, usize, usize) {
                             }
                         }
                         // объём: светлее у верхнего-левого края пикселя, темнее у нижнего-правого
-                        let bevel = if k >= 4.0 { ((0.5 - rx) + (0.5 - ry)) * 0.07 } else { 0.0 };
+                        // (в чистом стиле — без объёма и зернистости: плоские цвета)
+                        let clean = style() == STYLE_CLEAN;
+                        let bevel = if k >= 4.0 && !clean { ((0.5 - rx) + (0.5 - ry)) * 0.07 } else { 0.0 };
                         // мелкая зернистость
-                        let g = (hash(ox as i32, oy as i32, 991) - 0.5) * if k >= 2.0 { 0.09 } else { 0.0 };
+                        let g = (hash(ox as i32, oy as i32, 991) - 0.5) * if k >= 2.0 && !clean { 0.09 } else { 0.0 };
                         let m = 1.0 + bevel + g;
                         for j in 0..3 {
                             o[j] = (c[j] * m).clamp(0.0, 255.0) as u8;
@@ -638,15 +640,175 @@ impl Atlas {
         assert!((t as usize) < ATLAS_TILES * ATLAS_TILES, "атлас переполнен");
         self.next += 1;
         let (tx, ty) = (t as usize % ATLAS_TILES, t as usize / ATLAS_TILES);
+        let mut buf = [[0u8; 4]; TILE * TILE];
         for y in 0..TILE {
             for x in 0..TILE {
-                let c = f(x as i32, y as i32);
+                buf[y * TILE + x] = f(x as i32, y as i32);
+            }
+        }
+        if style() == STYLE_CLEAN {
+            clean_tile(&mut buf);
+        }
+        for y in 0..TILE {
+            for x in 0..TILE {
                 let i = ((ty * TILE + y) * ATLAS + tx * TILE + x) * 4;
-                self.px[i..i + 4].copy_from_slice(&c);
+                self.px[i..i + 4].copy_from_slice(&buf[y * TILE + x]);
             }
         }
         t
     }
+}
+
+// ---------- стиль текстур ----------
+/// Классический: шум, зернистость, объём.
+pub const STYLE_CLASSIC: u8 = 0;
+/// Чистый: плоские сочные цвета, простые формы, контуры.
+pub const STYLE_CLEAN: u8 = 1;
+pub const STYLE_NAMES: [&str; 2] = ["Классический", "Чистый"];
+
+static STYLE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(STYLE_CLEAN);
+
+/// Выбрать стиль до первой постройки атласа (потом меняется только перезапуском).
+pub fn set_style(s: u8) {
+    STYLE.store(s.min(1), std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn style() -> u8 {
+    STYLE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// «Чистая» плитка: близкие оттенки сливаются в несколько плоских цветов,
+/// одиночные пиксели убираются, цвета сочнее; у блоков — лёгкая рамка,
+/// у спрайтов (предметы, цветы) — тёмный контур.
+fn clean_tile(p: &mut [Px; TILE * TILE]) {
+    const N: usize = TILE * TILE;
+    let opaque = p.iter().filter(|c| c[3] == 255).count();
+    if opaque == 0 {
+        return;
+    }
+    let semi = p.iter().any(|c| c[3] > 0 && c[3] < 255);
+    let lum = |c: [f32; 3]| 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+    let saturate = |c: [f32; 3], k: f32| -> [f32; 3] {
+        let l = lum(c);
+        [l + (c[0] - l) * k, l + (c[1] - l) * k, l + (c[2] - l) * k]
+    };
+    let to_px = |c: [f32; 3], a: u8| -> Px { [c[0].clamp(0.0, 255.0) as u8, c[1].clamp(0.0, 255.0) as u8, c[2].clamp(0.0, 255.0) as u8, a] };
+    let f = |c: Px| [c[0] as f32, c[1] as f32, c[2] as f32];
+    if semi {
+        // полупрозрачное (вода, стекло, тени): только сочнее
+        for c in p.iter_mut() {
+            if c[3] > 0 {
+                *c = to_px(saturate(f(*c), 1.2), c[3]);
+            }
+        }
+        return;
+    }
+    // --- кластеры цветов (k-средних, начальные центры — по яркости) ---
+    let idx: Vec<usize> = (0..N).filter(|&i| p[i][3] == 255).collect();
+    let mut by_lum = idx.clone();
+    by_lum.sort_by(|&a, &b| lum(f(p[a])).total_cmp(&lum(f(p[b]))));
+    const K: usize = 5;
+    let mut cent: Vec<[f32; 3]> = (0..K).map(|k| f(p[by_lum[((k as f32 + 0.5) / K as f32 * by_lum.len() as f32) as usize]])).collect();
+    let dist = |a: [f32; 3], b: [f32; 3]| ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
+    let mut label = [usize::MAX; N];
+    for _ in 0..6 {
+        for &i in &idx {
+            let c = f(p[i]);
+            label[i] = (0..cent.len()).min_by(|&a, &b| dist(c, cent[a]).total_cmp(&dist(c, cent[b]))).unwrap();
+        }
+        let mut sum = vec![[0f32; 4]; cent.len()];
+        for &i in &idx {
+            let c = f(p[i]);
+            let s = &mut sum[label[i]];
+            s[0] += c[0];
+            s[1] += c[1];
+            s[2] += c[2];
+            s[3] += 1.0;
+        }
+        for (k, s) in sum.iter().enumerate() {
+            if s[3] > 0.0 {
+                cent[k] = [s[0] / s[3], s[1] / s[3], s[2] / s[3]];
+            }
+        }
+    }
+    // близкие оттенки (шум) — в один плоский цвет; заметные детали остаются
+    let mut count = vec![0usize; cent.len()];
+    for &i in &idx {
+        count[label[i]] += 1;
+    }
+    loop {
+        let mut best: Option<(usize, usize, f32)> = None;
+        for a in 0..cent.len() {
+            for b in a + 1..cent.len() {
+                if count[a] == 0 || count[b] == 0 {
+                    continue;
+                }
+                let d = dist(cent[a], cent[b]);
+                if d < 34.0 && best.is_none_or(|(_, _, bd)| d < bd) {
+                    best = Some((a, b, d));
+                }
+            }
+        }
+        let Some((a, b, _)) = best else { break };
+        let (ca, cb) = (count[a] as f32, count[b] as f32);
+        for j in 0..3 {
+            cent[a][j] = (cent[a][j] * ca + cent[b][j] * cb) / (ca + cb);
+        }
+        count[a] += count[b];
+        count[b] = 0;
+        for &i in &idx {
+            if label[i] == b {
+                label[i] = a;
+            }
+        }
+    }
+    // одиночные пиксели перекрашиваются в цвет соседей
+    let at = |x: i32, y: i32| -> Option<usize> { (x >= 0 && y >= 0 && x < TILE as i32 && y < TILE as i32).then(|| y as usize * TILE + x as usize) };
+    let mut fixed = label;
+    for &i in &idx {
+        let (x, y) = ((i % TILE) as i32, (i / TILE) as i32);
+        let mut votes = vec![0u8; cent.len()];
+        let mut same = 0;
+        for (dx, dy) in [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
+            if let Some(j) = at(x + dx, y + dy).filter(|&j| p[j][3] == 255) {
+                votes[label[j]] += 1;
+                if label[j] == label[i] {
+                    same += 1;
+                }
+            }
+        }
+        if same == 0 {
+            if let Some((k, _)) = votes.iter().enumerate().filter(|(_, v)| **v > 0).max_by_key(|(_, v)| **v) {
+                fixed[i] = k;
+            }
+        }
+    }
+    let full = opaque == N;
+    let mut out = *p;
+    for &i in &idx {
+        let (x, y) = ((i % TILE) as i32, (i / TILE) as i32);
+        let c = cent[fixed[i]];
+        // чуть-чуть исходной фактуры, чтобы плоское не было «пластиковым»
+        let o = f(p[i]);
+        let mut v = if fixed[i] == label[i] { [c[0] + (o[0] - c[0]) * 0.18, c[1] + (o[1] - c[1]) * 0.18, c[2] + (o[2] - c[2]) * 0.18] } else { c };
+        v = saturate(v, 1.3);
+        let mut k = 1.04;
+        if full {
+            // лёгкая рамка у блоков
+            if x == 0 || y == 0 || x == TILE as i32 - 1 || y == TILE as i32 - 1 {
+                k *= 0.84;
+            }
+        } else {
+            // контур спрайта: край формы (но не тонкие травинки)
+            let edge = [(0, -1), (0, 1), (-1, 0), (1, 0)].iter().any(|(dx, dy)| at(x + dx, y + dy).is_none_or(|j| p[j][3] == 0));
+            let solid_n = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)].iter().filter(|(dx, dy)| at(x + dx, y + dy).is_some_and(|j| p[j][3] == 255)).count();
+            if edge && solid_n >= 4 {
+                k *= 0.6;
+            }
+        }
+        out[i] = to_px([v[0] * k, v[1] * k, v[2] * k], 255);
+    }
+    *p = out;
 }
 
 // --- стили текстур ---
