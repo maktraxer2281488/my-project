@@ -333,6 +333,8 @@ pub struct Registry {
     pub defs: Vec<BlockDef>,
     pub opaque: Vec<bool>,
     pub solid: Vec<bool>,
+    /// Сплошная (без дырок) плитка листвы для «быстрой листвы» и дальних чанков; 0 — нет.
+    pub solid_leaf: Vec<u16>,
 }
 
 static ALL: OnceLock<(Registry, Vec<u8>, Vec<u16>)> = OnceLock::new();
@@ -1686,6 +1688,40 @@ fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
     }
 
     let defs: Vec<BlockDef> = defs.into_iter().enumerate().map(|(i, d)| d.unwrap_or_else(|| panic!("блок {i} не описан"))).collect();
+    // сплошные плитки листвы: прозрачные пиксели заливаются тёмным оттенком самой листвы
+    let mut solid_leaf = vec![0u16; BLOCK_COUNT];
+    for (id, d) in defs.iter().enumerate() {
+        if !is_leaves(id as u16) {
+            continue;
+        }
+        let t = d.tex[1] as usize;
+        let (tx, ty) = (t % ATLAS_TILES, t / ATLAS_TILES);
+        let px_at = |px: &Vec<u8>, x: usize, y: usize| {
+            let i = ((ty * TILE + y) * ATLAS + tx * TILE + x) * 4;
+            [px[i], px[i + 1], px[i + 2], px[i + 3]]
+        };
+        let mut sum = [0u32; 3];
+        let mut cnt = 0u32;
+        let mut src = [[0u8; 4]; TILE * TILE];
+        for y in 0..TILE {
+            for x in 0..TILE {
+                let c = px_at(&a.px, x, y);
+                src[y * TILE + x] = c;
+                if c[3] > 0 {
+                    for k in 0..3 {
+                        sum[k] += c[k] as u32;
+                    }
+                    cnt += 1;
+                }
+            }
+        }
+        let avg = [(sum[0] / cnt.max(1)) as u8, (sum[1] / cnt.max(1)) as u8, (sum[2] / cnt.max(1)) as u8, 255];
+        let dark = shade(avg, 0.55);
+        solid_leaf[id] = a.add(move |x, y| {
+            let c = src[(y as usize) * TILE + x as usize];
+            if c[3] == 0 { dark } else { c }
+        });
+    }
     let mut opaque = vec![false; BLOCK_COUNT];
     let mut solid = vec![false; BLOCK_COUNT];
     for (i, d) in defs.iter().enumerate() {
@@ -1705,7 +1741,7 @@ fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
     for t in skins {
         items.extend_from_slice(&t);
     }
-    (Registry { defs, opaque, solid }, a.px, items)
+    (Registry { defs, opaque, solid, solid_leaf }, a.px, items)
 }
 
 /// Генератор плитки для предметов (используется из items.rs).

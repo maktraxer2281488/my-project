@@ -12,6 +12,7 @@ mod mobdefs;
 mod mobs;
 mod model;
 mod net;
+mod opt;
 mod player;
 mod render;
 mod save;
@@ -1844,6 +1845,7 @@ fn settings_screen(app: &mut App) -> Option<Screen> {
     let x2 = w / 2.0 + gap / 2.0;
     let mut y = h * 0.11;
     let old_smooth = app.settings.smooth_light;
+    let old_fast = opt::get().fast_leaves;
     let st = &mut app.settings;
     let ui = &mut app.ui;
     let rd = ui.slider(1, x1, y, cw, bh, &format!("Дальность прорисовки: {} чанков", st.render_dist), st.render_dist as f32, 2.0, 32.0);
@@ -1921,10 +1923,22 @@ fn settings_screen(app: &mut App) -> Option<Screen> {
     if ui.button(x2, y, cw, bh, &format!("Авто-дальность (60 FPS): {}", onoff(st.auto_dist))) {
         st.auto_dist = !st.auto_dist;
     }
-    y += bh + gap * 2.0;
+    y += bh + gap;
+    if ui.button(x1, y, cw, bh, &format!("Оптимизация: {}", opt::NAMES[st.opt_level as usize])) {
+        st.opt_level = (st.opt_level + 1) % 4;
+    }
+    let lim = if st.fps_limit == 0 { "без ограничения".to_string() } else { st.fps_limit.to_string() };
+    if ui.button(x2, y, cw, bh, &format!("Лимит FPS: {lim}")) {
+        let i = settings::FPS_LIMITS.iter().position(|&f| f == st.fps_limit).unwrap_or(0);
+        st.fps_limit = settings::FPS_LIMITS[(i + 1) % settings::FPS_LIMITS.len()];
+    }
+    y += bh + 4.0 * s;
+    ui.text(&format!("Оптимизация: {}", opt::HINTS[st.opt_level as usize]), x1 + 6.0 * s, y + 14.0 * s, 13.0, Color::new(0.9, 0.9, 0.85, 1.0));
+    y += 22.0 * s + gap;
     let done = ui.button((w - cw) / 2.0, y, cw, bh, "Готово") || is_key_pressed(KeyCode::Escape);
     st.clamp();
-    if st.smooth_light != old_smooth {
+    opt::set_level(st.opt_level);
+    if st.smooth_light != old_smooth || opt::get().fast_leaves != old_fast {
         app.loader.epoch += 1;
     }
     if done {
@@ -2713,6 +2727,11 @@ async fn main() {
     };
 
     app.eff_dist = app.settings.render_dist;
+    if let Some(l) = std::env::var("RK_OPT").ok().and_then(|v| v.parse::<u8>().ok()) {
+        app.settings.opt_level = l.min(3);
+    }
+    opt::set_level(app.settings.opt_level);
+    let mut frame_start = std::time::Instant::now();
     if std::env::var("RK_BENCH").is_ok() || std::env::var("RK_SHOT").is_ok() {
         app.settings.auto_dist = false;
     }
@@ -3082,7 +3101,16 @@ async fn main() {
                 }
             }
         }
+        // ограничение FPS: ждём остаток кадра (меньше нагрев и шум ноутбука)
+        if app.settings.fps_limit > 0 {
+            let target = std::time::Duration::from_secs_f64(1.0 / app.settings.fps_limit as f64);
+            let spent = frame_start.elapsed();
+            if spent < target {
+                std::thread::sleep(target - spent);
+            }
+        }
         next_frame().await;
+        frame_start = std::time::Instant::now();
     }
 }
 

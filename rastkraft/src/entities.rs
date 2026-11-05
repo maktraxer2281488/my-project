@@ -58,6 +58,7 @@ impl Entities {
 
     /// Россыпь частиц (обломки блока, кровь, искры).
     pub fn burst(&mut self, at: Vec3, n: usize, spread: f32, colors: &[Color], size: f32, speed: f32) {
+        let n = ((n as f32 * crate::opt::get().particles).round() as usize).max(1);
         if self.particles.len() > 600 {
             return;
         }
@@ -199,7 +200,9 @@ impl Entities {
             model::cube(Mat4::from_translation(p.pos) * Mat4::from_rotation_y(p.pos.x * 3.0) * Mat4::from_scale(Vec3::splat(s)), p.color);
         }
         for d in &self.drops {
-            model::shadow(vec3(d.body.pos.x, d.body.pos.y, d.body.pos.z), 0.22, 0.45);
+            if crate::opt::get().shadows {
+                model::shadow(vec3(d.body.pos.x, d.body.pos.y, d.body.pos.z), 0.22, 0.45);
+            }
         }
     }
 }

@@ -4,6 +4,11 @@
 use crate::blocks::{self, Shape, *};
 use crate::world::{CH, CS, Chunk};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// «Быстрая листва»: листья рисуются сплошными блоками без прозрачности
+/// и закрывают грани соседей (меняется в настройках оптимизации).
+pub static FAST_LEAVES: AtomicBool = AtomicBool::new(false);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -38,6 +43,13 @@ pub struct MeshData {
     /// Мелкие растения: рисуются только вблизи.
     pub detail_v: Vec<V>,
     pub detail_i: Vec<u32>,
+    /// Упрощённая копия для дальних расстояний: клетки 2×2×2, без пещер и растений.
+    pub lod_v: Vec<V>,
+    pub lod_i: Vec<u32>,
+    pub lod_cut_v: Vec<V>,
+    pub lod_cut_i: Vec<u32>,
+    pub lod_water_v: Vec<V>,
+    pub lod_water_i: Vec<u32>,
 }
 
 /// Центральный чанк и его 8 соседей.
@@ -221,9 +233,9 @@ const FACES: [([i32; 3], [[f32; 3]; 4], f32); 6] = [
 ];
 const AO_LEVELS: [f32; 4] = [0.45, 0.64, 0.82, 1.0];
 
-fn face_visible(b: u16, nb: u16) -> bool {
+fn face_visible(b: u16, nb: u16, fast: bool) -> bool {
     let reg = blocks::reg();
-    if reg.opaque[nb as usize] {
+    if reg.opaque[nb as usize] || (fast && is_leaves(nb) && reg.defs[b as usize].shape != Shape::Liquid) {
         return false;
     }
     match reg.defs[b as usize].shape {
@@ -280,8 +292,10 @@ fn axis_size(a: usize) -> i32 {
 
 pub fn build(n: &Nbhd, smooth: bool) -> MeshData {
     let reg = blocks::reg();
+    let fast = FAST_LEAVES.load(Ordering::Relaxed);
     let light = compute_light(n);
     let mut out = MeshData::default();
+    build_lod(n, &light, &mut out);
     // объединяемые грани по направлениям: [dir][x][y][z]
     let mut mask: Vec<Option<Key>> = vec![None; 6 * SX * SY * SX];
     let mi = |dir: usize, x: i32, y: i32, z: i32| ((dir * SX + x as usize) * SY + y as usize) * SX + z as usize;
@@ -322,6 +336,8 @@ pub fn build(n: &Nbhd, smooth: bool) -> MeshData {
                 let leaves = is_leaves(b);
                 let pass = if to_water {
                     Pass::Water
+                } else if leaves && fast {
+                    Pass::Opaque
                 } else if d.shape == Shape::Cutout {
                     Pass::Cutout
                 } else {
@@ -330,10 +346,11 @@ pub fn build(n: &Nbhd, smooth: bool) -> MeshData {
 
                 for (fi, (nrm, corners, shade)) in FACES.iter().enumerate() {
                     let nb = n.get(x + nrm[0], y + nrm[1], z + nrm[2]);
-                    if !face_visible(b, nb) {
+                    if !face_visible(b, nb, fast) {
                         continue;
                     }
                     let tile = match fi {
+                        _ if leaves && fast => reg.solid_leaf[b as usize],
                         2 => d.tex[0],
                         3 => d.tex[2],
                         _ => d.tex[1],
@@ -495,4 +512,156 @@ pub fn build(n: &Nbhd, smooth: bool) -> MeshData {
         }
     }
     out
+}
+
+
+/// Клетка 2×2×2 для дальней копии: сплошной блок (что виднее сверху), вода или пусто.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Cell {
+    Air,
+    Water,
+    Solid(u16),
+}
+
+fn lod_cell(n: &Nbhd, cx: i32, cy: i32, cz: i32) -> Cell {
+    let reg = blocks::reg();
+    let (mut solid, mut water) = (0, 0);
+    let mut top: Option<(i32, u16)> = None;
+    for dy in 0..2 {
+        for dz in 0..2 {
+            for dx in 0..2 {
+                let (x, y, z) = (cx * 2 + dx, cy * 2 + dy, cz * 2 + dz);
+                let b = n.get(x, y, z);
+                match reg.defs[b as usize].shape {
+                    Shape::Cube | Shape::Cutout => {
+                        solid += 1;
+                        if top.is_none_or(|(ty, _)| y > ty) {
+                            top = Some((y, b));
+                        }
+                    }
+                    Shape::Liquid if b == WATER => water += 1,
+                    _ => {}
+                }
+            }
+        }
+    }
+    match top {
+        Some((_, b)) if solid >= 3 => Cell::Solid(b),
+        _ if water >= 4 => Cell::Water,
+        _ => Cell::Air,
+    }
+}
+
+/// Дальняя копия чанка: вдвое крупнее «пиксели», грани без света в пещерах не строятся,
+/// соседние одинаковые грани в строке склеиваются.
+fn build_lod(n: &Nbhd, light: &Light, out: &mut MeshData) {
+    let reg = blocks::reg();
+    const NX: i32 = CS / 2;
+    const NY: i32 = CH / 2;
+    // клетки с запасом в одну клетку вокруг чанка
+    let w = NX + 2;
+    let mut cells = vec![Cell::Air; (w * w * NY) as usize];
+    let ci = |x: i32, y: i32, z: i32| ((y * w + (z + 1)) * w + (x + 1)) as usize;
+    for y in 0..NY {
+        for z in -1..=NX {
+            for x in -1..=NX {
+                cells[ci(x, y, z)] = lod_cell(n, x, y, z);
+            }
+        }
+    }
+    let get = |x: i32, y: i32, z: i32| -> Cell {
+        if y < 0 {
+            Cell::Solid(BEDROCK)
+        } else if y >= NY {
+            Cell::Air
+        } else {
+            cells[ci(x, y, z)]
+        }
+    };
+    for (fi, (nrm, corners, shade)) in FACES.iter().enumerate() {
+        for y in 0..NY {
+            for z in 0..NX {
+                let mut x = 0;
+                while x < NX {
+                    let c = get(x, y, z);
+                    // на краю чанка соседа считаем пустым: стенка-бортик закрывает щели
+                    // между упрощённым и обычным чанком (тёмные части бортика не строятся)
+                    let edge = |x2: i32, z2: i32| !(0..NX).contains(&x2) || !(0..NX).contains(&z2);
+                    let nb = if edge(x + nrm[0], z + nrm[2]) { Cell::Air } else { get(x + nrm[0], y + nrm[1], z + nrm[2]) };
+                    let face = |c: Cell, nb: Cell| -> Option<(u16, [u8; 4], bool)> {
+                        let (tile, water) = match c {
+                            Cell::Air => return None,
+                            Cell::Water => {
+                                if fi != 2 || nb != Cell::Air {
+                                    return None;
+                                }
+                                (reg.defs[WATER as usize].tex[0], true)
+                            }
+                            Cell::Solid(b) => {
+                                if matches!(nb, Cell::Solid(_)) {
+                                    return None;
+                                }
+                                let d = &reg.defs[b as usize];
+                                let t = if is_leaves(b) { reg.solid_leaf[b as usize] } else { match fi { 2 => d.tex[0], 3 => d.tex[2], _ => d.tex[1] } };
+                                (t, false)
+                            }
+                        };
+                        // свет снаружи грани: лучший из соседних клеток-блоков
+                        let (mut sl, mut bl) = (0u8, 0u8);
+                        for k in 0..4 {
+                            let ox = x * 2 + if nrm[0] > 0 { 2 } else if nrm[0] < 0 { -1 } else { k & 1 };
+                            let oy = y * 2 + if nrm[1] > 0 { 2 } else if nrm[1] < 0 { -1 } else { (k >> 1) & 1 };
+                            let oz = z * 2 + if nrm[2] > 0 { 2 } else if nrm[2] < 0 { -1 } else if nrm[0] != 0 { k & 1 } else { (k >> 1) & 1 };
+                            let (a, b2) = light.at(ox, oy, oz);
+                            sl = sl.max(a);
+                            bl = bl.max(b2);
+                        }
+                        if sl == 0 && bl == 0 && !water {
+                            return None; // тёмные пещеры вдали не нужны
+                        }
+                        let alpha = if water { 180 } else { 255 };
+                        Some((tile, [lb(sl as f32), lb(bl as f32), (shade * 255.0) as u8, alpha], water))
+                    };
+                    let Some(key) = face(c, nb) else {
+                        x += 1;
+                        continue;
+                    };
+                    // склеиваем одинаковые грани вдоль x (для граней ±x — только по одной)
+                    let mut len = 1;
+                    if nrm[0] == 0 {
+                        while x + len < NX && len < 8 {
+                            let c2 = get(x + len, y, z);
+                            let nb2 = if edge(x + len + nrm[0], z + nrm[2]) { Cell::Air } else { get(x + len + nrm[0], y + nrm[1], z + nrm[2]) };
+                            if face(c2, nb2) != Some(key) {
+                                break;
+                            }
+                            len += 1;
+                        }
+                    }
+                    let (tile, lt, water) = key;
+                    let mut q = [V::new([0.0; 3], [0.0; 2], tile, lt); 4];
+                    let uax = (0..3).find(|&a| corners[0][a] != corners[1][a]).unwrap();
+                    let vax = (0..3).find(|&a| corners[0][a] != corners[3][a]).unwrap();
+                    for (i, cr) in corners.iter().enumerate() {
+                        let sx = if nrm[0] == 0 { len as f32 * 2.0 } else { 2.0 };
+                        let pos = [x as f32 * 2.0 + cr[0] * sx, y as f32 * 2.0 + cr[1] * 2.0 - if water { 0.25 } else { 0.0 }, z as f32 * 2.0 + cr[2] * 2.0];
+                        let ext = |a: usize| if a == 0 { sx } else { 2.0 };
+                        let u = if cr[uax] == corners[1][uax] { ext(uax) } else { 0.0 };
+                        let v = if cr[vax] == corners[0][vax] { ext(vax) } else { 0.0 };
+                        q[i] = V::new(pos, [u, v], tile, lt);
+                    }
+                    let leaves = matches!(c, Cell::Solid(b) if reg.defs[b as usize].shape == Shape::Cutout && !is_leaves(b));
+                    let (vv, ii) = if water {
+                        (&mut out.lod_water_v, &mut out.lod_water_i)
+                    } else if leaves {
+                        (&mut out.lod_cut_v, &mut out.lod_cut_i)
+                    } else {
+                        (&mut out.lod_v, &mut out.lod_i)
+                    };
+                    push_quad(vv, ii, q, false);
+                    x += len;
+                }
+            }
+        }
+    }
 }

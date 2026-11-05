@@ -151,6 +151,9 @@ pub struct ChunkGpu {
     detail: Option<GpuMesh>,
     dark: Option<GpuMesh>,
     water: Option<GpuMesh>,
+    lod: Option<GpuMesh>,
+    lod_cut: Option<GpuMesh>,
+    lod_water: Option<GpuMesh>,
     version: u32,
     epoch: u32,
 }
@@ -239,14 +242,23 @@ impl Renderer {
         }
         // ближние чанки первыми: видеокарта не тратит время на закрытые пиксели
         vis.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        let o = crate::opt::get();
+        // дальние чанки — упрощённой копией (если она есть)
+        let far = |d: f32, _g: &ChunkGpu| d > o.lod_dist;
         ctx.begin_pass(pass, PassAction::Nothing);
         ctx.apply_pipeline(&self.pip_opaque);
         for (d, off, g) in &vis {
+            if far(*d, g) {
+                if let Some(m) = &g.lod {
+                    self.draw_mesh(ctx, m, &self.uniforms(f, *off));
+                }
+                continue;
+            }
             if let Some(m) = &g.opaque {
                 self.draw_mesh(ctx, m, &self.uniforms(f, *off));
             }
             // тёмные подземные грани: если игрок под землёй — все, иначе только рядом
-            if f.underground || *d < 40.0 {
+            if f.underground || *d < o.dark_dist {
                 if let Some(m) = &g.dark {
                     self.draw_mesh(ctx, m, &self.uniforms(f, *off));
                 }
@@ -254,11 +266,17 @@ impl Renderer {
         }
         ctx.apply_pipeline(&self.pip_cutout);
         for (d, off, g) in &vis {
+            if far(*d, g) {
+                if let Some(m) = &g.lod_cut {
+                    self.draw_mesh(ctx, m, &self.uniforms(f, *off));
+                }
+                continue;
+            }
             if let Some(m) = &g.cutout {
                 self.draw_mesh(ctx, m, &self.uniforms(f, *off));
             }
             // трава и папоротники — только поблизости
-            if *d < DETAIL_DIST {
+            if *d < o.detail_dist {
                 if let Some(m) = &g.detail {
                     self.draw_mesh(ctx, m, &self.uniforms(f, *off));
                 }
@@ -266,7 +284,13 @@ impl Renderer {
         }
         ctx.apply_pipeline(&self.pip_blend);
         vis.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
-        for (_, off, g) in &vis {
+        for (d, off, g) in &vis {
+            if far(*d, g) {
+                if let Some(m) = &g.lod_water {
+                    self.draw_mesh(ctx, m, &self.uniforms(f, *off));
+                }
+                continue;
+            }
             if let Some(m) = &g.water {
                 self.draw_mesh(ctx, m, &self.uniforms(f, *off));
             }
@@ -310,7 +334,6 @@ impl Renderer {
 }
 
 const CLOUD_PERIOD: f32 = 384.0;
-const DETAIL_DIST: f32 = 56.0;
 
 fn build_clouds(dim: Dim) -> (Vec<V>, Vec<u32>) {
     const CELL: f32 = 12.0;
@@ -415,6 +438,9 @@ impl Loader {
             if let Some(m) = g.water {
                 m.delete(ctx);
             }
+            for m in [g.lod, g.lod_cut, g.lod_water].into_iter().flatten() {
+                m.delete(ctx);
+            }
         }
         self.pending_gen.clear();
         self.pending_mesh.clear();
@@ -486,6 +512,9 @@ impl Loader {
             detail: GpuMesh::new(ctx, &mesh.detail_v, &mesh.detail_i),
             dark: GpuMesh::new(ctx, &mesh.dark_v, &mesh.dark_i),
             water: GpuMesh::new(ctx, &mesh.water_v, &mesh.water_i),
+            lod: GpuMesh::new(ctx, &mesh.lod_v, &mesh.lod_i),
+            lod_cut: GpuMesh::new(ctx, &mesh.lod_cut_v, &mesh.lod_cut_i),
+            lod_water: GpuMesh::new(ctx, &mesh.lod_water_v, &mesh.lod_water_i),
             version,
             epoch: self.epoch,
         };
@@ -503,6 +532,9 @@ impl Loader {
                 m.delete(ctx);
             }
             if let Some(m) = old.water {
+                m.delete(ctx);
+            }
+            for m in [old.lod, old.lod_cut, old.lod_water].into_iter().flatten() {
                 m.delete(ctx);
             }
         }

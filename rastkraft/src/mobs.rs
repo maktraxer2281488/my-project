@@ -398,7 +398,8 @@ impl Mobs {
             for &(_, rp) in remotes {
                 near = near.min((rp - m.body.pos).length_squared());
             }
-            let far = near > 44.0 * 44.0;
+            let mob_far = crate::opt::get().mob_far;
+            let far = near > mob_far * mob_far;
             if far && m.dying <= 0.0 && (frame + i as u32) % 3 != 0 {
                 continue;
             }
@@ -769,12 +770,14 @@ impl Mobs {
     }
 
     pub fn draw(&self, _world: &World, daylight: f32, t: f32, cam: Vec3, fwd: Vec3) {
+        let o = crate::opt::get();
         for m in &self.list {
             let p = m.body.pos;
             let to = p + vec3(0.0, m.body.h * 0.5, 0.0) - cam;
             let dist = to.length();
             // дальние и оказавшиеся за спиной не рисуем
-            if dist > 72.0 || (dist > 4.0 && to.dot(fwd) < -m.body.h) {
+            let max_d = if m.is_boss() { o.mob_dist.max(64.0) } else { o.mob_dist };
+            if dist > max_d || (dist > 4.0 && to.dot(fwd) < -m.body.h) {
                 continue;
             }
             let d = m.d();
@@ -793,7 +796,7 @@ impl Mobs {
             if m.body.on_ground || d.flags & FLY != 0 {
                 let alpha = if d.flags & FLY != 0 { 0.35 } else { 0.6 };
                 let gy = if d.flags & FLY != 0 { p.y.floor() - 3.0 } else { p.y };
-                if d.flags & FLY == 0 {
+                if d.flags & FLY == 0 && o.shadows {
                     model::shadow(vec3(p.x, gy, p.z), m.body.hw * 1.6 + 0.2, alpha);
                 }
             }

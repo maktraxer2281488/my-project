@@ -20,6 +20,10 @@ pub struct Settings {
     pub render_scale: f32,
     /// Сама снижать дальность, чтобы держать 60 FPS.
     pub auto_dist: bool,
+    /// Уровень оптимизации 0–3 (см. opt.rs).
+    pub opt_level: u8,
+    /// Ограничение FPS (0 — без ограничения).
+    pub fps_limit: u32,
 }
 
 impl Default for Settings {
@@ -41,9 +45,14 @@ impl Default for Settings {
             name: "Игрок".to_string(),
             render_scale: 1.0,
             auto_dist: true,
+            opt_level: 1,
+            fps_limit: 0,
         }
     }
 }
+
+/// Варианты ограничения FPS (0 — без ограничения).
+pub const FPS_LIMITS: [u32; 5] = [0, 30, 60, 120, 144];
 
 pub const DIFFICULTY: [&str; 4] = ["Мирная", "Лёгкая", "Обычная", "Сложная"];
 
@@ -79,6 +88,8 @@ impl Settings {
                 "name" => s.name = v.to_string(),
                 "render_scale" => s.render_scale = v.parse().unwrap_or(s.render_scale),
                 "auto_dist" => s.auto_dist = b,
+                "opt_level" => s.opt_level = v.parse().unwrap_or(s.opt_level),
+                "fps_limit" => s.fps_limit = v.parse().unwrap_or(s.fps_limit),
                 _ => {}
             }
         }
@@ -94,11 +105,15 @@ impl Settings {
         self.gui_scale = self.gui_scale.clamp(0.75, 2.0);
         self.difficulty = self.difficulty.min(3);
         self.render_scale = self.render_scale.clamp(0.4, 1.0);
+        self.opt_level = self.opt_level.min(3);
+        if !FPS_LIMITS.contains(&self.fps_limit) {
+            self.fps_limit = 0;
+        }
     }
 
     pub fn save(&self) {
         let text = format!(
-            "render_dist={}\nfov={}\nsensitivity={}\nbrightness={}\nfog={}\nclouds={}\nsmooth_light={}\nview_bob={}\nshow_fps={}\ngui_scale={}\ndifficulty={}\ninvert_mouse={}\npvp={}\nname={}\nrender_scale={}\nauto_dist={}\n",
+            "render_dist={}\nfov={}\nsensitivity={}\nbrightness={}\nfog={}\nclouds={}\nsmooth_light={}\nview_bob={}\nshow_fps={}\ngui_scale={}\ndifficulty={}\ninvert_mouse={}\npvp={}\nname={}\nrender_scale={}\nauto_dist={}\nopt_level={}\nfps_limit={}\n",
             self.render_dist,
             self.fov,
             self.sensitivity,
@@ -114,7 +129,9 @@ impl Settings {
             self.pvp as u8,
             self.name,
             self.render_scale,
-            self.auto_dist as u8
+            self.auto_dist as u8,
+            self.opt_level,
+            self.fps_limit
         );
         let _ = std::fs::write(path(), text);
     }
