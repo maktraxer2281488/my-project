@@ -35,7 +35,10 @@ fn cache_path(t: Track) -> Option<std::path::PathBuf> {
 }
 
 /// Песни rtxx131, вшитые как есть (OGG): (мелодия, запись).
-const SONGS: &[(Track, &[u8])] = &[(Track::Menu, include_bytes!("../assets/music/menu_rtxx131.ogg"))];
+const SONGS: &[(Track, &[u8])] = &[
+    (Track::Menu, include_bytes!("../assets/music/menu_rtxx131.ogg")),
+    (Track::Heaven, include_bytes!("../assets/music/heaven_rtxx131.ogg")),
+];
 
 /// Готовая запись мелодии в WAV: вшитая, сохранённая ранее или сочинённая заново.
 /// Сочинённая в игре мелодия совпадает с записью байт в байт — качество то же.
@@ -341,5 +344,7 @@ mod tests {
         let w = track_wav(Track::Menu);
         let secs = wav_secs(&w);
         assert!((secs - 31.8).abs() < 0.5, "{secs}");
+        let secs = wav_secs(&track_wav(Track::Heaven));
+        assert!((secs - 53.2).abs() < 0.5, "{secs}");
     }
 }

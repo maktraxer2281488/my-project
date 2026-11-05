@@ -40,7 +40,7 @@ impl Track {
             Track::Taiga => "Снег над тайгой",
             Track::Night => "Ночная тишина",
             Track::Caves => "Глубина",
-            Track::Heaven => "Небесные сады",
+            Track::Heaven => "Небесные сады — rtxx131",
             Track::Boss => "Битва",
             Track::Ocean => "Морской бриз",
             Track::Dawn => "Рассвет",

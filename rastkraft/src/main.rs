@@ -5292,7 +5292,8 @@ fn music_for(g: &Game) -> &'static [music::Track] {
         return if b.enraged { &[T::Fury] } else { &[T::Boss, T::Fury] };
     }
     if g.dim == Dim::Heaven {
-        return &[T::Heaven, T::Clouds];
+        // в Раю — песня rtxx131
+        return &[T::Heaven];
     }
     if g.dim == Dim::Abyss {
         return &[T::Caves, T::Night];
