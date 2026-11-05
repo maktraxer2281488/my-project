@@ -14,7 +14,17 @@ pub enum Biome {
     Desert,
     Taiga,
     Islands,
+    Swamp,
+    Jungle,
+    Savanna,
+    Canyon,
+    Cherry,
+    IceSpikes,
+    Volcano,
 }
+
+/// Все биомы верхнего мира (без Рая).
+pub const LAND: [Biome; 10] = [Biome::Meadow, Biome::Desert, Biome::Taiga, Biome::Swamp, Biome::Jungle, Biome::Savanna, Biome::Canyon, Biome::Cherry, Biome::IceSpikes, Biome::Volcano];
 
 impl Biome {
     pub fn name(self) -> &'static str {
@@ -24,6 +34,22 @@ impl Biome {
             Biome::Desert => "Знойная пустыня",
             Biome::Taiga => "Снежная тайга",
             Biome::Islands => "Парящие острова",
+            Biome::Swamp => "Туманное болото",
+            Biome::Jungle => "Дикие джунгли",
+            Biome::Savanna => "Золотая саванна",
+            Biome::Canyon => "Красные каньоны",
+            Biome::Cherry => "Сакуровая долина",
+            Biome::IceSpikes => "Ледяные пики",
+            Biome::Volcano => "Вулканические пустоши",
+        }
+    }
+    /// «Родительский» климат: по нему выбираются жители, музыка, погода.
+    pub fn family(self) -> Biome {
+        match self {
+            Biome::Swamp | Biome::Jungle | Biome::Cherry => Biome::Meadow,
+            Biome::Savanna | Biome::Canyon | Biome::Volcano => Biome::Desert,
+            Biome::IceSpikes => Biome::Taiga,
+            b => b,
         }
     }
 }
@@ -93,6 +119,7 @@ pub struct Column {
 pub fn column(seed: u32, x: i32, z: i32) -> Column {
     let (fx, fz) = (x as f32, z as f32);
     let temp = stretch(fbm2(fx * 0.0021, fz * 0.0021, seed.wrapping_add(11), 3), 2.6);
+    let hum = stretch(fbm2(fx * 0.0027 + 700.0, fz * 0.0027, seed.wrapping_add(13), 3), 2.4);
     let cont = stretch(fbm2(fx * 0.0014, fz * 0.0014, seed.wrapping_add(21), 4), 2.4);
 
     let w_taiga = smoothstep(0.42, 0.30, temp);
@@ -108,7 +135,23 @@ pub fn column(seed: u32, x: i32, z: i32) -> Column {
     let mountain = ((stretch(mnt, 2.0) - 0.5).max(0.0) * 2.0).powf(1.5) * 52.0;
     let h_taiga = 53.0 + stretch(hills, 1.6) * 16.0 + detail * 5.0 + mountain;
 
-    let land = w_meadow * h_meadow + w_desert * h_desert + w_taiga * h_taiga;
+    let mut land = w_meadow * h_meadow + w_desert * h_desert + w_taiga * h_taiga;
+    // новые биомы меняют рельеф плавно (веса от тех же шумов — без обрывов на границах)
+    let w_swamp = smoothstep(0.60, 0.70, hum) * w_meadow;
+    land += (SEA as f32 + 1.4 + detail * 1.6 - land) * w_swamp * 0.9;
+    let w_jungle = smoothstep(0.58, 0.68, hum) * w_desert;
+    land += w_jungle * (stretch(hills, 1.8) * 10.0 + detail * 3.0);
+    let w_canyon = smoothstep(0.40, 0.30, hum) * w_desert;
+    let mesa = 60.0 + stretch(fbm2(fx * 0.011, fz * 0.011, seed.wrapping_add(67), 3), 1.9) * 34.0;
+    let terraced = (mesa / 6.0).floor() * 6.0 + ((mesa / 6.0).fract() - 0.8).max(0.0) * 30.0;
+    land += (terraced - land) * w_canyon;
+    let volc = fbm2(fx * 0.006 + 300.0, fz * 0.006, seed.wrapping_add(19), 3);
+    let w_volc = smoothstep(0.66, 0.74, volc) * (1.0 - w_taiga);
+    let cone = ((volc - 0.66) / 0.14).clamp(0.0, 1.0);
+    // конус с кратером на вершине
+    let crater = ((cone - 0.85) / 0.15).clamp(0.0, 1.0) * 14.0;
+    land += w_volc * (cone * cone * 46.0 - crater);
+
     let ocean_floor = 33.0 + detail * 6.0 + hills * 4.0;
     let k = smoothstep(0.30, 0.44, cont);
     let h = ocean_floor + (land - ocean_floor) * k;
@@ -117,12 +160,27 @@ pub fn column(seed: u32, x: i32, z: i32) -> Column {
     // биом с лёгким «дрожанием» на границах
     let jitter = (hash(x, z, seed.wrapping_add(71)) - 0.5) * 0.06;
     let t = temp + jitter;
+    let u = hum + jitter;
     let biome = if height < SEA - 1 {
         Biome::Ocean
+    } else if volc > 0.70 && t > 0.45 {
+        Biome::Volcano
     } else if t < 0.36 {
-        Biome::Taiga
+        if t < 0.27 && u < 0.46 { Biome::IceSpikes } else { Biome::Taiga }
     } else if t > 0.64 {
-        Biome::Desert
+        if u < 0.35 {
+            Biome::Canyon
+        } else if u > 0.63 {
+            Biome::Jungle
+        } else {
+            Biome::Desert
+        }
+    } else if u > 0.65 && height <= SEA + 6 {
+        Biome::Swamp
+    } else if u < 0.36 && t > 0.5 {
+        Biome::Savanna
+    } else if u > 0.52 && u < 0.65 && t < 0.5 {
+        Biome::Cherry
     } else {
         Biome::Meadow
     };
@@ -435,6 +493,18 @@ fn gen_overworld(seed: u32, cx: i32, cz: i32) -> Chunk {
                     (b, b, 3)
                 }
                 Biome::Desert => (SAND, SAND, 4),
+                Biome::Canyon => (RED_SAND, RED_SANDSTONE, 2),
+                Biome::Volcano => {
+                    let n = hash(x / 2, z / 2, seed.wrapping_add(82));
+                    (if n < 0.15 { MAGMA } else if n < 0.45 { ASH_BLOCK } else if n < 0.6 { BLACK_SAND } else { BASALT }, BASALT, 3)
+                }
+                Biome::IceSpikes => (SNOW_BLOCK, SNOW_PACKED, 3),
+                Biome::Swamp => {
+                    let n = hash(x / 3, z / 3, seed.wrapping_add(83));
+                    (if n < 0.3 { MUD } else if n < 0.45 { MOSS_BLOCK } else { GRASS }, if n < 0.5 { MUD } else { DIRT }, 3)
+                }
+                Biome::Savanna => (if hash(x / 2, z / 2, seed.wrapping_add(84)) < 0.3 { COARSE_DIRT } else { GRASS }, DIRT, 3),
+                Biome::Jungle if beach => (SAND, SAND, 3),
                 Biome::Taiga if beach => (GRAVEL, GRAVEL, 2),
                 _ if beach => (SAND, SAND, 3),
                 Biome::Taiga if h > 96 => (SNOW_BLOCK, STONE, 1),
@@ -451,6 +521,11 @@ fn gen_overworld(seed: u32, cx: i32, cz: i32) -> Chunk {
                     filler
                 } else if col.biome == Biome::Desert && y > h - depth - 4 {
                     SANDSTONE
+                } else if col.biome == Biome::Canyon && y > 50 {
+                    // слоистые стены каньона
+                    [RED_SANDSTONE, ADOBE, CUT_RED_SANDSTONE, RED_SANDSTONE, CHALK, RED_SAND, ADOBE][(y / 3) as usize % 7]
+                } else if col.biome == Biome::Volcano && y > h - 12 {
+                    if hash(x, y * 7 + z, seed.wrapping_add(85)) < 0.08 { OBSIDIAN } else { BASALT }
                 } else if y < 18 {
                     SLATE
                 } else {
@@ -459,8 +534,18 @@ fn gen_overworld(seed: u32, cx: i32, cz: i32) -> Chunk {
                 chunk.set(lx, y, lz, b);
             }
             for y in (h + 1)..=SEA {
-                let b = if y == SEA && col.biome == Biome::Taiga && col.temp < 0.32 { ICE } else { WATER };
+                let cold = matches!(col.biome, Biome::Taiga | Biome::IceSpikes) && col.temp < 0.32;
+                let b = if y == SEA && cold { ICE } else { WATER };
                 chunk.set(lx, y, lz, b);
+            }
+            // озеро лавы в кратере вулкана
+            if col.biome == Biome::Volcano && h > SEA + 30 {
+                let rim = column(seed, x + 4, z).height.max(column(seed, x - 4, z).height).max(column(seed, x, z + 4).height).max(column(seed, x, z - 4).height);
+                if rim > h + 3 {
+                    for y in (h + 1)..=(rim - 3).min(h + 3) {
+                        chunk.set(lx, y, lz, LAVA);
+                    }
+                }
             }
         }
     }
@@ -548,6 +633,8 @@ fn gen_overworld(seed: u32, cx: i32, cz: i32) -> Chunk {
 
     // --- растительность (с запасом вокруг чанка, чтобы кроны не обрезались) ---
     const M: i32 = 3;
+    // на полянах деревень и больших построек деревья не растут
+    let clearings = crate::structures::big_clearings(seed, x0, z0);
     for gz in (z0 - M)..(z0 + CS + M) {
         for gx in (x0 - M)..(x0 + CS + M) {
             let inside = gx >= x0 && gx < x0 + CS && gz >= z0 && gz < z0 + CS;
@@ -560,7 +647,9 @@ fn gen_overworld(seed: u32, cx: i32, cz: i32) -> Chunk {
             if inside && g.get(gx, h, gz) == AIR {
                 continue; // поверхность выедена пещерой
             }
-            let r = hash(gx, gz, seed.wrapping_add(5));
+            let cleared = clearings.iter().any(|&(cx, cz, rr)| (gx - cx) * (gx - cx) + (gz - cz) * (gz - cz) < rr * rr);
+            // на поляне «r» выше любого шанса дерева — растёт только трава и цветы
+            let r = if cleared { 0.9 } else { hash(gx, gz, seed.wrapping_add(5)) };
             let (fx, fz) = (gx as f32, gz as f32);
             match c.biome {
                 Biome::Meadow => {
@@ -644,6 +733,122 @@ fn gen_overworld(seed: u32, cx: i32, cz: i32) -> Chunk {
                         }
                     }
                 }
+                Biome::Swamp => {
+                    if r < 0.022 && h >= SEA {
+                        let t = hash(gx, gz, seed.wrapping_add(6));
+                        if t > 0.55 { tree_willow(&mut g, gx, h, gz, t) } else { tree_mangrove(&mut g, gx, h, gz, t) }
+                    } else if inside && g.get(gx, h + 1, gz) == AIR {
+                        let p = hash(gx, gz, seed.wrapping_add(7));
+                        if p < 0.08 {
+                            g.set(gx, h + 1, gz, CATTAIL);
+                        } else if p < 0.16 {
+                            g.set(gx, h + 1, gz, TALL_GRASS);
+                        } else if p < 0.19 {
+                            g.set(gx, h + 1, gz, if p < 0.175 { BLUE_MUSHROOM } else { BROWN_MUSHROOM });
+                        } else if p < 0.2 {
+                            g.set(gx, h + 1, gz, ORCHID);
+                        }
+                    }
+                }
+                Biome::Jungle => {
+                    let t = hash(gx, gz, seed.wrapping_add(6));
+                    if r < 0.06 && h > SEA + 1 {
+                        if t > 0.7 {
+                            tree_jungle_giant(&mut g, gx, h, gz, t);
+                        } else if t > 0.45 {
+                            tree_ebony(&mut g, gx, h, gz, t);
+                        } else {
+                            tree_mangrove(&mut g, gx, h, gz, t);
+                        }
+                    } else if r > 0.995 && h > SEA + 1 {
+                        // заросли бамбука
+                        let tall = 4 + (t * 7.0) as i32;
+                        for y in 1..=tall {
+                            g.set(gx, h + y, gz, BAMBOO_BLOCK);
+                        }
+                    } else if inside && g.get(gx, h + 1, gz) == AIR && g.get(gx, h, gz) == GRASS {
+                        let p = hash(gx, gz, seed.wrapping_add(7));
+                        if p < 0.22 {
+                            g.set(gx, h + 1, gz, if p < 0.12 { FERN } else { TALL_GRASS });
+                        } else if p < 0.235 {
+                            g.set(gx, h + 1, gz, ORCHID);
+                        } else if p > 0.997 {
+                            g.set(gx, h + 1, gz, MELON);
+                        }
+                    }
+                }
+                Biome::Savanna => {
+                    if r < 0.006 && h > SEA + 1 {
+                        tree_acacia(&mut g, gx, h, gz, hash(gx, gz, seed.wrapping_add(6)));
+                    } else if inside && g.get(gx, h + 1, gz) == AIR && matches!(g.get(gx, h, gz), GRASS | COARSE_DIRT) {
+                        let p = hash(gx, gz, seed.wrapping_add(7));
+                        if p < 0.18 {
+                            g.set(gx, h + 1, gz, TALL_GRASS);
+                        } else if p < 0.2 {
+                            g.set(gx, h + 1, gz, DEAD_BUSH);
+                        } else if p < 0.205 {
+                            g.set(gx, h + 1, gz, SUNFLOWER);
+                        }
+                    }
+                }
+                Biome::Canyon => {
+                    if inside && g.get(gx, h + 1, gz) == AIR && g.get(gx, h, gz) == RED_SAND {
+                        let p = hash(gx, gz, seed.wrapping_add(7));
+                        if p < 0.004 {
+                            for y in 1..=(1 + (hash(gx, gz, 8) * 3.0) as i32) {
+                                g.set(gx, h + y, gz, CACTUS);
+                            }
+                        } else if p < 0.02 {
+                            g.set(gx, h + 1, gz, DEAD_BUSH);
+                        }
+                    }
+                }
+                Biome::Cherry => {
+                    let t = hash(gx, gz, seed.wrapping_add(6));
+                    if r < 0.028 && h > SEA + 1 {
+                        tree_sakura(&mut g, gx, h, gz, t);
+                    } else if inside && g.get(gx, h + 1, gz) == AIR && g.get(gx, h, gz) == GRASS {
+                        let p = hash(gx, gz, seed.wrapping_add(7));
+                        if p < 0.1 {
+                            g.set(gx, h + 1, gz, [TULIP_PINK, PEONY, LAVENDER, TULIP_PINK, CLOVER][(p * 50.0) as usize % 5]);
+                        } else if p < 0.16 {
+                            g.set(gx, h + 1, gz, TALL_GRASS);
+                        }
+                    }
+                }
+                Biome::IceSpikes => {
+                    // ледяные шпили
+                    if r < 0.004 && h > SEA {
+                        let t = hash(gx, gz, seed.wrapping_add(6));
+                        let tall = 6 + (t * t * 22.0) as i32;
+                        let rad = if tall > 16 { 1 } else { 0 };
+                        for y in 1..=tall {
+                            let rr = if y < tall / 3 { rad } else { 0 };
+                            for dz in -rr..=rr {
+                                for dx in -rr..=rr {
+                                    g.set(gx + dx, h + y, gz + dz, PACKED_ICE);
+                                }
+                            }
+                        }
+                    } else if inside && g.get(gx, h + 1, gz) == AIR && hash(gx, gz, seed.wrapping_add(7)) < 0.004 {
+                        g.set(gx, h + 1, gz, SNOW_FLOWER);
+                    }
+                }
+                Biome::Volcano => {
+                    if inside && g.get(gx, h + 1, gz) == AIR && matches!(g.get(gx, h, gz), BASALT | ASH_BLOCK | BLACK_SAND) {
+                        let p = hash(gx, gz, seed.wrapping_add(7));
+                        if p < 0.006 {
+                            g.set(gx, h + 1, gz, FIREFLOWER);
+                        } else if p < 0.012 {
+                            g.set(gx, h + 1, gz, DEAD_BUSH);
+                        } else if p > 0.9985 {
+                            // столб пемзы
+                            for y in 1..=(2 + (hash(gx, gz, 9) * 4.0) as i32) {
+                                g.set(gx, h + y, gz, PUMICE);
+                            }
+                        }
+                    }
+                }
                 _ => {}
             }
             // тростник у воды
@@ -669,6 +874,7 @@ fn gen_overworld(seed: u32, cx: i32, cz: i32) -> Chunk {
         }
     }
     crate::structures::place(&mut g, Dim::Overworld, seed);
+    crate::structures::place_big(&mut g, seed);
     dungeons(&mut g, seed);
     chunk
 }
@@ -876,6 +1082,35 @@ fn tree_cedar(g: &mut Gen, x: i32, h: i32, z: i32, t: f32) {
         }
     }
     trunk(g, x, h, z, len - 1, CEDAR_LOG);
+}
+
+/// Высокое дерево джунглей: толстый ствол 2×2 и широкая крона.
+fn tree_jungle_giant(g: &mut Gen, x: i32, h: i32, z: i32, t: f32) {
+    let len = 14 + (t * 9.0) as i32;
+    for y in 1..=len {
+        for (dx, dz) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+            g.set(x + dx, h + y, z + dz, MANGROVE_LOG);
+        }
+    }
+    let top = h + len;
+    for (dy, r) in [(-2i32, 4i32), (-1, 5), (0, 4), (1, 3)] {
+        for dz in -r..=r + 1 {
+            for dx in -r..=r + 1 {
+                let d = ((dx as f32 - 0.5).powi(2) + (dz as f32 - 0.5).powi(2)).sqrt();
+                if d <= r as f32 + 0.3 && g.get(x + dx, top + dy, z + dz) == AIR {
+                    g.set(x + dx, top + dy, z + dz, MANGROVE_LEAVES);
+                }
+            }
+        }
+    }
+    // ветви с листвой пониже
+    for k in 0..3 {
+        let a = t * 40.0 + k as f32 * 2.1;
+        let (bx, bz) = (x + (a.cos() * 3.5) as i32, z + (a.sin() * 3.5) as i32);
+        let by = h + len / 2 + k * 2;
+        g.set(bx, by, bz, MANGROVE_LOG);
+        leaves_blob(g, bx, by + 1, bz, MANGROVE_LEAVES, t + k as f32);
+    }
 }
 
 fn tree_palm(g: &mut Gen, x: i32, h: i32, z: i32, t: f32) {
@@ -1091,6 +1326,19 @@ mod tests {
         assert!(seen.contains(&Biome::Desert));
         assert!(seen.contains(&Biome::Taiga));
         assert!(seen.contains(&Biome::Ocean));
+    }
+
+    #[test]
+    fn all_new_biomes_exist() {
+        let mut count = std::collections::HashMap::new();
+        for i in 0..40000 {
+            let (x, z) = ((i % 200) * 61 - 6000, (i / 200) * 61 - 6000);
+            *count.entry(column(42, x, z).biome).or_insert(0) += 1;
+        }
+        eprintln!("{count:?}");
+        for b in LAND {
+            assert!(count.get(&b).copied().unwrap_or(0) > 100, "{b:?}: {:?}", count.get(&b));
+        }
     }
 
     #[test]

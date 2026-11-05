@@ -108,6 +108,13 @@ fn render_n(seed: u32, dim: Dim, center: Vec2, scale: f32, n: usize) -> Vec<u8> 
                                     let base = match col.biome {
                                         Biome::Desert => [222.0, 200.0, 140.0],
                                         Biome::Taiga => if h > 82 { [236.0, 240.0, 246.0] } else { [200.0, 214.0, 220.0] },
+                                        Biome::Swamp => [74.0, 104.0, 70.0],
+                                        Biome::Jungle => [44.0, 132.0, 48.0],
+                                        Biome::Savanna => [176.0, 170.0, 88.0],
+                                        Biome::Canyon => [196.0, 104.0, 56.0],
+                                        Biome::Cherry => [236.0, 168.0, 196.0],
+                                        Biome::IceSpikes => [190.0, 220.0, 246.0],
+                                        Biome::Volcano => if h > SEA + 34 { [150.0, 50.0, 30.0] } else { [70.0, 66.0, 70.0] },
                                         _ => if h <= SEA + 1 { [214.0, 200.0, 150.0] } else { [96.0, 160.0, 72.0] },
                                     };
                                     shade(base, height_k * relief)
@@ -262,13 +269,37 @@ impl MapView {
                     draw_rectangle(q.x - r, q.y - r, r * 2.0, r * 2.0, Color::new(0.35, 0.2, 0.1, 1.0));
                     draw_rectangle(q.x - r + 1.5, q.y - r + 1.5, r * 2.0 - 3.0, r * 2.0 - 3.0, Color::new(0.95, 0.75, 0.3, 1.0));
                     if (mouse - q).length() < r * 2.0 {
-                        let names = match biome {
+                        let names = match biome.family() {
                             Biome::Desert => &structures::DESERT,
                             Biome::Taiga => &structures::TAIGA,
                             Biome::Islands => &structures::HEAVEN,
                             _ => &structures::MEADOW,
                         };
                         hover = Some(names[kind % 10].to_string());
+                    }
+                }
+            }
+        }
+        // деревни и большие постройки
+        if dim == Dim::Overworld {
+            let br = structures::BIG_REGION as f32;
+            let (b0x, b1x) = (((self.center.x - half) / br).floor() as i32 - 1, ((self.center.x + half) / br).floor() as i32 + 1);
+            let (b0z, b1z) = (((self.center.y - half) / br).floor() as i32 - 1, ((self.center.y + half) / br).floor() as i32 + 1);
+            if (b1x - b0x) * (b1z - b0z) < 2500 {
+                for rz in b0z..=b1z {
+                    for rx in b0x..=b1x {
+                        let Some((sx, _, sz, biome, kind)) = structures::big_site(seed, rx, rz) else { continue };
+                        let q = to_screen(vec2(sx as f32, sz as f32), self.center);
+                        if q.x < x0 || q.y < y0 || q.x > x0 + size || q.y > y0 + size {
+                            continue;
+                        }
+                        let r = (6.0 * s).max(3.0);
+                        let col = if kind == structures::Big::Village { Color::new(0.4, 0.9, 0.5, 1.0) } else { Color::new(0.95, 0.4, 0.35, 1.0) };
+                        draw_circle(q.x, q.y, r + 1.5, Color::new(0.15, 0.1, 0.05, 1.0));
+                        draw_circle(q.x, q.y, r, col);
+                        if (mouse - q).length() < r * 2.0 {
+                            hover = Some(structures::big_name(kind, biome));
+                        }
                     }
                 }
             }

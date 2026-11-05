@@ -314,7 +314,7 @@ impl Mobs {
             }
             let exposed = world.sky_exposed(x, y, z);
             let pos = vec3(x as f32 + 0.5, y as f32, z as f32 + 0.5);
-            let biome = if world.dim == Dim::Heaven { Biome::Islands } else { worldgen::column(world.seed, x, z).biome };
+            let biome = if world.dim == Dim::Heaven { Biome::Islands } else { worldgen::column(world.seed, x, z).biome.family() };
             let night = daylight < 0.3;
             let want_hostile = ho < hostile_cap && (fr >= MAX_FRIENDLY || self.rand() < 0.5);
             let want_friendly = fr < MAX_FRIENDLY;

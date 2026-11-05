@@ -1151,7 +1151,7 @@ fn sky_colors(g: &Game) -> (Color, Color) {
     let k = g.rain_k;
     if k > 0.0 {
         let p = g.player.body.pos;
-        let desert = worldgen::column(g.seed, p.x as i32, p.z as i32).biome == worldgen::Biome::Desert;
+        let desert = worldgen::column(g.seed, p.x as i32, p.z as i32).biome.family() == worldgen::Biome::Desert;
         let gray = if desert { Color::new(0.78 * d + 0.1, 0.66 * d + 0.08, 0.45 * d + 0.06, 1.0) } else { Color::new(0.45 * d + 0.05, 0.47 * d + 0.05, 0.5 * d + 0.06, 1.0) };
         return (lerp(top, gray, k * 0.85), lerp(hor, gray, k * 0.9));
     }
@@ -3775,7 +3775,7 @@ fn render_world(app: &mut App) {
         } else if app.settings.fog {
             // в непогоду туман ближе (в песчаную бурю — гораздо ближе)
             let p = g.player.body.pos;
-            let desert = g.rain_k > 0.0 && worldgen::column(g.seed, p.x as i32, p.z as i32).biome == worldgen::Biome::Desert;
+            let desert = g.rain_k > 0.0 && worldgen::column(g.seed, p.x as i32, p.z as i32).biome.family() == worldgen::Biome::Desert;
             let k = 1.0 - g.rain_k * if desert { 0.75 } else { 0.35 };
             ([hor.r, hor.g, hor.b, 1.0], [r * 0.5 * k, r * 0.98 * k])
         } else {
@@ -3836,7 +3836,7 @@ fn render_world(app: &mut App) {
     let tp = std::time::Instant::now();
     // осадки вокруг камеры: дождь, снег в тайге, песок в пустыне
     if g.rain_k > 0.05 && g.dim == Dim::Overworld {
-        let biome = worldgen::column(g.seed, eye.x as i32, eye.z as i32).biome;
+        let biome = worldgen::column(g.seed, eye.x as i32, eye.z as i32).biome.family();
         let n = (360.0 * g.rain_k) as i32;
         let t = app.time;
         for i in 0..n {
@@ -5139,7 +5139,7 @@ fn music_for(g: &Game) -> &'static [music::Track] {
     if y < 56 && !g.world().sky_exposed(x, y, z) {
         return &[T::Caves];
     }
-    let biome = worldgen::column(g.seed, x, z).biome;
+    let biome = worldgen::column(g.seed, x, z).biome.family();
     if g.daylight() < 0.3 {
         return if biome == worldgen::Biome::Taiga { &[T::Aurora, T::Night] } else { &[T::Night, T::Dusk] };
     }
