@@ -343,7 +343,8 @@ pub const POTATO_CROP: u16 = POTATO_S0 + 3;
 pub const BED: u16 = POTATO_CROP + 1;
 pub const ENCHANT_TABLE: u16 = BED + 1;
 pub const ABYSS_PORTAL: u16 = ENCHANT_TABLE + 1;
-pub const BLOCK_COUNT: usize = (ABYSS_PORTAL + 1) as usize;
+pub const RAIL: u16 = ABYSS_PORTAL + 1;
+pub const BLOCK_COUNT: usize = (RAIL + 1) as usize;
 
 /// Посев: (культура 0 пшеница/1 морковь/2 картофель, стадия 0..3; 3 — спелый).
 pub fn crop(b: u16) -> Option<(u8, u8)> {
@@ -2099,6 +2100,12 @@ fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
             mix(rgb(120, 10, 30), rgb(255, 90, 40), (swirl * 0.5 + 0.5) * 0.8 + hash(x, y, 1409) * 0.2)
         });
         put(ABYSS_PORTAL, "Портал Бездны", [t; 3], Cutout, -1.0, Any, Decor, 12);
+        let t = a.add(move |x, y| {
+            let rail = x == 2 || x == 3 || x == 12 || x == 13 || y == 2 || y == 3 || y == 12 || y == 13;
+            let tie = (y % 4 == 0 || x % 4 == 0) && (1..=14).contains(&x) && (1..=14).contains(&y);
+            if rail { if (x + y) % 2 == 0 { rgb(200, 200, 210) } else { rgb(150, 150, 160) } } else if tie { shade(rgb(120, 82, 44), 0.9 + hash(x, y, 1410) * 0.2) } else { CLEAR }
+        });
+        put(RAIL, "Рельсы", [t; 3], Form, 0.4, Pickaxe, Decor, 0);
     }
     // портал проходим насквозь
     let portal = defs[PORTAL as usize].as_mut().unwrap();

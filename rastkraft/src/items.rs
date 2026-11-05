@@ -336,6 +336,8 @@ pub const LAVA_BUCKET: u16 = BUCKET + 2;
 pub const COIN: u16 = BUCKET + 3;
 pub const WHEAT_SEEDS: u16 = BUCKET + 4;
 pub const ARROW: u16 = BUCKET + 5;
+pub const BOAT: u16 = BUCKET + 6;
+pub const MINECART: u16 = BUCKET + 7;
 
 /// Трофей существа.
 pub fn mob_drop(def: usize) -> u16 {
@@ -549,6 +551,8 @@ fn build_things() -> Vec<ThingDef> {
     t("Монета", m, Orb, (250, 210, 70), (180, 130, 30));
     t("Семена пшеницы", m, Berries, (200, 180, 100), (150, 130, 70));
     t("Стрела", m, Stick, (200, 200, 210), (150, 110, 66));
+    t("Лодка", m, Bowl, (176, 128, 76), (120, 82, 44));
+    t("Вагонетка", m, Bucket, (150, 154, 164), (70, 70, 80));
     v
 }
 
@@ -626,6 +630,7 @@ impl Item {
             Item::Thing(t) if summon_boss(t).is_some() => 1,
             Item::Thing(WATER_BUCKET | LAVA_BUCKET) => 1,
             Item::Thing(BUCKET) => 16,
+            Item::Thing(BOAT | MINECART) => 1,
             Item::Thing(t) if matches!(thing(t).kind, TKind::Potion(..)) => 8,
             Item::Empty => 0,
             _ => 64,

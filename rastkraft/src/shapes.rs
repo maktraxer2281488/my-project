@@ -49,11 +49,16 @@ pub enum Form {
     Wire { on: bool },
     /// Кровать (полвысоты).
     Bed,
+    /// Рельсы.
+    Rail,
 }
 
 pub fn form(b: u16) -> Option<Form> {
     if b == BED {
         return Some(Form::Bed);
+    }
+    if b == RAIL {
+        return Some(Form::Rail);
     }
     if !(SLAB0..FORM_END).contains(&b) {
         return None;
@@ -97,6 +102,7 @@ pub fn id(f: Form) -> u16 {
         Form::Plate { on } => PLATE0 + on as u16,
         Form::Wire { on } => WIRE0 + on as u16,
         Form::Bed => BED,
+        Form::Rail => RAIL,
     }
 }
 
@@ -124,6 +130,7 @@ pub fn base(f: Form) -> u16 {
         Form::Plate { .. } => STONE,
         Form::Wire { on } => WIRE0 + on as u16,
         Form::Bed => BED,
+        Form::Rail => RAIL,
     }
 }
 
@@ -251,6 +258,11 @@ pub fn boxes(f: Form, conn: [bool; 4], collide: bool, out: &mut Vec<Bx>) {
             }
         }
         Form::Bed => out.push((Vec3::ZERO, vec3(1.0, 9.0 * P, 1.0))),
+        Form::Rail => {
+            if !collide {
+                out.push((Vec3::ZERO, vec3(1.0, 0.5 * P, 1.0)));
+            }
+        }
         Form::Wire { .. } => {
             if !collide {
                 out.push((Vec3::ZERO, vec3(1.0, 0.5 * P, 1.0)));
@@ -296,5 +308,5 @@ pub fn conn_at(get: impl Fn(i32, i32, i32) -> u16, f: Form, x: i32, y: i32, z: i
 
 /// Двери, люки и панели рисуются с прозрачностью.
 pub fn cutout(f: Form) -> bool {
-    matches!(f, Form::Door { .. } | Form::Trapdoor { .. } | Form::Pane | Form::Wire { .. })
+    matches!(f, Form::Door { .. } | Form::Trapdoor { .. } | Form::Pane | Form::Wire { .. } | Form::Rail)
 }

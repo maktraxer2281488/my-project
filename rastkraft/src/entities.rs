@@ -41,8 +41,20 @@ pub struct Orb {
     pub age: f32,
 }
 
+/// Лодка или вагонетка.
+pub struct Vehicle {
+    pub boat: bool,
+    pub pos: Vec3,
+    pub yaw: f32,
+    pub speed: f32,
+    /// Направление вагонетки по рельсам.
+    pub dir: IVec3,
+    pub vy: f32,
+}
+
 #[derive(Default)]
 pub struct Entities {
+    pub vehicles: Vec<Vehicle>,
     pub orbs: Vec<Orb>,
     pub drops: Vec<ItemDrop>,
     pub projectiles: Vec<Projectile>,
@@ -225,7 +237,109 @@ impl Entities {
         hits
     }
 
+    /// Движение лодок и вагонеток. `input` — (вперёд/назад, направление взгляда) для той, на которой едет игрок.
+    pub fn update_vehicles(&mut self, world: &World, riding: Option<usize>, input: (f32, Vec3), dt: f32) {
+        for (i, v) in self.vehicles.iter_mut().enumerate() {
+            let me = riding == Some(i);
+            let cell = v.pos.floor().as_ivec3();
+            let at = |p: IVec3| world.get(p.x, p.y, p.z);
+            if v.boat {
+                let in_water = blocks::fluid(at(cell)).is_some_and(|(w, _)| w) || blocks::fluid(at(cell - IVec3::Y)).is_some_and(|(w, _)| w);
+                if me {
+                    v.yaw = input.1.z.atan2(input.1.x);
+                    v.speed = (v.speed + input.0 * dt * if in_water { 6.0 } else { 1.5 }).clamp(-3.0, if in_water { 8.0 } else { 1.5 });
+                }
+                v.speed *= 1.0 - dt * if in_water { 0.6 } else { 4.0 };
+                // держимся на поверхности воды
+                let surface = if blocks::fluid(at(cell)).is_some() { cell.y as f32 + 0.85 } else { v.pos.y };
+                if blocks::fluid(at(cell)).is_some() {
+                    v.vy = (surface + 0.05 - v.pos.y) * 4.0;
+                } else if !blocks::is_solid(at(cell - IVec3::Y)) && !in_water {
+                    v.vy -= 20.0 * dt;
+                } else {
+                    v.vy = v.vy.max(0.0) * 0.5;
+                }
+                v.pos.y += v.vy * dt;
+            } else {
+                let on_rail = at(cell) == blocks::RAIL;
+                if me && on_rail {
+                    let along = vec3(v.dir.x as f32, 0.0, v.dir.z as f32);
+                    let push = input.0 * input.1.with_y(0.0).normalize_or_zero().dot(along).signum();
+                    v.speed = (v.speed + push * dt * 8.0).clamp(-9.0, 9.0);
+                }
+                v.speed *= 1.0 - dt * if on_rail { 0.15 } else { 3.0 };
+                if on_rail {
+                    // по рельсам: вперёд, а на тупике — поворот налево или направо
+                    let ahead = cell + v.dir * if v.speed >= 0.0 { 1 } else { -1 };
+                    if at(ahead) != blocks::RAIL {
+                        let left = IVec3::new(v.dir.z, 0, -v.dir.x);
+                        let sign = if v.speed >= 0.0 { 1 } else { -1 };
+                        let c = v.pos.floor() + Vec3::splat(0.5);
+                        let near_center = (v.pos.with_y(0.0) - c.with_y(0.0)).length() < 0.25;
+                        if near_center && at(cell + left * sign) == blocks::RAIL {
+                            v.dir = left;
+                            v.pos = vec3(c.x, v.pos.y, c.z);
+                        } else if near_center && at(cell - left * sign) == blocks::RAIL {
+                            v.dir = -left;
+                            v.pos = vec3(c.x, v.pos.y, c.z);
+                        } else if near_center {
+                            v.speed = 0.0;
+                        }
+                    }
+                    v.yaw = (v.dir.z as f32).atan2(v.dir.x as f32);
+                    // держимся середины рельса
+                    let c = v.pos.floor() + Vec3::splat(0.5);
+                    if v.dir.x == 0 {
+                        v.pos.x += (c.x - v.pos.x) * (dt * 8.0).min(1.0);
+                    } else {
+                        v.pos.z += (c.z - v.pos.z) * (dt * 8.0).min(1.0);
+                    }
+                }
+                if !blocks::is_solid(at(cell - IVec3::Y)) && !on_rail {
+                    v.vy -= 20.0 * dt;
+                    v.pos.y += v.vy * dt;
+                } else {
+                    v.vy = 0.0;
+                }
+            }
+            let fwd = if v.boat { vec3(v.yaw.cos(), 0.0, v.yaw.sin()) } else { vec3(v.dir.x as f32, 0.0, v.dir.z as f32) };
+            let next = v.pos + fwd * v.speed * dt;
+            let nc = (next + fwd * 0.5 * v.speed.signum()).floor().as_ivec3();
+            if blocks::is_solid(world.get(nc.x, nc.y, nc.z)) {
+                v.speed = 0.0;
+            } else {
+                v.pos = next;
+            }
+        }
+    }
+
     pub fn draw(&self, atlas: &Texture2D, t: f32, cam_right: Vec3) {
+        for v in &self.vehicles {
+            let r = Mat4::from_translation(v.pos) * Mat4::from_rotation_y(-v.yaw);
+            let b = |m: Mat4, c: Color| model::cube(m, c);
+            let sc = |x: f32, y: f32, z: f32| Mat4::from_scale(vec3(x, y, z));
+            let tr = |x: f32, y: f32, z: f32| Mat4::from_translation(vec3(x, y, z));
+            if v.boat {
+                let wood = Color::from_rgba(176, 128, 76, 255);
+                let dark = Color::from_rgba(120, 82, 44, 255);
+                b(r * tr(0.0, 0.1, 0.0) * sc(1.4, 0.12, 0.8), dark);
+                b(r * tr(0.0, 0.3, 0.38) * sc(1.4, 0.35, 0.08), wood);
+                b(r * tr(0.0, 0.3, -0.38) * sc(1.4, 0.35, 0.08), wood);
+                b(r * tr(0.68, 0.3, 0.0) * sc(0.08, 0.35, 0.8), wood);
+                b(r * tr(-0.68, 0.3, 0.0) * sc(0.08, 0.35, 0.8), wood);
+                b(r * tr(0.0, 0.32, 0.0) * sc(0.25, 0.06, 0.7), dark);
+            } else {
+                let iron = Color::from_rgba(150, 154, 164, 255);
+                let dark = Color::from_rgba(70, 70, 80, 255);
+                b(r * tr(0.0, 0.15, 0.0) * sc(0.9, 0.1, 0.7), dark);
+                for (x, z, sx, sz) in [(0.0, 0.33, 0.9, 0.06), (0.0, -0.33, 0.9, 0.06), (0.43, 0.0, 0.06, 0.7), (-0.43, 0.0, 0.06, 0.7)] {
+                    b(r * tr(x, 0.4, z) * sc(sx, 0.45, sz), iron);
+                }
+                for (x, z) in [(0.3, 0.36), (-0.3, 0.36), (0.3, -0.36), (-0.3, -0.36)] {
+                    b(r * tr(x, 0.1, z) * sc(0.18, 0.18, 0.05), Color::from_rgba(40, 40, 44, 255));
+                }
+            }
+        }
         for o in &self.orbs {
             let pulse = 0.85 + (t * 6.0 + o.pos.x).sin() * 0.15;
             let sz = 0.12 + (o.value as f32).sqrt() * 0.03;

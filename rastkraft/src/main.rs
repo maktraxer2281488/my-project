@@ -126,6 +126,8 @@ struct Game {
     ach_later: Vec<u8>,
     /// Метки на карте: (измерение, место, название).
     markers: Vec<(u8, Vec2, String)>,
+    /// На какой лодке/вагонетке едет игрок.
+    riding: Option<usize>,
     dim: Dim,
     seed: u32,
     name: String,
@@ -196,6 +198,7 @@ impl Game {
             ach_pending_archer: false,
             ach_later: Vec::new(),
             markers: Vec::new(),
+            riding: None,
             dim: Dim::Overworld,
             seed,
             name: name.to_string(),
@@ -1274,6 +1277,22 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
         {
             let world = &g.worlds[dim as usize];
             g.player.update(world, dt, creative, playing, difficulty);
+            // лодки и вагонетки
+            let fw = if playing && g.riding.is_some() { (is_key_down(KeyCode::W) as i32 - is_key_down(KeyCode::S) as i32) as f32 } else { 0.0 };
+            g.ents.update_vehicles(world, g.riding, (fw, g.player.forward()), dt);
+            if let Some(i) = g.riding {
+                if i >= g.ents.vehicles.len() || (playing && is_key_pressed(KeyCode::LeftShift)) {
+                    if let Some(v) = g.ents.vehicles.get(i) {
+                        g.player.body.pos = v.pos + vec3(0.0, 1.0, 0.0);
+                    }
+                    g.riding = None;
+                } else {
+                    let v = &g.ents.vehicles[i];
+                    g.player.body.pos = v.pos + vec3(0.0, if v.boat { 0.25 } else { 0.35 }, 0.0);
+                    g.player.body.vel = Vec3::ZERO;
+                    g.player.fall_start = None;
+                }
+            }
             // кто управляет существами: хост (или одиночная игра) — симулирует; клиент — показывает снимки хоста
             let host_dim = g.remotes.get(&0).map(|r| r.st.dim);
             let client_mode = g.net.as_ref().is_some_and(|n| !n.host) && host_dim == Some(dim_code(dim));
@@ -1502,6 +1521,18 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
             let lmb = is_mouse_button_down(MouseButton::Left);
             let lmb_p = is_mouse_button_pressed(MouseButton::Left);
             let held_ench = g.player.inv.slots[g.player.selected].ench;
+            // удар по лодке/вагонетке — забрать её
+            if lmb_p && g.riding.is_none() {
+                let hit = g.ents.vehicles.iter().enumerate().filter_map(|(i, v)| {
+                    let half = vec3(0.7, 0.5, 0.7);
+                    mobs::ray_aabb(eye, dir, v.pos - half.with_y(0.0), v.pos + half).filter(|t| *t < 4.0).map(|t| (i, t))
+                }).min_by(|a, b| a.1.total_cmp(&b.1));
+                if let Some((i, _)) = hit {
+                    let v = g.ents.vehicles.remove(i);
+                    let it = Item::Thing(if v.boat { items::BOAT } else { items::MINECART });
+                    g.ents.spawn_drop(it, 1, v.pos + vec3(0.0, 0.5, 0.0), 0.3);
+                }
+            }
             let rmb = is_mouse_button_down(MouseButton::Right);
             let rmb_p = is_mouse_button_pressed(MouseButton::Right);
             if lmb_p && (g.swing_p >= 0.5) {
@@ -1780,6 +1811,54 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                 if let Some((_, _, ENCHANT_TABLE)) = target_block {
                     open_enchant = true;
                     used = true;
+                }
+            }
+            // лодки и вагонетки: поставить, сесть
+            if !used && rmb_p && g.riding.is_none() {
+                let veh_hit = g.ents.vehicles.iter().enumerate().filter_map(|(i, v)| {
+                    let half = vec3(0.7, 0.5, 0.7);
+                    mobs::ray_aabb(eye, dir, v.pos - half.with_y(0.0), v.pos + half).filter(|t| *t < 4.0).map(|t| (i, t))
+                }).min_by(|a, b| a.1.total_cmp(&b.1));
+                match held {
+                    Item::Thing(items::BOAT) => {
+                        for k in 1..50 {
+                            let q = (eye + dir * (k as f32 * 0.1)).floor().as_ivec3();
+                            let bq = world.get(q.x, q.y, q.z);
+                            if fluid(bq).is_some_and(|(w, _)| w) {
+                                g.ents.vehicles.push(entities::Vehicle { boat: true, pos: q.as_vec3() + vec3(0.5, 0.85, 0.5), yaw: g.player.yaw, speed: 0.0, dir: IVec3::X, vy: 0.0 });
+                                if !creative {
+                                    let sel = g.player.selected;
+                                    g.player.inv.take_one(sel);
+                                }
+                                used = true;
+                                break;
+                            }
+                            if is_solid(bq) {
+                                break;
+                            }
+                        }
+                    }
+                    Item::Thing(items::MINECART) => {
+                        if let Some((h, _, RAIL)) = target_block {
+                            let d = shapes::facing(g.player.yaw);
+                            let dv = [IVec3::X, IVec3::NEG_X, IVec3::Z, IVec3::NEG_Z][d as usize];
+                            g.ents.vehicles.push(entities::Vehicle { boat: false, pos: h.as_vec3() + vec3(0.5, 0.05, 0.5), yaw: 0.0, speed: 0.0, dir: dv, vy: 0.0 });
+                            if !creative {
+                                let sel = g.player.selected;
+                                g.player.inv.take_one(sel);
+                            }
+                            used = true;
+                        }
+                    }
+                    _ => {
+                        if let Some((i, _)) = veh_hit {
+                            g.riding = Some(i);
+                            let boat = g.ents.vehicles[i].boat;
+                            g.ach_later.push(if boat { ach::BOAT } else { ach::CART });
+                            g.toast = Some(("W/S — ехать, Shift — сойти".into(), 2.5));
+                            used = true;
+                        }
+                    }
                 }
             }
             // существа: приручение, команда «сидеть», разведение, торговля
@@ -3201,6 +3280,7 @@ fn draw_hud(app: &mut App) {
         let dc = dim_code(g.dim);
         let mk: Vec<map::Marker> = g.markers.iter().filter(|m| m.0 == dc).map(|(_, p, n)| map::Marker { pos: *p, label: n.clone(), color: Color::new(1.0, 0.85, 0.2, 1.0), yaw: None }).collect();
         app.minimap.draw(g.seed, g.dim, me, g.player.yaw, &mk, w - size - 12.0 * s, 12.0 * s, size);
+        app.ui.text_center("С", w - size / 2.0 - 12.0 * s, 26.0 * s, 13.0, Color::new(1.0, 0.4, 0.35, 1.0));
     }
     // всплывающие достижения
     for (k, (id, t)) in g.ach_pop.iter().enumerate() {
@@ -4139,11 +4219,21 @@ async fn main() {
                             put.push((base + ivec3(-1, 0, 5), shapes::id(shapes::Form::Door { m: 11, dir: 0, open: false, upper: false })));
                             put.push((base + ivec3(-1, 1, 5), shapes::id(shapes::Form::Door { m: 11, dir: 0, open: false, upper: true })));
                             put.push((base + ivec3(0, 3, 10), WATER));
+                            for k in 0..8 {
+                                put.push((base + ivec3(4, 0, k), RAIL));
+                            }
+                            for k in 1..5 {
+                                put.push((base + ivec3(4 - k, 0, 7), RAIL));
+                            }
                             for (q, b) in put {
                                 edit_block(&mut app, dim, q, b, false);
                                 after_edit(&mut app, dim, q, AIR, b);
                             }
                         } else {
+                            if let Some(g) = app.game.as_mut() {
+                                g.ents.vehicles.push(entities::Vehicle { boat: false, pos: (base + ivec3(4, 0, 2)).as_vec3() + vec3(0.5, 0.05, 0.5), yaw: 0.0, speed: 3.0, dir: IVec3::Z, vy: 0.0 });
+                                g.ents.vehicles.push(entities::Vehicle { boat: true, pos: (base + ivec3(2, 0, 12)).as_vec3() + vec3(0.5, 0.3, 0.5), yaw: 0.5, speed: 0.0, dir: IVec3::X, vy: 0.0 });
+                            }
                             edit_block(&mut app, dim, base, LEVER_ON, false);
                             after_edit(&mut app, dim, base, LEVER_OFF, LEVER_ON);
                         }

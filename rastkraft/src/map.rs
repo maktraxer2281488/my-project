@@ -59,7 +59,6 @@ impl MiniMap {
         let f = vec2(yaw.cos(), yaw.sin());
         let side = vec2(-f.y, f.x);
         draw_triangle(c + f * 7.0, c - f * 4.0 + side * 4.0, c - f * 4.0 - side * 4.0, Color::new(1.0, 0.3, 0.25, 1.0));
-        draw_text("С", c.x - 4.0, y + 12.0, 16.0, WHITE);
     }
 }
 
