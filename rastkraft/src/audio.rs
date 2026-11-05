@@ -38,6 +38,7 @@ fn asset_ogg(t: Track) -> Option<Vec<u8>> {
 /// Готовая запись мелодии в WAV: вшитая, распакованная или сочинённая заново.
 fn track_wav(t: Track) -> Vec<u8> {
     match embedded(t) {
+        Some(b) if EMBED_OGG => ogg_to_wav(b).unwrap_or_else(|| music::wav(&music::render(t))),
         Some(b) => b.to_vec(),
         None => music::wav(&music::render(t)),
     }
@@ -176,7 +177,7 @@ impl Audio {
             }
         } else if cur.is_none() {
             if let Some(w) = want {
-                if let Some(bytes) = embedded(w) {
+                if let Some(bytes) = embedded(w).filter(|_| !EMBED_OGG) {
                     self.start(w, bytes);
                     return;
                 }
@@ -218,7 +219,7 @@ pub fn export_music() -> std::io::Result<std::path::PathBuf> {
     std::fs::create_dir_all(&dir)?;
     for t in music::TRACKS {
         // сжатые записи сохраняются как есть (.ogg), остальные — WAV
-        let (bytes, ext) = match asset_ogg(t) {
+        let (bytes, ext) = match asset_ogg(t).or_else(|| embedded(t).filter(|_| EMBED_OGG).map(|b| b.to_vec())) {
             Some(b) => (b, "ogg"),
             None => (track_wav(t), "wav"),
         };
@@ -241,5 +242,16 @@ mod tests {
         let secs = wav_secs(&wav);
         let want = music::render(Track::Menu).len() as f32 / 2.0 / music::RATE as f32;
         assert!((secs - want).abs() < 0.5, "{secs} vs {want}");
+    }
+
+    /// В лёгком exe вшитые OGG дают ту же мелодию, что и полный WAV.
+    #[test]
+    fn small_exe_music() {
+        if !EMBED_OGG {
+            return;
+        }
+        let wav = track_wav(Track::Boss);
+        let want = music::render(Track::Boss).len() as f32 / 2.0 / music::RATE as f32;
+        assert!((wav_secs(&wav) - want).abs() < 0.5);
     }
 }

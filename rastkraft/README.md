@@ -255,6 +255,13 @@ sudo apt install gcc-mingw-w64-x86-64
 cargo build --release --target x86_64-pc-windows-gnu
 ```
 
+**Лёгкий exe (~21 МБ)** собирается с музыкой в OGG вместо WAV:
+
+```bash
+cargo run --release --manifest-path tools/musicpack/Cargo.toml
+RK_SMALL=1 cargo build --release --target x86_64-pc-windows-gnu
+```
+
 ## Устройство кода
 
 | Файл | Что внутри |
