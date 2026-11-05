@@ -51,7 +51,13 @@ use world::{CS, Dim, World, chunk_of};
 const DAY_SECONDS: f32 = 720.0;
 const AUTOSAVE: f32 = 120.0;
 
+/// VSync, с которым запущено окно (меняется только перезапуском).
+static VSYNC_AT_START: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
 fn window_conf() -> macroquad::conf::Conf {
+    // VSync выключен по умолчанию: со слабой видеокартой он сбрасывает
+    // 40–55 кадров ровно до 30 (кадр ждёт следующего обновления экрана)
+    let vsync = *VSYNC_AT_START.get_or_init(|| Settings::load().vsync);
     macroquad::conf::Conf {
         miniquad_conf: Conf {
             window_title: "Расткрафт".to_owned(),
@@ -60,6 +66,7 @@ fn window_conf() -> macroquad::conf::Conf {
             window_resizable: true,
             fullscreen: cfg!(target_os = "android"),
             high_dpi: cfg!(target_os = "android"),
+            platform: macroquad::miniquad::conf::Platform { swap_interval: Some(vsync as i32), ..Default::default() },
             ..Default::default()
         },
         draw_call_vertex_capacity: 40_000,
@@ -2793,17 +2800,20 @@ fn settings_screen(app: &mut App) -> Option<Screen> {
     st.music_vol = ui.slider(7, x1, y, cw, bh, &format!("Музыка: {:.0}%", st.music_vol * 100.0), st.music_vol, 0.0, 1.0);
     st.sound_vol = ui.slider(8, x2, y, cw, bh, &format!("Звуки: {:.0}%", st.sound_vol * 100.0), st.sound_vol, 0.0, 1.0);
     y += bh + gap;
-    if ui.button(x1, y, cw, bh, &format!("Текстуры: x{0} ({0}×{0} пикс.)", st.tex_res)) {
+    let note = if st.tex_res != active_res {
+        "после перезапуска".to_string()
+    } else {
+        let mb = blocks::ATLAS_TILES * st.tex_res as usize * blocks::atlas_rows() * st.tex_res as usize * 4 / 1_000_000;
+        format!("~{} МБ", mb.max(1))
+    };
+    if ui.button(x1, y, cw, bh, &format!("Текстуры: x{} ({note})", st.tex_res)) {
         let i = blocks::TEX_RES.iter().position(|&r| r == st.tex_res as usize).unwrap_or(1);
         st.tex_res = blocks::TEX_RES[(i + 1) % blocks::TEX_RES.len()] as u32;
     }
-    let note = if st.tex_res != active_res {
-        "применится после перезапуска игры".to_string()
-    } else {
-        let mb = blocks::ATLAS_TILES * st.tex_res as usize * blocks::atlas_rows() * st.tex_res as usize * 4 / 1_000_000;
-        format!("видеопамять под текстуры: ~{mb} МБ")
-    };
-    ui.text(&note, x2 + 6.0 * s, y + bh * 0.62, 13.0, Color::new(0.9, 0.9, 0.85, 1.0));
+    let vs_note = if Some(&st.vsync) != VSYNC_AT_START.get() { " (после перезапуска)" } else { "" };
+    if ui.button(x2, y, cw, bh, &format!("Верт. синхронизация: {}{vs_note}", onoff(st.vsync))) {
+        st.vsync = !st.vsync;
+    }
     y += bh + gap;
     if ui.button(x1, y, cw, bh, &format!("Мини-карта и компас: {}", onoff(st.minimap))) {
         st.minimap = !st.minimap;
@@ -4398,8 +4408,14 @@ async fn amain() {
         if app.settings.fps_limit > 0 {
             let target = std::time::Duration::from_secs_f64(1.0 / app.settings.fps_limit as f64);
             let spent = frame_start.elapsed();
-            if spent < target {
-                std::thread::sleep(target - spent);
+            // на Windows сон длится шагами ~15,6 мс: спим с запасом,
+            // а последние миллисекунды дожидаемся точно
+            let margin = std::time::Duration::from_millis(3);
+            if spent + margin < target {
+                std::thread::sleep(target - spent - margin);
+            }
+            while frame_start.elapsed() < target {
+                std::thread::yield_now();
             }
         }
         next_frame().await;
