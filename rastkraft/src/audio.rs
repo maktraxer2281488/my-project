@@ -38,6 +38,7 @@ fn cache_path(t: Track) -> Option<std::path::PathBuf> {
 const SONGS: &[(Track, &[u8])] = &[
     (Track::Menu, include_bytes!("../assets/music/menu_rtxx131.ogg")),
     (Track::Heaven, include_bytes!("../assets/music/heaven_rtxx131.ogg")),
+    (Track::Meadow, include_bytes!("../assets/music/world_rtxx131.ogg")),
 ];
 
 /// Готовая запись мелодии в WAV: вшитая, сохранённая ранее или сочинённая заново.
@@ -346,5 +347,7 @@ mod tests {
         assert!((secs - 31.8).abs() < 0.5, "{secs}");
         let secs = wav_secs(&track_wav(Track::Heaven));
         assert!((secs - 53.2).abs() < 0.5, "{secs}");
+        let secs = wav_secs(&track_wav(Track::Meadow));
+        assert!((secs - 58.1).abs() < 0.5, "{secs}");
     }
 }

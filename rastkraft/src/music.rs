@@ -35,7 +35,7 @@ impl Track {
     pub fn title(self) -> &'static str {
         match self {
             Track::Menu => "Расткрафт — rtxx131",
-            Track::Meadow => "Утро на лугах",
+            Track::Meadow => "Мир Расткрафта — rtxx131",
             Track::Desert => "Песчаный караван",
             Track::Taiga => "Снег над тайгой",
             Track::Night => "Ночная тишина",

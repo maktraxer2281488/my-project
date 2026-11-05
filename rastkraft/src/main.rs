@@ -5302,19 +5302,8 @@ fn music_for(g: &Game) -> &'static [music::Track] {
     if y < 56 && !g.world().sky_exposed(x, y, z) {
         return &[T::Caves];
     }
-    let biome = worldgen::column(g.seed, x, z).biome.family();
-    if g.daylight() < 0.3 {
-        return if biome == worldgen::Biome::Taiga { &[T::Aurora, T::Night] } else { &[T::Night, T::Dusk] };
-    }
-    if g.creative {
-        return &[T::Workshop, T::Meadow, T::Village];
-    }
-    match biome {
-        worldgen::Biome::Desert => &[T::Desert, T::Dusk],
-        worldgen::Biome::Taiga => &[T::Taiga, T::Aurora],
-        worldgen::Biome::Ocean => &[T::Ocean, T::Dawn],
-        _ => &[T::Meadow, T::Village, T::Dawn],
-    }
+    // на поверхности обычного мира — песня rtxx131
+    &[T::Meadow]
 }
 
 fn map_screen(app: &mut App) -> Option<Screen> {
