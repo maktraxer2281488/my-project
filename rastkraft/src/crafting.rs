@@ -294,6 +294,8 @@ fn build() -> Vec<Recipe> {
     r((b(RAINBOW_BLOCK), 4), &[(b(CLOUD), 4), (t(items::DYE0 + 5), 1), (t(items::DYE0 + 7), 1), (t(items::DYE0 + 12), 1)], Workbench);
     r((b(PORTAL_FRAME), 1), &[(t(items::GOLD_INGOT), 4), (b(OBSIDIAN), 1)], Anvil);
     r((b(PORTAL), 1), &[(t(items::HEAVEN_DUST), 8), (t(items::CRYSTAL), 1)], Anvil);
+    // из того, что есть в верхнем мире: можно попасть в Рай без готового портала
+    r((b(PORTAL), 1), &[(t(items::GOLD_INGOT), 6), (t(items::CRYSTAL), 2), (b(OBSIDIAN), 2)], Anvil);
     r((b(GLOWSTONE), 1), &[(t(items::HEAVEN_DUST), 2), (t(items::COAL), 2)], Furnace);
 
     // зелья: бутылка + особые ингредиенты в котле

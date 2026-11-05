@@ -31,10 +31,26 @@ pub struct Opt {
 }
 
 static LEVEL: AtomicU8 = AtomicU8::new(1);
+/// Авто-качество включило быструю листву.
+static AUTO_FAST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn set_level(l: u8) {
     LEVEL.store(l.min(3), Ordering::Relaxed);
-    crate::mesher::FAST_LEAVES.store(get().fast_leaves, Ordering::Relaxed);
+    let fast = get().fast_leaves || AUTO_FAST.load(Ordering::Relaxed);
+    crate::mesher::FAST_LEAVES.store(fast, Ordering::Relaxed);
+}
+
+/// Включить/выключить быструю листву от авто-качества.
+/// Возвращает true, если вид листвы поменялся (нужно перестроить чанки).
+pub fn set_auto_fast(on: bool) -> bool {
+    let before = crate::mesher::FAST_LEAVES.load(Ordering::Relaxed);
+    AUTO_FAST.store(on, Ordering::Relaxed);
+    set_level(level());
+    before != crate::mesher::FAST_LEAVES.load(Ordering::Relaxed)
+}
+
+pub fn auto_fast() -> bool {
+    AUTO_FAST.load(Ordering::Relaxed)
 }
 
 pub fn level() -> u8 {

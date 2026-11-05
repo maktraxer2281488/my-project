@@ -734,7 +734,7 @@ fn gen_overworld(seed: u32, cx: i32, cz: i32) -> Chunk {
                     }
                 }
                 Biome::Swamp => {
-                    if r < 0.022 && h >= SEA {
+                    if r < 0.012 && h >= SEA {
                         let t = hash(gx, gz, seed.wrapping_add(6));
                         if t > 0.55 { tree_willow(&mut g, gx, h, gz, t) } else { tree_mangrove(&mut g, gx, h, gz, t) }
                     } else if inside && g.get(gx, h + 1, gz) == AIR {
@@ -752,8 +752,8 @@ fn gen_overworld(seed: u32, cx: i32, cz: i32) -> Chunk {
                 }
                 Biome::Jungle => {
                     let t = hash(gx, gz, seed.wrapping_add(6));
-                    if r < 0.06 && h > SEA + 1 {
-                        if t > 0.7 {
+                    if r < 0.03 && h > SEA + 1 {
+                        if t > 0.8 {
                             tree_jungle_giant(&mut g, gx, h, gz, t);
                         } else if t > 0.45 {
                             tree_ebony(&mut g, gx, h, gz, t);
@@ -805,7 +805,7 @@ fn gen_overworld(seed: u32, cx: i32, cz: i32) -> Chunk {
                 }
                 Biome::Cherry => {
                     let t = hash(gx, gz, seed.wrapping_add(6));
-                    if r < 0.028 && h > SEA + 1 {
+                    if r < 0.018 && h > SEA + 1 {
                         tree_sakura(&mut g, gx, h, gz, t);
                     } else if inside && g.get(gx, h + 1, gz) == AIR && g.get(gx, h, gz) == GRASS {
                         let p = hash(gx, gz, seed.wrapping_add(7));
@@ -1407,5 +1407,22 @@ mod dungeon_find {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod spawn_probe {
+    use super::*;
+    #[test]
+    #[ignore]
+    fn spawn_biomes() {
+        let (sx, sz) = find_spawn(7);
+        let mut cnt = std::collections::HashMap::new();
+        for dz in (-128..128).step_by(8) {
+            for dx in (-128..128).step_by(8) {
+                *cnt.entry(column(7, sx + dx, sz + dz).biome).or_insert(0) += 1;
+            }
+        }
+        println!("SPAWN {sx} {sz} {cnt:?}");
     }
 }

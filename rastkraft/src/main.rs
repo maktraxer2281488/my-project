@@ -2194,7 +2194,19 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                     }
                     let body_hit = |c: IVec3| g.player.body.overlaps_block(c) || g.mobs.list.iter().any(|m| m.body.overlaps_block(c));
                     let blocked = (is_solid(nb) || shapes::form(nb).is_some()) && (body_hit(at) || (door && body_hit(up)));
-                    if ok && !blocked {
+                    if ok && !blocked && nb == PORTAL {
+                        // портал в Рай: сразу целая рамка 4×5 поперёк взгляда
+                        let f = g.player.forward();
+                        let side = if f.x.abs() > f.z.abs() { IVec3::Z } else { IVec3::X };
+                        for u in 0..4 {
+                            for v in 0..5 {
+                                let c = at + side * (u - 1) + IVec3::Y * (v - 1);
+                                let edge = u == 0 || u == 3 || v == 0 || v == 4;
+                                edits.push((c, if edge { PORTAL_FRAME } else { PORTAL }));
+                            }
+                        }
+                        g.toast = Some(("Портал в Рай готов — шагните в него".into(), 3.0));
+                    } else if ok && !blocked {
                         edits.push((at, nb));
                         if door {
                             if let Some(shapes::Form::Door { m, dir, open, .. }) = shapes::form(nb) {
@@ -3698,8 +3710,9 @@ fn draw_hud(app: &mut App) {
         // при сенсорном управлении слева вверху кнопки — счётчик ниже них
         let fy = if app.settings.touch { screen_height() * 0.16 + 20.0 * s } else { 24.0 * s };
         // авто-качество что-то понизило — видно рядом со счётчиком
-        let auto = if app.settings.auto_dist && (app.dyn_scale < 0.99 || app.eff_dist < app.settings.render_dist) {
-            format!("  (рендер {:.0}%, дальность {})", app.settings.render_scale * app.dyn_scale * 100.0, app.eff_dist)
+        let leaves = if opt::auto_fast() { ", листва проще" } else { "" };
+        let auto = if app.settings.auto_dist && (app.dyn_scale < 0.99 || app.eff_dist < app.settings.render_dist || opt::auto_fast()) {
+            format!("  (рендер {:.0}%, дальность {}{leaves})", app.settings.render_scale * app.dyn_scale * 100.0, app.eff_dist)
         } else {
             String::new()
         };
@@ -4346,7 +4359,12 @@ async fn amain() {
             let total = rs * app.dyn_scale;
             if app.busy_fps < 57.0 {
                 if app.auto_t > 1.0 {
-                    if total > 0.76 {
+                    if !opt::get().fast_leaves && !opt::auto_fast() {
+                        // сначала — быстрая листва: на встроенных видеокартах даёт больше всего
+                        if opt::set_auto_fast(true) {
+                            app.loader.epoch += 1;
+                        }
+                    } else if total > 0.76 {
                         app.dyn_scale = ((total - 0.1).max(0.75) / rs).min(1.0);
                     } else if app.eff_dist > 4 {
                         app.eff_dist -= 1;
@@ -4365,6 +4383,11 @@ async fn amain() {
                         app.eff_dist += 1;
                     } else if app.dyn_scale < 1.0 {
                         app.dyn_scale = (app.dyn_scale + 0.1).min(1.0);
+                    } else if opt::auto_fast() && app.busy_fps > 80.0 {
+                        // большой запас — вернуть красивую листву
+                        if opt::set_auto_fast(false) {
+                            app.loader.epoch += 1;
+                        }
                     }
                     app.auto_t = 0.0;
                 }
@@ -4375,6 +4398,9 @@ async fn amain() {
         } else if !app.settings.auto_dist {
             app.eff_dist = app.settings.render_dist;
             app.dyn_scale = 1.0;
+            if opt::auto_fast() && opt::set_auto_fast(false) {
+                app.loader.epoch += 1;
+            }
         }
 
         if app.game.is_some() {
