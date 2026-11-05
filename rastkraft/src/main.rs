@@ -27,6 +27,7 @@ mod settings;
 mod shapes;
 mod skins;
 mod structures;
+mod touch;
 mod ui;
 mod workers;
 mod world;
@@ -57,6 +58,8 @@ fn window_conf() -> macroquad::conf::Conf {
             window_width: std::env::var("RK_W").ok().and_then(|v| v.parse().ok()).unwrap_or(1280),
             window_height: std::env::var("RK_H").ok().and_then(|v| v.parse().ok()).unwrap_or(720),
             window_resizable: true,
+            fullscreen: cfg!(target_os = "android"),
+            high_dpi: cfg!(target_os = "android"),
             ..Default::default()
         },
         draw_call_vertex_capacity: 40_000,
@@ -85,6 +88,7 @@ enum Screen {
     Achievements,
     Look,
     Relay,
+    Controls,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -364,6 +368,11 @@ struct App {
     audio: audio::Audio,
     map: Option<map::MapView>,
     minimap: map::MiniMap,
+    /// Раскладка сенсорных кнопок.
+    touch_layout: touch::Layout,
+    /// Редактор раскладки: какая кнопка выбрана и перетаскивается ли.
+    touch_edit: Option<touch::Act>,
+    keyboard_shown: bool,
     /// Открытая торговля: (вид жителя, его номер).
     trade: Option<(usize, u32)>,
     /// Разрешение текстур, с которым игра запущена.
@@ -1282,7 +1291,7 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
             let fw = if playing && g.riding.is_some() { (is_key_down(KeyCode::W) as i32 - is_key_down(KeyCode::S) as i32) as f32 } else { 0.0 };
             g.ents.update_vehicles(world, g.riding, (fw, g.player.forward()), dt);
             if let Some(i) = g.riding {
-                if i >= g.ents.vehicles.len() || (playing && is_key_pressed(KeyCode::LeftShift)) {
+                if i >= g.ents.vehicles.len() || (playing && (is_key_pressed(KeyCode::LeftShift) || touch::out().pressed(touch::Act::Sneak))) {
                     if let Some(v) = g.ents.vehicles.get(i) {
                         g.player.body.pos = v.pos + vec3(0.0, 1.0, 0.0);
                     }
@@ -1470,16 +1479,21 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                 }
             }
             let (_, wheel) = mouse_wheel();
+            if let Some(k) = touch::out().hotbar {
+                g.player.selected = k;
+                g.label_t = 2.0;
+                g.player.eat_t = 0.0;
+            }
             if wheel != 0.0 {
                 g.player.selected = (g.player.selected as i32 - wheel.signum() as i32).rem_euclid(9) as usize;
                 g.label_t = 2.0;
                 g.player.eat_t = 0.0;
             }
-            if is_key_pressed(KeyCode::F) && creative {
+            if (is_key_pressed(KeyCode::F) || touch::out().pressed(touch::Act::Fly)) && creative {
                 g.player.flying = !g.player.flying;
             }
             // выбросить предмет
-            if is_key_pressed(KeyCode::Q) {
+            if is_key_pressed(KeyCode::Q) || touch::out().pressed(touch::Act::Drop) {
                 let sel = g.player.selected;
                 if let Some(it) = g.player.inv.take_one(sel) {
                     let p = g.player.eye() + g.player.forward() * 0.6;
@@ -1519,8 +1533,12 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                     }
                 }
             }
-            let lmb = is_mouse_button_down(MouseButton::Left);
-            let lmb_p = is_mouse_button_pressed(MouseButton::Left);
+            let tc = touch::out();
+            let (lmb, lmb_p) = if tc.active {
+                (tc.down(touch::Act::Attack), tc.pressed(touch::Act::Attack))
+            } else {
+                (is_mouse_button_down(MouseButton::Left), is_mouse_button_pressed(MouseButton::Left))
+            };
             let held_ench = g.player.inv.slots[g.player.selected].ench;
             // удар по лодке/вагонетке — забрать её
             if lmb_p && g.riding.is_none() {
@@ -1534,8 +1552,11 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                     g.ents.spawn_drop(it, 1, v.pos + vec3(0.0, 0.5, 0.0), 0.3);
                 }
             }
-            let rmb = is_mouse_button_down(MouseButton::Right);
-            let rmb_p = is_mouse_button_pressed(MouseButton::Right);
+            let (rmb, rmb_p) = if tc.active {
+                (tc.down(touch::Act::Use), tc.pressed(touch::Act::Use))
+            } else {
+                (is_mouse_button_down(MouseButton::Right), is_mouse_button_pressed(MouseButton::Right))
+            };
             if lmb_p && (g.swing_p >= 0.5) {
                 g.swing_p = 0.0;
             }
@@ -2013,7 +2034,7 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                     }
                 }
             }
-            if !used && rmb_p && !is_key_down(KeyCode::LeftShift) {
+            if !used && rmb_p && !is_key_down(KeyCode::LeftShift) && !touch::out().down(touch::Act::Sneak) {
                 if let Some((h, _, b)) = target_block {
                     if let Some(nb2) = shapes::toggled(b) {
                         edits.push((h, nb2));
@@ -2669,11 +2690,11 @@ fn settings_screen(app: &mut App) -> Option<Screen> {
     }
     app.ui.text_center("Настройки", w / 2.0, h * 0.07, 34.0, WHITE);
     let cw = 330.0 * s;
-    let bh = 38.0 * s;
-    let gap = 8.0 * s;
+    let bh = 34.0 * s;
+    let gap = 6.0 * s;
     let x1 = w / 2.0 - cw - gap / 2.0;
     let x2 = w / 2.0 + gap / 2.0;
-    let mut y = h * 0.11;
+    let mut y = h * 0.095;
     let old_smooth = app.settings.smooth_light;
     let old_fast = opt::get().fast_leaves;
     let active_res = app.tex_res_active;
@@ -2786,6 +2807,11 @@ fn settings_screen(app: &mut App) -> Option<Screen> {
     }
     let open_look = ui.button(x2, y, cw, bh, "Внешность игрока…");
     y += bh + gap;
+    if ui.button(x1, y, cw, bh, &format!("Сенсорное управление: {}", onoff(st.touch))) {
+        st.touch = !st.touch;
+    }
+    let open_controls = ui.button(x2, y, cw, bh, "Настроить кнопки…");
+    y += bh + gap;
     let exporting = app.export_rx.is_some();
     let export = ui.button(x1, y, cw, bh, if exporting { "Сохраняю музыку…" } else { "Сохранить музыку в папку music" });
     let done = ui.button(x2, y, cw, bh, "Готово") || is_key_pressed(KeyCode::Escape);
@@ -2813,6 +2839,10 @@ fn settings_screen(app: &mut App) -> Option<Screen> {
     }
     if open_look {
         return Some(Screen::Look);
+    }
+    if open_controls {
+        app.settings.save();
+        return Some(Screen::Controls);
     }
     if done {
         app.settings.save();
@@ -3204,6 +3234,9 @@ fn draw_hud(app: &mut App) {
         }
     }
 
+    if app.settings.touch && app.screen == Screen::Playing && !app.hide_hud {
+        touch::draw(&app.touch_layout, &app.ui, g.creative);
+    }
     // полоска здоровья ближайшего босса
     let ppos = g.player.body.pos;
     if let Some(b) = g.mobs.list.iter().filter(|m| m.is_boss() && m.alive() && (m.body.pos - ppos).length() < 64.0).min_by(|a, b| (a.body.pos - ppos).length().total_cmp(&(b.body.pos - ppos).length())) {
@@ -3405,12 +3438,30 @@ fn player_light(g: &Game) -> f32 {
     if exposed { g.daylight().max(0.3) } else { 0.5 }
 }
 
+/// Можно ли рисовать 3D в текстуру с буфером глубины (на старых телефонах с
+/// OpenGL ES 2 без расширения OES_depth_texture — нельзя, рисуем сразу на экран).
+fn depth_target_ok() -> bool {
+    static OK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *OK.get_or_init(|| {
+        if !cfg!(target_os = "android") {
+            return true;
+        }
+        let get = |name| unsafe {
+            let p = macroquad::miniquad::gl::glGetString(name);
+            if p.is_null() { String::new() } else { std::ffi::CStr::from_ptr(p as *const _).to_string_lossy().into_owned() }
+        };
+        let ver = get(macroquad::miniquad::gl::GL_VERSION);
+        let ext = get(macroquad::miniquad::gl::GL_EXTENSIONS);
+        ver.contains("ES 3") || ext.contains("depth_texture")
+    })
+}
+
 /// 3D-сцена: небо, мир, существа, игроки, предметы, рука.
 fn render_world(app: &mut App) {
     // масштаб рендера: 3D рисуется в текстуру меньшего размера и растягивается
     let (sw, sh) = (screen_width(), screen_height());
     let scale = app.settings.render_scale;
-    let use_rt = scale < 0.99;
+    let use_rt = scale < 0.99 && depth_target_ok();
     if use_rt {
         let (w, h) = (((sw * scale) as u32).max(64), ((sh * scale) as u32).max(64));
         if app.rt.as_ref().is_none_or(|(_, rw, rh)| *rw != w || *rh != h) {
@@ -3761,6 +3812,9 @@ async fn amain() {
         audio: audio::Audio::new(),
         map: None,
         minimap: map::MiniMap::default(),
+        touch_layout: touch::Layout::default(),
+        touch_edit: None,
+        keyboard_shown: false,
         trade: None,
         tex_res_active: 16,
         sfx: Vec::new(),
@@ -3784,6 +3838,7 @@ async fn amain() {
         app.settings.opt_level = l.min(3);
     }
     opt::set_level(app.settings.opt_level);
+    app.touch_layout = touch::Layout::from_text(&app.settings.touch_layout);
     let mut frame_start = std::time::Instant::now();
     if std::env::var("RK_BENCH").is_ok() || std::env::var("RK_SHOT").is_ok() {
         app.settings.auto_dist = false;
@@ -3828,6 +3883,10 @@ async fn amain() {
         }
     }
     let shot_screen = std::env::var("RK_SCREEN").unwrap_or_default();
+    // проверка сенсорного управления на ПК
+    if std::env::var("RK_TOUCH").is_ok() {
+        app.settings.touch = true;
+    }
     if shot_screen == "title" {
         app.game = None;
         app.screen = Screen::Title;
@@ -3840,7 +3899,25 @@ async fn amain() {
         app.fps += (1.0 / raw_dt.max(1e-4) - app.fps) * 0.05;
         app.ui.begin(app.settings.gui_scale);
         let mouse: Vec2 = mouse_position().into();
-        let md = if app.grabbed { mouse - app.last_mouse } else { Vec2::ZERO };
+        // касания: джойстик, обзор и кнопки (в меню касания работают как мышь)
+        {
+            let s = app.ui.s;
+            let slot = 46.0 * s;
+            let gap = 5.0 * s;
+            let total = 9.0 * (slot + gap) - gap;
+            let hot = ((screen_width() - total) / 2.0, screen_height() - slot - 12.0 * s, slot, slot + gap);
+            touch::update(&app.touch_layout, app.settings.touch, app.screen == Screen::Playing, hot);
+        }
+        let mut md = if app.grabbed { mouse - app.last_mouse } else { Vec2::ZERO };
+        if app.settings.touch {
+            md += touch::out().look * 1.6;
+        }
+        // экранная клавиатура там, где вводят текст
+        let want_kb = app.settings.touch && matches!(app.screen, Screen::Chat | Screen::NewWorld | Screen::Relay | Screen::RecipeBook | Screen::Multiplayer);
+        if want_kb != app.keyboard_shown {
+            macroquad::miniquad::window::show_keyboard(want_kb);
+            app.keyboard_shown = want_kb;
+        }
         app.last_mouse = mouse;
         if let Some((_, t)) = &mut app.status {
             *t -= dt;
@@ -3855,19 +3932,20 @@ async fn amain() {
         }
         match app.screen {
             Screen::Playing => {
-                if is_key_pressed(KeyCode::Escape) {
+                let tc = touch::out();
+                if is_key_pressed(KeyCode::Escape) || tc.pressed(touch::Act::Pause) {
                     app.screen = Screen::Paused;
                     app.just_opened = true;
-                } else if is_key_pressed(KeyCode::E) {
+                } else if is_key_pressed(KeyCode::E) || tc.pressed(touch::Act::Inventory) {
                     app.screen = Screen::Inventory;
                     app.just_opened = true;
                 }
-                if is_key_pressed(KeyCode::T) || is_key_pressed(KeyCode::Enter) {
+                if is_key_pressed(KeyCode::T) || is_key_pressed(KeyCode::Enter) || tc.pressed(touch::Act::Chat) {
                     app.screen = Screen::Chat;
                     app.just_opened = true;
                 }
                 // M — карта мира
-                if is_key_pressed(KeyCode::M) && app.screen == Screen::Playing {
+                if (is_key_pressed(KeyCode::M) || tc.pressed(touch::Act::Map)) && app.screen == Screen::Playing {
                     if let Some(g) = app.game.as_ref() {
                         let me = vec2(g.player.body.pos.x, g.player.body.pos.z);
                         if app.map.is_none() {
@@ -3880,7 +3958,7 @@ async fn amain() {
                     }
                 }
                 // B — книга рецептов, если она есть в инвентаре (или в творчестве)
-                if is_key_pressed(KeyCode::B) && app.screen == Screen::Playing {
+                if (is_key_pressed(KeyCode::B) || tc.pressed(touch::Act::Book)) && app.screen == Screen::Playing {
                     let has = app.game.as_ref().is_some_and(|g| g.creative || g.player.inv.count(Item::Thing(items::RECIPE_BOOK)) > 0);
                     if has {
                         open_recipe_book(&mut app);
@@ -3894,7 +3972,7 @@ async fn amain() {
                 if is_key_pressed(KeyCode::F1) {
                     app.hide_hud = !app.hide_hud;
                 }
-                if is_key_pressed(KeyCode::F5) {
+                if is_key_pressed(KeyCode::F5) || tc.pressed(touch::Act::Camera) {
                     if let Some(g) = app.game.as_mut() {
                         g.third_person = !g.third_person;
                     }
@@ -3903,7 +3981,7 @@ async fn amain() {
             Screen::Paused if is_key_pressed(KeyCode::Escape) && !app.just_opened => app.screen = Screen::Playing,
             _ => {}
         }
-        let want_grab = app.screen == Screen::Playing && shot.is_none();
+        let want_grab = app.screen == Screen::Playing && shot.is_none() && !app.settings.touch;
         set_grab(&mut app, want_grab);
 
         process_net(&mut app);
@@ -4034,7 +4112,7 @@ async fn amain() {
             if !app.hide_hud && matches!(app.screen, Screen::Playing | Screen::Paused | Screen::Inventory | Screen::Chat | Screen::RecipeBook) {
                 draw_hud(&mut app);
             }
-            if app.screen == Screen::Playing && is_key_down(KeyCode::Tab) {
+            if app.screen == Screen::Playing && (is_key_down(KeyCode::Tab) || touch::out().down(touch::Act::Players)) {
                 draw_player_list(&mut app);
             }
         } else {
@@ -4059,6 +4137,7 @@ async fn amain() {
             Screen::Achievements => achievements_screen(&mut app),
             Screen::Look => look_screen(&mut app),
             Screen::Relay => relay_screen(&mut app),
+            Screen::Controls => controls_screen(&mut app),
             Screen::Loading => {
                 let (w, h) = (screen_width(), screen_height());
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.07, 0.08, 0.1, 1.0));
@@ -4084,6 +4163,15 @@ async fn amain() {
             }
             Screen::Playing => None,
         };
+        // на телефоне нет Esc и E: кнопка «закрыть» на наложенных экранах
+        let mut next = next;
+        if app.settings.touch && next.is_none() && matches!(app.screen, Screen::Inventory | Screen::RecipeBook | Screen::Map | Screen::Trade | Screen::Enchant | Screen::Chat) {
+            let s = app.ui.s;
+            let b = 52.0 * s;
+            if app.ui.button(screen_width() - b - 10.0 * s, 10.0 * s, b, b, "✕") && !app.just_opened {
+                next = Some(Screen::Playing);
+            }
+        }
         if let Some(n) = next {
             if n == Screen::Playing && app.screen == Screen::Inventory && !app.cursor.is_empty() {
                 let c = app.cursor;
@@ -4166,6 +4254,11 @@ async fn amain() {
                             app.screen = Screen::Worlds;
                         }
                         "multiplayer" => app.screen = Screen::Multiplayer,
+                        "controls" => {
+                            app.settings_back = Screen::Playing;
+                            app.touch_edit = Some(touch::Act::Attack);
+                            app.screen = Screen::Controls;
+                        }
                         "pause" => app.screen = Screen::Paused,
                         "enchant" => {
                             if let Some(g) = app.game.as_mut() {
@@ -4936,6 +5029,73 @@ fn relay_screen(app: &mut App) -> Option<Screen> {
     }
     if app.ui.button(bx, y + 116.0 * s, bw, 44.0 * s, "Назад") || is_key_pressed(KeyCode::Escape) {
         return Some(Screen::Paused);
+    }
+    None
+}
+
+/// Редактор сенсорных кнопок: перетащите кнопку пальцем, ниже — её размер,
+/// общая прозрачность и масштаб.
+fn controls_screen(app: &mut App) -> Option<Screen> {
+    let (w, h) = (screen_width(), screen_height());
+    let s = app.ui.s;
+    draw_rectangle(0.0, 0.0, w, h, Color::new(0.12, 0.16, 0.12, 1.0));
+    // «мир» на фоне для наглядности
+    draw_rectangle(0.0, h * 0.62, w, h * 0.38, Color::new(0.35, 0.55, 0.3, 1.0));
+    app.ui.text_center("Перетащите кнопки, выберите кнопку и меняйте её размер", w / 2.0, h * 0.2, 16.0, WHITE);
+    let mouse = app.ui.mouse;
+    // выбор и перетаскивание
+    if app.ui.pressed {
+        let hit = touch::ACTS.iter().copied().find(|a| {
+            let (x, y, r) = app.touch_layout.get(*a);
+            (mouse - vec2(x * w, y * h)).length() < r * h * app.touch_layout.scale * 1.1
+        });
+        if hit.is_some() {
+            app.touch_edit = hit;
+        }
+    }
+    if let Some(a) = app.touch_edit {
+        if app.ui.down && mouse.y < h * 0.98 {
+            let (x, y, r) = app.touch_layout.get(a);
+            let inside_panel = mouse.y > h * 0.3 && mouse.y < h * 0.52 && mouse.x > w * 0.25 && mouse.x < w * 0.75;
+            let (cx, cy) = (x * w, y * h);
+            if !inside_panel && (mouse - vec2(cx, cy)).length() < r * h * app.touch_layout.scale * 3.0 {
+                app.touch_layout.pos.insert(a, ((mouse.x / w).clamp(0.02, 0.98), (mouse.y / h).clamp(0.02, 0.98), r));
+            }
+        }
+    }
+    touch::draw(&app.touch_layout, &app.ui, true);
+    if let Some(a) = app.touch_edit {
+        let (x, y, r) = app.touch_layout.get(a);
+        draw_circle_lines(x * w, y * h, r * h * app.touch_layout.scale + 4.0, 4.0, ACCENT);
+    }
+    // панель настроек
+    let pw = w * 0.5;
+    let (px, py) = (w * 0.25, h * 0.3);
+    draw_rectangle(px, py, pw, h * 0.22, Color::new(0.0, 0.0, 0.0, 0.7));
+    let bh = 32.0 * s;
+    let label = app.touch_edit.map_or("Кнопка не выбрана".to_string(), |a| format!("Размер «{}»", a.label()));
+    if let Some(a) = app.touch_edit {
+        let (x, y, r) = app.touch_layout.get(a);
+        let nr = app.ui.slider(21, px + 10.0 * s, py + 8.0 * s, pw - 20.0 * s, bh, &label, r, 0.025, 0.15);
+        app.touch_layout.pos.insert(a, (x, y, nr));
+    } else {
+        app.ui.text_center(&label, w / 2.0, py + 28.0 * s, 14.0, GRAY);
+    }
+    let op = app.touch_layout.opacity;
+    app.touch_layout.opacity = app.ui.slider(22, px + 10.0 * s, py + 12.0 * s + bh, pw - 20.0 * s, bh, &format!("Прозрачность: {:.0}%", op * 100.0), op, 0.1, 1.0);
+    let sc = app.touch_layout.scale;
+    app.touch_layout.scale = app.ui.slider(23, px + 10.0 * s, py + 16.0 * s + bh * 2.0, pw - 20.0 * s, bh, &format!("Все кнопки: {:.0}%", sc * 100.0), sc, 0.6, 1.8);
+    let by = py + 22.0 * s + bh * 3.0;
+    let half = (pw - 30.0 * s) / 2.0;
+    if app.ui.button_small(px + 10.0 * s, by, half, bh, "Сбросить") {
+        app.touch_layout = touch::Layout::default();
+        app.touch_edit = None;
+    }
+    if app.ui.button_small(px + 20.0 * s + half, by, half, bh, "Готово") || is_key_pressed(KeyCode::Escape) {
+        app.settings.touch_layout = app.touch_layout.to_text();
+        app.settings.save();
+        app.touch_edit = None;
+        return Some(Screen::Settings);
     }
     None
 }

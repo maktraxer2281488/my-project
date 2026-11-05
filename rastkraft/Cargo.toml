@@ -1,7 +1,7 @@
 [package]
 name = "rastkraft"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 macroquad = { version = "0.4", features = ["audio"] }
@@ -21,3 +21,20 @@ opt-level = 3
 
 [profile.dev.build-override]
 opt-level = 3
+
+# сборка под Android: cargo quad-apk build --release (см. README)
+[package.metadata.android]
+package_name = "com.maktraxer.rastkraft"
+label = "Расткрафт"
+version_code = 1
+version_name = "0.16"
+android_version = 33
+target_sdk_version = 33
+min_sdk_version = 21
+build_targets = ["aarch64-linux-android", "armv7-linux-androideabi"]
+fullscreen = true
+opengles_version_major = 2
+opengles_version_minor = 0
+
+[package.metadata.android.activity_attributes]
+"android:screenOrientation" = "sensorLandscape"

@@ -62,9 +62,15 @@ void main() {
 
 /// Сплошные блоки: без discard — видеокарта может отбрасывать скрытое заранее.
 const FRAGMENT_OPAQUE: &str = r#"#version 100
+#ifdef GL_FRAGMENT_PRECISION_HIGH
 precision highp float;
-varying highp vec2 uv;
-varying highp vec2 tile0;
+#define HP highp
+#else
+precision mediump float;
+#define HP mediump
+#endif
+varying HP vec2 uv;
+varying HP vec2 tile0;
 varying lowp vec4 col;
 varying mediump float fogf;
 
@@ -80,9 +86,15 @@ void main() {
 
 /// Листва, стекло, растения: прозрачные пиксели отбрасываются.
 const FRAGMENT_CUTOUT: &str = r#"#version 100
+#ifdef GL_FRAGMENT_PRECISION_HIGH
 precision highp float;
-varying highp vec2 uv;
-varying highp vec2 tile0;
+#define HP highp
+#else
+precision mediump float;
+#define HP mediump
+#endif
+varying HP vec2 uv;
+varying HP vec2 tile0;
 varying lowp vec4 col;
 varying mediump float fogf;
 
@@ -141,7 +153,13 @@ impl GpuMesh {
             return None;
         }
         let vb = ctx.new_buffer(BufferType::VertexBuffer, BufferUsage::Immutable, BufferSource::slice(v));
-        let ib = ctx.new_buffer(BufferType::IndexBuffer, BufferUsage::Immutable, BufferSource::slice(i));
+        // 16-битные индексы работают на любой видеокарте (32-битные — не на всех телефонах)
+        let ib = if v.len() <= u16::MAX as usize {
+            let i16: Vec<u16> = i.iter().map(|&x| x as u16).collect();
+            ctx.new_buffer(BufferType::IndexBuffer, BufferUsage::Immutable, BufferSource::slice(&i16))
+        } else {
+            ctx.new_buffer(BufferType::IndexBuffer, BufferUsage::Immutable, BufferSource::slice(i))
+        };
         Some(GpuMesh { vb, ib, n: i.len() as i32 })
     }
     fn delete(self, ctx: &mut dyn RenderingBackend) {

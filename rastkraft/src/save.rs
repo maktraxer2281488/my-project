@@ -5,11 +5,18 @@ use crate::world::{CHUNK_VOL, Chunk};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+/// Папка для данных игры: рядом с exe на ПК, во внутренней памяти приложения на Android.
+pub fn data_dir() -> PathBuf {
+    if cfg!(target_os = "android") {
+        let d = PathBuf::from("/data/data/com.maktraxer.rastkraft/files");
+        let _ = std::fs::create_dir_all(&d);
+        return d;
+    }
+    std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())).unwrap_or_else(|| ".".into())
+}
+
 pub fn saves_dir() -> PathBuf {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("saves")))
-        .unwrap_or_else(|| "saves".into())
+    data_dir().join("saves")
 }
 
 pub fn world_dir(name: &str) -> PathBuf {

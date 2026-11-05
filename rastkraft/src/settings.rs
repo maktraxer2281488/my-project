@@ -34,11 +34,14 @@ pub struct Settings {
     pub look: [u8; 4],
     /// Адрес ретранслятора для игры через интернет.
     pub relay: String,
+    /// Сенсорное управление и его раскладка.
+    pub touch: bool,
+    pub touch_layout: String,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings {
+        let mut s = Settings {
             render_dist: 8,
             fov: 75.0,
             sensitivity: 1.0,
@@ -63,7 +66,21 @@ impl Default for Settings {
             minimap: true,
             look: [255; 4],
             relay: String::new(),
+            touch: crate::touch::is_mobile(),
+            touch_layout: String::new(),
+        };
+        // телефон: лёгкие настройки, чтобы держать частоту кадров
+        if crate::touch::is_mobile() {
+            s.render_dist = 5;
+            s.smooth_light = false;
+            s.clouds = false;
+            s.render_scale = 0.7;
+            s.opt_level = 3;
+            s.gui_scale = 1.35;
+            s.auto_dist = true;
+            s.fps_limit = 60;
         }
+        s
     }
 }
 
@@ -73,10 +90,7 @@ pub const FPS_LIMITS: [u32; 5] = [0, 30, 60, 120, 144];
 pub const DIFFICULTY: [&str; 4] = ["Мирная", "Лёгкая", "Обычная", "Сложная"];
 
 fn path() -> std::path::PathBuf {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("rastkraft_settings.txt")))
-        .unwrap_or_else(|| "rastkraft_settings.txt".into())
+    crate::save::data_dir().join("rastkraft_settings.txt")
 }
 
 impl Settings {
@@ -111,6 +125,8 @@ impl Settings {
                 "tex_res" => s.tex_res = v.parse().unwrap_or(s.tex_res),
                 "minimap" => s.minimap = b,
                 "relay" => s.relay = v.to_string(),
+                "touch" => s.touch = b,
+                "touch_layout" => s.touch_layout = v.to_string(),
                 "look" => {
                     let v: Vec<u8> = v.split(',').filter_map(|x| x.parse().ok()).collect();
                     if v.len() == 4 {
@@ -145,7 +161,7 @@ impl Settings {
 
     pub fn save(&self) {
         let text = format!(
-            "render_dist={}\nfov={}\nsensitivity={}\nbrightness={}\nfog={}\nclouds={}\nsmooth_light={}\nview_bob={}\nshow_fps={}\ngui_scale={}\ndifficulty={}\ninvert_mouse={}\npvp={}\nname={}\nrender_scale={}\nauto_dist={}\nopt_level={}\nfps_limit={}\nmusic_vol={}\nsound_vol={}\ntex_res={}\nminimap={}\nlook={},{},{},{}\nrelay={}\n",
+            "render_dist={}\nfov={}\nsensitivity={}\nbrightness={}\nfog={}\nclouds={}\nsmooth_light={}\nview_bob={}\nshow_fps={}\ngui_scale={}\ndifficulty={}\ninvert_mouse={}\npvp={}\nname={}\nrender_scale={}\nauto_dist={}\nopt_level={}\nfps_limit={}\nmusic_vol={}\nsound_vol={}\ntex_res={}\nminimap={}\nlook={},{},{},{}\nrelay={}\ntouch={}\ntouch_layout={}\n",
             self.render_dist,
             self.fov,
             self.sensitivity,
@@ -172,7 +188,9 @@ impl Settings {
             self.look[1],
             self.look[2],
             self.look[3],
-            self.relay
+            self.relay,
+            self.touch as u8,
+            self.touch_layout
         );
         let _ = std::fs::write(path(), text);
     }

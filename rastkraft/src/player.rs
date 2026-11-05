@@ -410,9 +410,13 @@ impl Player {
             if is_key_down(KeyCode::A) {
                 wish -= right;
             }
-            jump = is_key_down(KeyCode::Space);
-            sprint = (is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::R)) && (creative || self.hunger > 6.0);
-            sneak = is_key_down(KeyCode::LeftShift);
+            let t = crate::touch::out();
+            if t.active && t.mv.length() > 0.12 {
+                wish += fwd * t.mv.y + right * t.mv.x;
+            }
+            jump = is_key_down(KeyCode::Space) || t.down(crate::touch::Act::Jump);
+            sprint = (is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::R) || t.down(crate::touch::Act::Sprint)) && (creative || self.hunger > 6.0);
+            sneak = is_key_down(KeyCode::LeftShift) || t.down(crate::touch::Act::Sneak);
         }
         let wish = wish.normalize_or_zero();
         self.sprinting = sprint && wish != Vec3::ZERO;

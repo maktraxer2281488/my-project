@@ -183,7 +183,7 @@ impl Audio {
 
 /// Сохранить все мелодии в папку `music/` рядом с игрой (WAV, 44.1 кГц, стерео).
 pub fn export_music() -> std::io::Result<std::path::PathBuf> {
-    let dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("music"))).unwrap_or_else(|| "music".into());
+    let dir = crate::save::data_dir().join("music");
     std::fs::create_dir_all(&dir)?;
     for t in music::TRACKS {
         let bytes = embedded(t).map(|b| b.to_vec()).unwrap_or_else(|| music::wav(&music::render(t)));
