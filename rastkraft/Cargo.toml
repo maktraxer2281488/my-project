@@ -35,8 +35,6 @@ target_sdk_version = 33
 min_sdk_version = 21
 build_targets = ["aarch64-linux-android", "armv7-linux-androideabi"]
 fullscreen = true
-# вся музыка (OGG) — её готовит tools/musicpack перед сборкой APK
-assets = "target/android-assets"
 opengles_version_major = 2
 opengles_version_minor = 0
 

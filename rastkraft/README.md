@@ -207,7 +207,7 @@ Shift+щелчок по рецепту делает 8 раз.
 
 На слабом телефоне можно опустить масштаб рендера и уровень оптимизации. Рендер работает даже на OpenGL ES 2.0: точность шейдеров выбирается сама, индексы 16-битные, а без `OES_depth_texture` игра рисует прямо на экран.
 
-В APK есть всё то же, что в версии для ПК, включая все 16 мелодий. Музыка лежит в сжатом виде (OGG Vorbis, ~128 кбит/с): 14 МБ вместо 247 МБ в WAV. Поэтому весь APK занимает ~18 МБ. Телефон распаковывает мелодию в фоне, игра при этом не подтормаживает. Сохранения лежат во внутренней папке приложения. У приложения есть разрешение на сеть для игры по адресу, через интернет и в локальной сети.
+В APK есть всё то же, что в версии для ПК, включая все 16 мелодий. Музыку игра сочиняет сама по нотам, прямо на устройстве. Получается байт в байт та же запись, что и готовый WAV (это проверяет тест), так что качество без потерь, а файл весит ~3,4 МБ. Мелодия сочиняется в фоне за несколько секунд, следующая готовится заранее, пока играет текущая. Сохранения лежат во внутренней папке приложения. У приложения есть разрешение на сеть для игры по адресу, через интернет и в локальной сети.
 
 **Сборка APK** (Linux; нужны Android SDK + NDK 25, JDK 8, build-tools 30.0.3 с `dx`). В `Cargo.lock` должна быть `version = 3`: cargo-quad-apk не читает 4-ю.
 
@@ -220,8 +220,6 @@ for t in aarch64-linux-android arm-linux-androideabi; do
   ln -sf ld.lld $B/$t-ld; ln -sf llvm-ar $B/$t-ar; ln -sf llvm-readelf $B/$t-readelf; ln -sf llvm-strip $B/$t-strip
 done
 # libunwind.a из lib64/clang/*/lib/linux/<arch>/ скопировать в lib/gcc/<triple>/4.9.x/
-# сжатая музыка для APK → target/android-assets/music/*.ogg
-cargo run --release --manifest-path tools/musicpack/Cargo.toml
 JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64 ANDROID_HOME=$SDK NDK_HOME=$NDK \
   cargo quad-apk build --release
 # результат: target/android-artifacts/release/apk/rastkraft.apk
@@ -255,11 +253,12 @@ sudo apt install gcc-mingw-w64-x86-64
 cargo build --release --target x86_64-pc-windows-gnu
 ```
 
-**Лёгкий exe (~21 МБ)** собирается с музыкой в OGG вместо WAV:
+По умолчанию exe весит ~7 МБ, а музыку игра сочиняет сама: звучит она так же, байт в байт. Сочинённые мелодии сохраняются в папку `music_cache` рядом с игрой, и со второго запуска играют сразу. Другие варианты сборки:
 
 ```bash
-cargo run --release --manifest-path tools/musicpack/Cargo.toml
-RK_SMALL=1 cargo build --release --target x86_64-pc-windows-gnu
+RK_EMBED_WAV=1 cargo build --release --target x86_64-pc-windows-gnu   # вшить WAV, ~266 МБ
+cargo run --release --manifest-path tools/musicpack/Cargo.toml         # OGG для лёгкого exe
+RK_SMALL=1 cargo build --release --target x86_64-pc-windows-gnu        # вшить OGG, ~21 МБ
 ```
 
 ## Устройство кода

@@ -1,7 +1,7 @@
-// Сборка: заранее «записывает» всю музыку игры (её сочиняет src/music.rs)
-// и вшивает готовые WAV прямо в exe — так всё лежит в одном файле.
-// Для телефона музыка не вшивается в программу: она лежит одной сжатой
-// копией (OGG) в assets APK, её готовит tools/musicpack.
+// Сборка. Музыку игра сочиняет сама (src/music.rs) — и в exe, и в APK она
+// по умолчанию не вшивается: звучит байт в байт так же, а файл маленький.
+// RK_EMBED_WAV=1 — вшить готовые WAV (exe ~266 МБ);
+// RK_SMALL=1 — вшить сжатые OGG из tools/musicpack (exe ~21 МБ).
 
 #[allow(dead_code)]
 #[path = "src/music.rs"]
@@ -26,7 +26,10 @@ fn main() {
             println!("cargo:rerun-if-changed={}", p.display());
         }
     }
-    let embed = std::env::var("RK_NO_EMBED").is_err() && !android && !small;
+    // RK_EMBED_WAV=1 — вшить готовые WAV (exe ~266 МБ). По умолчанию музыка
+    // сочиняется в самой игре: звучит так же (байт в байт), а файл маленький
+    println!("cargo:rerun-if-env-changed=RK_EMBED_WAV");
+    let embed = std::env::var("RK_EMBED_WAV").is_ok() && std::env::var("RK_NO_EMBED").is_err() && !android && !small;
     if embed {
         // все мелодии пишутся параллельно
         std::thread::scope(|sc| {
@@ -40,8 +43,6 @@ fn main() {
         });
     }
     let mut f = std::fs::File::create(format!("{out}/music_embed.rs")).unwrap();
-    writeln!(f, "/// Мелодии лежат в assets APK (music/<имя>.ogg).").unwrap();
-    writeln!(f, "pub const ASSET_OGG: bool = {};", android && std::env::var("RK_NO_EMBED").is_err()).unwrap();
     writeln!(f, "/// Вшитые записи сжаты в OGG (лёгкий exe), иначе — WAV.").unwrap();
     writeln!(f, "pub const EMBED_OGG: bool = {small};").unwrap();
     writeln!(f, "/// Готовые записи мелодий (имя файла, данные).").unwrap();

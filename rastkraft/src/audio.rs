@@ -14,7 +14,7 @@ fn embedded(t: Track) -> Option<&'static [u8]> {
     EMBEDDED.iter().find(|(n, _)| *n == t.file()).map(|(_, b)| *b)
 }
 
-/// Распаковать вшитую OGG-запись в WAV (на телефоне — в фоновом потоке).
+/// Распаковать вшитую OGG-запись в WAV (в фоновом потоке).
 fn ogg_to_wav(bytes: &[u8]) -> Option<Vec<u8>> {
     let mut r = lewton::inside_ogg::OggStreamReader::new(std::io::Cursor::new(bytes)).ok()?;
     let mut pcm: Vec<f32> = Vec::new();
@@ -24,24 +24,46 @@ fn ogg_to_wav(bytes: &[u8]) -> Option<Vec<u8>> {
     Some(music::wav(&pcm))
 }
 
-/// Сжатая запись мелодии из assets APK (на телефоне читается сразу, без ожидания).
-fn asset_ogg(t: Track) -> Option<Vec<u8>> {
-    if !ASSET_OGG {
+/// Где на ПК хранятся уже сочинённые мелодии (чтобы со второго запуска играли сразу).
+/// На телефоне не храним: это ~250 МБ, мелодия сочиняется заново за несколько секунд.
+fn cache_path(t: Track) -> Option<std::path::PathBuf> {
+    if crate::touch::is_mobile() {
         return None;
     }
-    let got = std::rc::Rc::new(std::cell::RefCell::new(None));
-    let g = got.clone();
-    macroquad::miniquad::fs::load_file(&format!("music/{}.ogg", t.file()), move |r| *g.borrow_mut() = r.ok());
-    got.take()
+    Some(crate::save::data_dir().join("music_cache").join(format!("{}.wav", t.file())))
 }
 
-/// Готовая запись мелодии в WAV: вшитая, распакованная или сочинённая заново.
+/// Готовая запись мелодии в WAV: вшитая, сохранённая ранее или сочинённая заново.
+/// Сочинённая в игре мелодия совпадает с записью байт в байт — качество то же.
 fn track_wav(t: Track) -> Vec<u8> {
     match embedded(t) {
-        Some(b) if EMBED_OGG => ogg_to_wav(b).unwrap_or_else(|| music::wav(&music::render(t))),
-        Some(b) => b.to_vec(),
-        None => music::wav(&music::render(t)),
+        Some(b) if EMBED_OGG => return ogg_to_wav(b).unwrap_or_else(|| music::wav(&music::render(t))),
+        Some(b) => return b.to_vec(),
+        None => {}
     }
+    let cache = cache_path(t);
+    if let Some(b) = cache.as_ref().and_then(|p| std::fs::read(p).ok()) {
+        if b.len() > 44 && b.starts_with(b"RIFF") && u32::from_le_bytes([b[4], b[5], b[6], b[7]]) as usize + 8 == b.len() {
+            return b;
+        }
+    }
+    let wav = music::wav(&music::render(t));
+    if let Some(p) = cache {
+        let tmp = p.with_extension("part");
+        if std::fs::create_dir_all(p.parent().unwrap()).is_ok() && std::fs::write(&tmp, &wav).is_ok() {
+            let _ = std::fs::rename(&tmp, &p);
+        }
+    }
+    wav
+}
+
+/// Подготовить мелодию в фоновом потоке.
+fn spawn_track(t: Track) -> Receiver<Vec<u8>> {
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(track_wav(t));
+    });
+    rx
 }
 
 /// Длительность WAV (16 бит, стерео, 44.1 кГц) в секундах.
@@ -73,6 +95,8 @@ pub struct Audio {
     left: f32,
     turn: usize,
     pending: Option<(Track, Receiver<Vec<u8>>)>,
+    /// Следующая мелодия, сочиняемая заранее, пока играет текущая.
+    ahead: Option<(Track, Receiver<Vec<u8>>)>,
     fade: f32,
     sent_vol: f32,
     sfx: HashMap<Sfx, Sound>,
@@ -87,7 +111,7 @@ impl Audio {
         // на Linux без устройства звука (сервер, контейнер) звук не включаем
         let device = !cfg!(target_os = "linux") || std::path::Path::new("/dev/snd").exists();
         let enabled = device && std::env::var("RK_NOAUDIO").is_err();
-        let mut a = Audio { enabled, current: None, want: &[], left: 0.0, turn: 0, pending: None, fade: 0.0, sent_vol: -1.0, sfx: HashMap::new(), rain: None, rain_vol: -1.0, now_playing: None };
+        let mut a = Audio { enabled, current: None, want: &[], left: 0.0, turn: 0, pending: None, ahead: None, fade: 0.0, sent_vol: -1.0, sfx: HashMap::new(), rain: None, rain_vol: -1.0, now_playing: None };
         if enabled {
             for s in music::SFX {
                 if let Some(snd) = load(&music::wav(&music::render_sfx(s))) {
@@ -189,19 +213,31 @@ impl Audio {
                         }
                     }
                     _ => {
-                        // распаковать (или сочинить) мелодию в фоне
-                        let (tx, rx) = channel();
-                        let packed = asset_ogg(w);
-                        std::thread::spawn(move || {
-                            let wav = packed.as_deref().and_then(ogg_to_wav).unwrap_or_else(|| track_wav(w));
-                            let _ = tx.send(wav);
-                        });
+                        // заранее сочинённая — берём её, иначе сочиняем в фоне
+                        let rx = match self.ahead.take() {
+                            Some((at, rx)) if at == w => rx,
+                            _ => spawn_track(w),
+                        };
                         self.pending = Some((w, rx));
                     }
                 }
             }
         } else {
             self.fade = (self.fade + dt / 2.5).min(1.0);
+            // пока играет мелодия — заранее готовим следующую
+            if self.ahead.is_none() && self.want.len() > 1 && embedded(self.want[0]).is_none() {
+                let mut next = self.want[(self.turn + 1) % self.want.len()];
+                if Some(next) == cur {
+                    next = self.want[(self.turn + 2) % self.want.len()];
+                }
+                if Some(next) != cur {
+                    self.ahead = Some((next, spawn_track(next)));
+                }
+            }
+        }
+        // подходящие мелодии сменились — заготовка больше не нужна
+        if self.ahead.as_ref().is_some_and(|(t, _)| !self.want.contains(t)) {
+            self.ahead = None;
         }
         if let Some((_, s)) = &self.current {
             let v = self.fade * music_vol * 0.8;
@@ -219,7 +255,7 @@ pub fn export_music() -> std::io::Result<std::path::PathBuf> {
     std::fs::create_dir_all(&dir)?;
     for t in music::TRACKS {
         // сжатые записи сохраняются как есть (.ogg), остальные — WAV
-        let (bytes, ext) = match asset_ogg(t).or_else(|| embedded(t).filter(|_| EMBED_OGG).map(|b| b.to_vec())) {
+        let (bytes, ext) = match embedded(t).filter(|_| EMBED_OGG).map(|b| b.to_vec()) {
             Some(b) => (b, "ogg"),
             None => (track_wav(t), "wav"),
         };
@@ -253,5 +289,41 @@ mod tests {
         let wav = track_wav(Track::Boss);
         let want = music::render(Track::Boss).len() as f32 / 2.0 / music::RATE as f32;
         assert!((wav_secs(&wav) - want).abs() < 0.5);
+    }
+
+    /// Мелодия, сочинённая в игре, совпадает с вшитой записью байт в байт.
+    #[test]
+    fn render_matches_embedded() {
+        if EMBED_OGG || EMBEDDED.is_empty() {
+            return;
+        }
+        let mut total = 0.0;
+        for t in music::TRACKS {
+            let t0 = std::time::Instant::now();
+            let w = music::wav(&music::render(t));
+            total += t0.elapsed().as_secs_f32();
+            if let Some(e) = embedded(t) {
+                assert!(e == &w[..], "{:?} отличается", t);
+            }
+        }
+        eprintln!("синтез 16 мелодий: {total:.1} с на одном ядре");
+    }
+
+    /// Сочинённая мелодия сохраняется и со второго раза читается с диска той же.
+    #[test]
+    fn music_cache_roundtrip() {
+        if !EMBEDDED.is_empty() {
+            return;
+        }
+        let t = Track::Fury;
+        if let Some(p) = cache_path(t) {
+            let _ = std::fs::remove_file(&p);
+        }
+        let a = track_wav(t);
+        assert!(cache_path(t).unwrap().exists());
+        let t0 = std::time::Instant::now();
+        let b = track_wav(t);
+        assert_eq!(a, b);
+        assert!(t0.elapsed().as_secs_f32() < 1.0, "с диска должно быть быстро");
     }
 }
