@@ -5,6 +5,8 @@ edition = "2021"
 
 [dependencies]
 macroquad = { version = "0.4", features = ["audio"] }
+# распаковка вшитой музыки (OGG) в версии для телефона
+lewton = "0.9"
 
 [profile.dev]
 opt-level = 1
@@ -33,8 +35,23 @@ target_sdk_version = 33
 min_sdk_version = 21
 build_targets = ["aarch64-linux-android", "armv7-linux-androideabi"]
 fullscreen = true
+# вся музыка (OGG) — её готовит tools/musicpack перед сборкой APK
+assets = "target/android-assets"
 opengles_version_major = 2
 opengles_version_minor = 0
+
+# сетевая игра (по адресу, через интернет и поиск игр в локальной сети)
+[[package.metadata.android.permission]]
+name = "android.permission.INTERNET"
+
+[[package.metadata.android.permission]]
+name = "android.permission.ACCESS_NETWORK_STATE"
+
+[[package.metadata.android.permission]]
+name = "android.permission.ACCESS_WIFI_STATE"
+
+[[package.metadata.android.permission]]
+name = "android.permission.CHANGE_WIFI_MULTICAST_STATE"
 
 [package.metadata.android.activity_attributes]
 "android:screenOrientation" = "sensorLandscape"

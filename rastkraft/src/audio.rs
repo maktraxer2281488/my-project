@@ -14,6 +14,35 @@ fn embedded(t: Track) -> Option<&'static [u8]> {
     EMBEDDED.iter().find(|(n, _)| *n == t.file()).map(|(_, b)| *b)
 }
 
+/// Распаковать вшитую OGG-запись в WAV (на телефоне — в фоновом потоке).
+fn ogg_to_wav(bytes: &[u8]) -> Option<Vec<u8>> {
+    let mut r = lewton::inside_ogg::OggStreamReader::new(std::io::Cursor::new(bytes)).ok()?;
+    let mut pcm: Vec<f32> = Vec::new();
+    while let Ok(Some(p)) = r.read_dec_packet_itl() {
+        pcm.extend(p.iter().map(|&x| x as f32 / 32768.0));
+    }
+    Some(music::wav(&pcm))
+}
+
+/// Сжатая запись мелодии из assets APK (на телефоне читается сразу, без ожидания).
+fn asset_ogg(t: Track) -> Option<Vec<u8>> {
+    if !ASSET_OGG {
+        return None;
+    }
+    let got = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let g = got.clone();
+    macroquad::miniquad::fs::load_file(&format!("music/{}.ogg", t.file()), move |r| *g.borrow_mut() = r.ok());
+    got.take()
+}
+
+/// Готовая запись мелодии в WAV: вшитая, распакованная или сочинённая заново.
+fn track_wav(t: Track) -> Vec<u8> {
+    match embedded(t) {
+        Some(b) => b.to_vec(),
+        None => music::wav(&music::render(t)),
+    }
+}
+
 /// Длительность WAV (16 бит, стерео, 44.1 кГц) в секундах.
 fn wav_secs(bytes: &[u8]) -> f32 {
     (bytes.len().saturating_sub(44)) as f32 / 4.0 / music::RATE as f32
@@ -159,10 +188,12 @@ impl Audio {
                         }
                     }
                     _ => {
-                        // сочинить и отрендерить мелодию в фоне
+                        // распаковать (или сочинить) мелодию в фоне
                         let (tx, rx) = channel();
+                        let packed = asset_ogg(w);
                         std::thread::spawn(move || {
-                            let _ = tx.send(music::wav(&music::render(w)));
+                            let wav = packed.as_deref().and_then(ogg_to_wav).unwrap_or_else(|| track_wav(w));
+                            let _ = tx.send(wav);
                         });
                         self.pending = Some((w, rx));
                     }
@@ -181,13 +212,34 @@ impl Audio {
     }
 }
 
-/// Сохранить все мелодии в папку `music/` рядом с игрой (WAV, 44.1 кГц, стерео).
+/// Сохранить все мелодии в папку `music/` рядом с игрой (WAV 44.1 кГц стерео; на телефоне — OGG).
 pub fn export_music() -> std::io::Result<std::path::PathBuf> {
     let dir = crate::save::data_dir().join("music");
     std::fs::create_dir_all(&dir)?;
     for t in music::TRACKS {
-        let bytes = embedded(t).map(|b| b.to_vec()).unwrap_or_else(|| music::wav(&music::render(t)));
-        std::fs::write(dir.join(format!("{}.wav", t.file())), bytes)?;
+        // сжатые записи сохраняются как есть (.ogg), остальные — WAV
+        let (bytes, ext) = match asset_ogg(t) {
+            Some(b) => (b, "ogg"),
+            None => (track_wav(t), "wav"),
+        };
+        std::fs::write(dir.join(format!("{}.{ext}", t.file())), bytes)?;
     }
     Ok(dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Сжатые мелодии для телефона (если tools/musicpack уже запускался)
+    /// распаковываются в WAV той же длины, что и исходная мелодия.
+    #[test]
+    fn packed_ogg_decodes() {
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/android-assets/music/01_menu.ogg");
+        let Ok(ogg) = std::fs::read(&p) else { return };
+        let wav = ogg_to_wav(&ogg).expect("OGG не распаковался");
+        let secs = wav_secs(&wav);
+        let want = music::render(Track::Menu).len() as f32 / 2.0 / music::RATE as f32;
+        assert!((secs - want).abs() < 0.5, "{secs} vs {want}");
+    }
 }

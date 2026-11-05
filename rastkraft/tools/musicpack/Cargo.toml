@@ -1,0 +1,10 @@
+[package]
+name = "musicpack"
+version = "0.1.0"
+edition = "2021"
+description = "Готовит сжатую музыку (OGG) для APK Расткрафта"
+
+[workspace]
+
+[dependencies]
+vorbis_rs = "0.5"

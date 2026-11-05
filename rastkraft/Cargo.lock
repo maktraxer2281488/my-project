@@ -348,6 +348,7 @@ dependencies = [
 name = "rastkraft"
 version = "0.1.0"
 dependencies = [
+ "lewton",
  "macroquad",
 ]
 

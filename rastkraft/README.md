@@ -204,9 +204,9 @@ Shift+щелчок по рецепту делает 8 раз.
 
 На слабом телефоне можно опустить масштаб рендера и уровень оптимизации. Рендер работает даже на OpenGL ES 2.0: точность шейдеров выбирается сама, индексы 16-битные, а без `OES_depth_texture` игра рисует прямо на экран.
 
-Музыка в APK не вшита (иначе файл был бы ~200 МБ), она сочиняется на телефоне в фоне. Сохранения лежат во внутренней папке приложения.
+В APK есть всё то же, что в версии для ПК, включая все 16 мелодий. Музыка лежит в сжатом виде (OGG Vorbis, ~128 кбит/с): 14 МБ вместо 247 МБ в WAV. Поэтому весь APK занимает ~18 МБ. Телефон распаковывает мелодию в фоне, игра при этом не подтормаживает. Сохранения лежат во внутренней папке приложения. У приложения есть разрешение на сеть для игры по адресу, через интернет и в локальной сети.
 
-**Сборка APK** (Linux; нужны Android SDK + NDK 25, JDK 8, build-tools 30.0.3 с `dx`):
+**Сборка APK** (Linux; нужны Android SDK + NDK 25, JDK 8, build-tools 30.0.3 с `dx`). В `Cargo.lock` должна быть `version = 3`: cargo-quad-apk не читает 4-ю.
 
 ```bash
 cargo install cargo-quad-apk
@@ -217,7 +217,9 @@ for t in aarch64-linux-android arm-linux-androideabi; do
   ln -sf ld.lld $B/$t-ld; ln -sf llvm-ar $B/$t-ar; ln -sf llvm-readelf $B/$t-readelf; ln -sf llvm-strip $B/$t-strip
 done
 # libunwind.a из lib64/clang/*/lib/linux/<arch>/ скопировать в lib/gcc/<triple>/4.9.x/
-JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64 ANDROID_HOME=$SDK NDK_HOME=$NDK RK_NO_EMBED=1 \
+# сжатая музыка для APK → target/android-assets/music/*.ogg
+cargo run --release --manifest-path tools/musicpack/Cargo.toml
+JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64 ANDROID_HOME=$SDK NDK_HOME=$NDK \
   cargo quad-apk build --release
 # результат: target/android-artifacts/release/apk/rastkraft.apk
 ```
