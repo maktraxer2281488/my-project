@@ -23,6 +23,8 @@ pub struct PState {
     pub walk: f32,
     pub speed: f32,
     pub swing: f32,
+    /// Внешность: 4 номера палитр (255 — по имени).
+    pub look: u32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -157,6 +159,7 @@ pub fn encode(m: &Msg) -> Vec<u8> {
             w.f32(s.walk);
             w.f32(s.speed);
             w.f32(s.swing);
+            w.u32(s.look);
         }
         Msg::Edit { dim, x, y, z, b } => {
             w.u8(4);
@@ -242,7 +245,7 @@ pub fn decode(b: &[u8]) -> Option<Msg> {
             let pitch = r.f32()?;
             let held = r.u32()?;
             let armor = [r.u32()?, r.u32()?, r.u32()?, r.u32()?];
-            Msg::State(PState { id, name, dim, pos, yaw, pitch, held, armor, health: r.f32()?, walk: r.f32()?, speed: r.f32()?, swing: r.f32()? })
+            Msg::State(PState { id, name, dim, pos, yaw, pitch, held, armor, health: r.f32()?, walk: r.f32()?, speed: r.f32()?, swing: r.f32()?, look: r.u32()? })
         }
         4 => Msg::Edit { dim: r.u8()?, x: r.i32()?, y: r.i32()?, z: r.i32()?, b: r.u16()? },
         5 => Msg::Hit { target: r.u8()?, from: r.u8()?, dmg: r.f32()?, knock: [r.f32()?, r.f32()?, r.f32()?] },
@@ -464,7 +467,7 @@ mod tests {
         let msgs = vec![
             Msg::Hello { name: "Игрок".into() },
             Msg::Welcome { id: 3, seed: 42, creative: true, time: 0.25, chunks: vec![(0, -1, 2, vec![1, 2, 3])] },
-            Msg::State(PState { id: 1, name: "А".into(), dim: 1, pos: [1.0, 2.0, 3.0], yaw: 0.5, pitch: -0.2, held: 7, armor: [1, 2, 3, 4], health: 18.0, walk: 3.0, speed: 1.0, swing: 0.5 }),
+            Msg::State(PState { id: 1, name: "А".into(), dim: 1, pos: [1.0, 2.0, 3.0], yaw: 0.5, pitch: -0.2, held: 7, armor: [1, 2, 3, 4], health: 18.0, walk: 3.0, speed: 1.0, swing: 0.5, look: 0x01020304 }),
             Msg::Edit { dim: 0, x: -5, y: 60, z: 9, b: 4 },
             Msg::Hit { target: 2, from: 0, dmg: 7.5, knock: [1.0, 0.5, 0.0] },
             Msg::Chat { text: "привет".into() },

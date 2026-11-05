@@ -12,6 +12,7 @@ mod mesher;
 mod mobdefs;
 mod mobs;
 mod model;
+mod ach;
 mod audio;
 mod music;
 mod map;
@@ -81,6 +82,8 @@ enum Screen {
     Map,
     Trade,
     Enchant,
+    Achievements,
+    Look,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -113,6 +116,16 @@ struct Game {
     /// Натяжение лука / зарядка арбалета (0..1) и заряжен ли арбалет.
     draw_t: f32,
     cross_loaded: bool,
+    /// Достижения (биты), побеждённые боссы (биты), всплывающие окна, звуки из игры.
+    ach: u32,
+    bosses: u8,
+    ach_pop: Vec<(u8, f32)>,
+    sfx_q: Vec<(music::Sfx, f32)>,
+    ach_check_t: f32,
+    ach_pending_archer: bool,
+    ach_later: Vec<u8>,
+    /// Метки на карте: (измерение, место, название).
+    markers: Vec<(u8, Vec2, String)>,
     dim: Dim,
     seed: u32,
     name: String,
@@ -175,6 +188,14 @@ impl Game {
             pending_edits: Vec::new(),
             draw_t: 0.0,
             cross_loaded: false,
+            ach: 0,
+            bosses: 0,
+            ach_pop: Vec::new(),
+            sfx_q: Vec::new(),
+            ach_check_t: 0.0,
+            ach_pending_archer: false,
+            ach_later: Vec::new(),
+            markers: Vec::new(),
             dim: Dim::Overworld,
             seed,
             name: name.to_string(),
@@ -250,6 +271,54 @@ impl Game {
         }
     }
 
+    /// Открыть достижение (один раз, с фанфарами).
+    fn unlock(&mut self, id: u8) {
+        if self.creative || self.ach & (1 << id) != 0 {
+            return;
+        }
+        self.ach |= 1 << id;
+        self.ach_pop.push((id, 5.0));
+        self.sfx_q.push((music::Sfx::Crit, 0.8));
+    }
+
+    /// Проверки по состоянию (раз в секунду).
+    fn check_achievements(&mut self) {
+        let inv = &self.player.inv;
+        let has = |it: Item| inv.count(it) > 0;
+        let mut got: Vec<u8> = Vec::new();
+        if inv.slots.iter().any(|s| matches!(s.item, Item::Tool(..))) {
+            got.push(ach::FIRST_TOOL);
+        }
+        if has(Item::Thing(items::IRON_INGOT)) {
+            got.push(ach::IRON);
+        }
+        if has(Item::Thing(items::RUBY)) || has(Item::Thing(items::SAPPHIRE)) || has(Item::Thing(items::MALACHITE)) {
+            got.push(ach::GEMS);
+        }
+        if has(Item::Thing(items::CRYSTAL)) {
+            got.push(ach::CRYSTAL);
+        }
+        for id in got {
+            self.unlock(id);
+        }
+        let (lvl, _) = self.player.level();
+        if lvl >= 10 {
+            self.unlock(ach::LVL10);
+        }
+        if lvl >= 30 {
+            self.unlock(ach::LVL30);
+        }
+        match self.dim {
+            Dim::Heaven => self.unlock(ach::HEAVEN),
+            Dim::Abyss => self.unlock(ach::ABYSS),
+            _ => {}
+        }
+        let p = self.player.body.pos;
+        if self.mobs.list.iter().any(|m| m.baby > 178.0 && (m.body.pos - p).length() < 24.0) {
+            self.unlock(ach::BREED);
+        }
+    }
+
     fn is_client(&self) -> bool {
         self.net.as_ref().is_some_and(|n| !n.host)
     }
@@ -290,6 +359,7 @@ struct App {
     chat_input: String,
     audio: audio::Audio,
     map: Option<map::MapView>,
+    minimap: map::MiniMap,
     /// Открытая торговля: (вид жителя, его номер).
     trade: Option<(usize, u32)>,
     /// Разрешение текстур, с которым игра запущена.
@@ -483,6 +553,9 @@ fn save_game(app: &mut App) -> bool {
     kv.set("armor", p.armor.iter().map(|a| a.code().to_string()).collect::<Vec<_>>().join(","));
     kv.set("selected", p.selected);
     kv.set("book", 1);
+    kv.set("ach", g.ach);
+    kv.set("markers", g.markers.iter().map(|(d, p, n)| format!("{d}|{:.0}|{:.0}|{n}", p.x, p.y)).collect::<Vec<_>>().join(";"));
+    kv.set("bosses", g.bosses);
     kv.set("xp", p.xp);
     kv.set("inv_ench", p.inv.slots.iter().map(|s| s.ench.to_string()).collect::<Vec<_>>().join(","));
     kv.set("armor_ench", p.armor_ench.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(","));
@@ -549,6 +622,18 @@ fn load_game(app: &mut App, name: &str) -> bool {
     }
     g.player.selected = (kv.u("selected", 0) as usize).min(8);
     g.player.xp = kv.u("xp", 0) as u32;
+    g.ach = kv.u("ach", 0) as u32;
+    if let Some(ms) = kv.get("markers") {
+        for e in ms.split(';') {
+            let f: Vec<&str> = e.splitn(4, '|').collect();
+            if f.len() == 4 {
+                if let (Ok(d), Ok(x), Ok(z)) = (f[0].parse::<u8>(), f[1].parse::<f32>(), f[2].parse::<f32>()) {
+                    g.markers.push((d, vec2(x, z), f[3].to_string()));
+                }
+            }
+        }
+    }
+    g.bosses = kv.u("bosses", 0) as u8;
     for (i, e) in kv.ints("inv_ench").iter().enumerate().take(inventory::SLOTS) {
         g.player.inv.slots[i].ench = *e as u8;
     }
@@ -799,6 +884,7 @@ fn process_net(app: &mut App) {
             walk: p.walk_phase,
             speed: vec2(p.body.vel.x, p.body.vel.z).length() / 4.0,
             swing: g.swing_t,
+            look: u32::from_le_bytes(app.settings.look),
         };
         n.broadcast(&Msg::State(st), None);
     }
@@ -1099,6 +1185,19 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
         let hp_before = g.player.health;
         let hunger_before = g.player.hunger;
         g.time = (g.time + dt / DAY_SECONDS).fract();
+        for id in std::mem::take(&mut g.ach_later) {
+            g.unlock(id);
+        }
+        g.ach_check_t -= dt;
+        if g.ach_check_t <= 0.0 {
+            g.ach_check_t = 1.0;
+            g.check_achievements();
+        }
+        for p in g.ach_pop.iter_mut() {
+            p.1 -= dt;
+        }
+        g.ach_pop.retain(|p| p.1 > 0.0);
+        sfx.append(&mut g.sfx_q);
         // погода (решает хозяин мира), посевы, сон
         if !g.is_client() {
             g.weather_t -= dt;
@@ -1147,6 +1246,7 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
             if g.sleep_t <= 0.0 {
                 g.time = 0.02;
                 g.weather = 0;
+                g.ach_later.push(ach::SLEEP);
                 g.toast = Some(("Доброе утро!".into(), 3.0));
             }
         }
@@ -1191,6 +1291,17 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                     g.ents.spawn_xp(*p, *v);
                 }
                 for text in &ev.say {
+                    if text.contains("повержен") {
+                        g.ach_later.push(ach::BOSS);
+                        for k in 0..6 {
+                            if text.contains(mobdefs::MOBS[mobdefs::BOSS0 + k].name) {
+                                g.bosses |= 1 << k;
+                            }
+                        }
+                        if g.bosses == 0b111111 {
+                            g.ach_later.push(ach::ALL_BOSSES);
+                        }
+                    }
                     if text.contains("пробу") {
                         sfx.push((music::Sfx::Boss, 1.0));
                     }
@@ -1248,9 +1359,13 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                             m.damage(pr.damage, pr.pos - pr.vel.normalize_or_zero());
                         }
                         pr.age = 99.0;
+                        g.ach_pending_archer = true;
                         break;
                     }
                 }
+            }
+            if std::mem::take(&mut g.ach_pending_archer) {
+                g.ach_later.push(ach::ARCHER);
             }
             let gained = g.ents.update_orbs(world, g.player.body.pos, dt);
             if gained > 0 {
@@ -1545,6 +1660,9 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                     if b == CHEST && !g.player.body.overlaps_block(h) {
                         let key = [h.x, h.y, h.z];
                         if g.opened.insert(key) {
+                            if h.y < 28 {
+                                g.ach_later.push(ach::DUNGEON);
+                            }
                             let tier = if dim == Dim::Heaven { 3 } else if h.y < 45 { 1 } else { 2 };
                             let seed = (h.x as u32).wrapping_mul(73_856_093) ^ (h.y as u32).wrapping_mul(19_349_663) ^ (h.z as u32).wrapping_mul(83_492_791);
                             for (it, n) in entities::chest_loot(tier, seed) {
@@ -1684,6 +1802,7 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                                 let mm = &mut g.mobs.list[mi];
                                 mm.owner = me_owner;
                                 mm.angry = false;
+                                g.ach_later.push(ach::PET);
                                 let hearts = [Color::from_rgba(250, 80, 110, 255), Color::from_rgba(255, 150, 170, 255)];
                                 g.ents.burst(pos, 14, 0.6, &hearts, 0.1, 2.0);
                                 g.toast = Some((format!("{} теперь ваш питомец!", g.mobs.list[mi].d().name), 2.5));
@@ -1731,6 +1850,7 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                         if let Some(k) = kind {
                             edits.push((prev, crop_block(k, 0)));
                             g.crops.push((prev, 50.0));
+                            g.ach_later.push(ach::FARMER);
                             if !creative {
                                 let sel = g.player.selected;
                                 g.player.inv.take_one(sel);
@@ -1851,6 +1971,9 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                         }
                     }
                     let door = matches!(shapes::form(nb), Some(shapes::Form::Door { .. }));
+                    if door {
+                        g.ach_later.push(ach::DOOR);
+                    }
                     let up = at + IVec3::Y;
                     if door && world.get(up.x, up.y, up.z) != AIR {
                         ok = false;
@@ -1895,6 +2018,11 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
         }
         if g.player.hunger > hunger_before + 0.5 {
             sfx.push((music::Sfx::Eat, 0.7));
+            if let Item::Thing(t) = g.player.held() {
+                if !matches!(t, items::RAW_BEEF | items::RAW_CHICKEN | items::RAW_MUTTON | items::RAW_FISH | items::APPLE | items::BERRIES | items::CARROT | items::POTATO) {
+                    g.ach_later.push(ach::COOK);
+                }
+            }
         }
     }
     app.sfx.append(&mut sfx);
@@ -2131,6 +2259,10 @@ fn draw_title(app: &mut App) -> Option<Screen> {
         next = Some(Screen::Multiplayer);
     }
     y += bh + 10.0 * s;
+    if app.ui.button(bx, y, bw, bh, "Достижения") {
+        next = Some(Screen::Achievements);
+    }
+    y += bh + 8.0 * s;
     if app.ui.button(bx, y, bw, bh, "Настройки") {
         app.settings_back = Screen::Title;
         next = Some(Screen::Settings);
@@ -2569,6 +2701,11 @@ fn settings_screen(app: &mut App) -> Option<Screen> {
     };
     ui.text(&note, x2 + 6.0 * s, y + bh * 0.62, 13.0, Color::new(0.9, 0.9, 0.85, 1.0));
     y += bh + gap;
+    if ui.button(x1, y, cw, bh, &format!("Мини-карта и компас: {}", onoff(st.minimap))) {
+        st.minimap = !st.minimap;
+    }
+    let open_look = ui.button(x2, y, cw, bh, "Внешность игрока…");
+    y += bh + gap;
     let exporting = app.export_rx.is_some();
     let export = ui.button(x1, y, cw, bh, if exporting { "Сохраняю музыку…" } else { "Сохранить музыку в папку music" });
     let done = ui.button(x2, y, cw, bh, "Готово") || is_key_pressed(KeyCode::Escape);
@@ -2593,6 +2730,9 @@ fn settings_screen(app: &mut App) -> Option<Screen> {
     opt::set_level(st.opt_level);
     if st.smooth_light != old_smooth || opt::get().fast_leaves != old_fast {
         app.loader.epoch += 1;
+    }
+    if open_look {
+        return Some(Screen::Look);
     }
     if done {
         app.settings.save();
@@ -3021,6 +3161,58 @@ fn draw_hud(app: &mut App) {
         }
         app.ui.text(&(i + 1).to_string(), x + 3.0 * s, y0 + 12.0 * s, 10.0, Color::new(1.0, 1.0, 1.0, 0.55));
     }
+    // компас: стороны света и метки по направлению взгляда
+    if !g.third_person || true {
+        let cw = 360.0 * s;
+        let cx0 = w / 2.0 - cw / 2.0;
+        let cy = 8.0 * s;
+        draw_rectangle(cx0, cy, cw, 20.0 * s, Color::new(0.0, 0.0, 0.0, 0.35));
+        let yaw = g.player.yaw;
+        let fov_h = 2.0;
+        let mut mark = |ang: f32, label: &str, col: Color, size: f32| {
+            let mut d = ang - yaw;
+            while d > std::f32::consts::PI {
+                d -= std::f32::consts::TAU;
+            }
+            while d < -std::f32::consts::PI {
+                d += std::f32::consts::TAU;
+            }
+            if d.abs() < fov_h / 2.0 {
+                let x = w / 2.0 + d / fov_h * cw;
+                app.ui.text_center(label, x, cy + 15.0 * s, size, col);
+            }
+        };
+        // север — к −z
+        for (ang, l) in [(-std::f32::consts::FRAC_PI_2, "С"), (0.0, "В"), (std::f32::consts::FRAC_PI_2, "Ю"), (std::f32::consts::PI, "З")] {
+            mark(ang, l, if l == "С" { Color::new(1.0, 0.4, 0.35, 1.0) } else { WHITE }, 14.0);
+        }
+        let dc = dim_code(g.dim);
+        let me = g.player.body.pos;
+        for (d, p, _) in &g.markers {
+            if *d == dc {
+                mark((p.y - me.z).atan2(p.x - me.x), "◆", Color::new(1.0, 0.85, 0.2, 1.0), 13.0);
+            }
+        }
+        draw_rectangle(w / 2.0 - 1.0, cy, 2.0, 20.0 * s, Color::new(1.0, 1.0, 1.0, 0.6));
+    }
+    if app.settings.minimap && !app.hide_hud {
+        let size = 150.0 * s;
+        let me = vec2(g.player.body.pos.x, g.player.body.pos.z);
+        let dc = dim_code(g.dim);
+        let mk: Vec<map::Marker> = g.markers.iter().filter(|m| m.0 == dc).map(|(_, p, n)| map::Marker { pos: *p, label: n.clone(), color: Color::new(1.0, 0.85, 0.2, 1.0), yaw: None }).collect();
+        app.minimap.draw(g.seed, g.dim, me, g.player.yaw, &mk, w - size - 12.0 * s, 12.0 * s, size);
+    }
+    // всплывающие достижения
+    for (k, (id, t)) in g.ach_pop.iter().enumerate() {
+        let a = ach::LIST[*id as usize].name;
+        let pw = 300.0 * s;
+        let x = w - pw - 14.0 * s + if *t > 4.6 { (*t - 4.6) * 600.0 * s } else { 0.0 };
+        let y = 180.0 * s + k as f32 * 62.0 * s;
+        draw_rectangle(x, y, pw, 54.0 * s, Color::new(0.08, 0.06, 0.12, 0.92));
+        draw_rectangle_lines(x, y, pw, 54.0 * s, 2.5 * s, Color::new(1.0, 0.8, 0.3, 1.0));
+        app.ui.text("Достижение!", x + 12.0 * s, y + 20.0 * s, 13.0, Color::new(1.0, 0.8, 0.3, 1.0));
+        app.ui.text(a, x + 12.0 * s, y + 42.0 * s, 16.0, WHITE);
+    }
     // опыт: полоска над панелью и уровень
     if !g.creative {
         let (lvl, frac) = g.player.level();
@@ -3235,13 +3427,14 @@ fn render_world(app: &mut App) {
             continue;
         }
         let armor = [Item::from_code(r.st.armor[0]), Item::from_code(r.st.armor[1]), Item::from_code(r.st.armor[2]), Item::from_code(r.st.armor[3])];
-        let look = model::look_for(*id as u32 * 7 + hash_seed(&r.st.name));
+        let lk = r.st.look.to_le_bytes();
+        let look = model::look_with(lk, *id as u32 * 7 + hash_seed(&r.st.name));
         model::draw_player(&app.ui.atlas, Vec3::from(r.shown), r.st.yaw, r.st.pitch, r.st.walk, r.st.speed, r.st.swing, Item::from_code(r.st.held), &armor, &look, daylight.max(0.35), r.hurt_t > 0.0);
     }
     let light = player_light(g);
     if g.third_person {
         let p = &g.player;
-        let look = model::look_for(hash_seed(&app.settings.name));
+        let look = model::look_with(app.settings.look, hash_seed(&app.settings.name));
         let sp = vec2(p.body.vel.x, p.body.vel.z).length() / 4.0;
         model::draw_player(&app.ui.atlas, p.body.pos, p.yaw, p.pitch, p.walk_phase, sp, g.swing_t, p.held(), &p.armor, &look, light, p.hurt_t > 0.0);
     }
@@ -3300,7 +3493,7 @@ fn render_world(app: &mut App) {
         gl.quad_context.begin_pass(pass, miniquad::PassAction::Clear { color: None, depth: Some(1.0), stencil: None });
         gl.quad_context.end_render_pass();
         let p = &g.player;
-        let look = model::look_for(hash_seed(&app.settings.name));
+        let look = model::look_with(app.settings.look, hash_seed(&app.settings.name));
         let sleeve = model::armor_color(p.armor[1]).unwrap_or(look.shirt);
         let hand_eye = g.player.eye() + bob;
         let hand_cam = Camera3D { position: hand_eye, target: hand_eye + dir, up: cam_up, fovy: 70f32.to_radians(), z_near: 0.02, z_far: 10.0, render_target: rt.clone(), aspect: Some(sw / sh.max(1.0)), ..Default::default() };
@@ -3472,6 +3665,7 @@ async fn main() {
         chat_input: String::new(),
         audio: audio::Audio::new(),
         map: None,
+        minimap: map::MiniMap::default(),
         trade: None,
         tex_res_active: 16,
         sfx: Vec::new(),
@@ -3762,6 +3956,8 @@ async fn main() {
             Screen::Map => map_screen(&mut app),
             Screen::Trade => trade::screen(&mut app),
             Screen::Enchant => enchant_screen(&mut app),
+            Screen::Achievements => achievements_screen(&mut app),
+            Screen::Look => look_screen(&mut app),
             Screen::Loading => {
                 let (w, h) = (screen_width(), screen_height());
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.07, 0.08, 0.1, 1.0));
@@ -4391,12 +4587,32 @@ fn map_screen(app: &mut App) -> Option<Screen> {
             markers.push(map::Marker { pos: vec2(r.st.pos[0], r.st.pos[2]), label: r.st.name.clone(), color: Color::new(0.35, 0.7, 1.0, 1.0), yaw: Some(r.st.yaw) });
         }
     }
+    for (d, p, name) in &g.markers {
+        if *d == dc {
+            markers.push(map::Marker { pos: *p, label: name.clone(), color: Color::new(1.0, 0.85, 0.2, 1.0), yaw: None });
+        }
+    }
     for m in g.mobs.list.iter().filter(|m| m.is_boss() && m.alive()) {
         markers.push(map::Marker { pos: vec2(m.body.pos.x, m.body.pos.z), label: format!("Босс: {}", m.d().name), color: Color::new(1.0, 0.25, 0.25, 1.0), yaw: None });
     }
     let (seed, dim, yaw, just) = (g.seed, g.dim, g.player.yaw, app.just_opened);
     let view = app.map.get_or_insert_with(|| map::MapView::new(me));
-    if view.draw(&mut app.ui, seed, dim, me, yaw, &markers, just) {
+    let close = view.draw(&mut app.ui, seed, dim, me, yaw, &markers, just);
+    // ПКМ по карте: поставить метку или убрать ближайшую
+    if app.ui.rpressed {
+        if let Some(wp) = view.screen_to_world(app.ui.mouse) {
+            let near_r = view.scale() * 8.0;
+            let g = app.game.as_mut().unwrap();
+            if let Some(i) = g.markers.iter().position(|(d, p, _)| *d == dc && (*p - wp).length() < near_r) {
+                g.markers.remove(i);
+            } else {
+                let n = g.markers.len() + 1;
+                g.markers.push((dc, wp, format!("Метка {n}")));
+                g.unlock(ach::MARKER);
+            }
+        }
+    }
+    if close {
         return Some(Screen::Playing);
     }
     None
@@ -4444,12 +4660,99 @@ fn enchant_screen(app: &mut App) -> Option<Screen> {
     if let Some((k, l)) = chosen {
         if g.creative || g.player.spend_levels(ench::cost(l)) {
             g.player.inv.slots[sel].ench = ench::pack(k, l);
+            g.unlock(ach::ENCHANT);
             g.toast = Some((format!("Зачаровано: {}", ench::name(ench::pack(k, l)).unwrap_or_default()), 2.0));
             app.sfx.push((music::Sfx::Crit, 0.7));
         }
     }
     if !app.just_opened && (is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::E)) {
         return Some(Screen::Playing);
+    }
+    None
+}
+
+fn achievements_screen(app: &mut App) -> Option<Screen> {
+    let (w, h) = (screen_width(), screen_height());
+    let s = app.ui.s;
+    draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.6));
+    let got = app.game.as_ref().map_or(0, |g| g.ach);
+    let n = got.count_ones();
+    app.ui.text_center(&format!("Достижения: {n} из {}", ach::COUNT), w / 2.0, 50.0 * s, 26.0, WHITE);
+    let cols = 2;
+    let cw = (w - 60.0 * s) / cols as f32;
+    let rh = 44.0 * s;
+    for (i, a) in ach::LIST.iter().enumerate() {
+        let x = 30.0 * s + (i % cols) as f32 * cw;
+        let y = 76.0 * s + (i / cols) as f32 * (rh + 4.0 * s);
+        let ok = got & (1 << i) != 0;
+        draw_rectangle(x, y, cw - 10.0 * s, rh, if ok { Color::new(0.2, 0.17, 0.06, 0.9) } else { Color::new(0.1, 0.1, 0.12, 0.85) });
+        app.ui.text(if ok { "★" } else { "☆" }, x + 10.0 * s, y + rh * 0.68, 18.0, if ok { Color::new(1.0, 0.8, 0.3, 1.0) } else { GRAY });
+        app.ui.text(a.name, x + 36.0 * s, y + 19.0 * s, 15.0, if ok { WHITE } else { GRAY });
+        app.ui.text(a.hint, x + 36.0 * s, y + 36.0 * s, 12.0, GRAY);
+    }
+    if app.ui.button((w - 240.0 * s) / 2.0, h - 54.0 * s, 240.0 * s, 40.0 * s, "Назад") || is_key_pressed(KeyCode::Escape) {
+        return Some(Screen::Paused);
+    }
+    None
+}
+
+/// Выбор внешности: рубашка, штаны, волосы, кожа.
+fn look_screen(app: &mut App) -> Option<Screen> {
+    let (w, h) = (screen_width(), screen_height());
+    let s = app.ui.s;
+    draw_rectangle(0.0, 0.0, w, h, Color::new(0.05, 0.06, 0.08, 0.92));
+    app.ui.text_center("Внешность игрока", w / 2.0, 70.0 * s, 28.0, WHITE);
+    app.ui.text_center("Её видят другие игроки по сети и вы — в виде от третьего лица (F5)", w / 2.0, 96.0 * s, 13.0, GRAY);
+    let rows: [(&str, Vec<(u8, u8, u8)>); 4] = [
+        ("Рубашка", model::SHIRTS.to_vec()),
+        ("Штаны", model::PANTS.to_vec()),
+        ("Волосы", model::HAIRS.to_vec()),
+        ("Кожа", model::SKINS.to_vec()),
+    ];
+    let bw = 520.0 * s;
+    let x0 = (w - bw) / 2.0;
+    let mut y = 130.0 * s;
+    for (i, (name, pal)) in rows.iter().enumerate() {
+        app.ui.text(name, x0, y + 26.0 * s, 17.0, WHITE);
+        let cur = app.settings.look[i];
+        // «по имени» и образцы цветов
+        let sw = 40.0 * s;
+        let mut x = x0 + 120.0 * s;
+        let auto = app.ui.hover(x, y, sw * 1.6, sw);
+        draw_rectangle(x, y, sw * 1.6, sw, Color::new(0.2, 0.2, 0.24, 1.0));
+        app.ui.text_center("авто", x + sw * 0.8, y + sw * 0.62, 12.0, WHITE);
+        if cur == 255 {
+            draw_rectangle_lines(x - 2.0, y - 2.0, sw * 1.6 + 4.0, sw + 4.0, 3.0, ACCENT);
+        }
+        if auto && app.ui.pressed {
+            app.settings.look[i] = 255;
+        }
+        x += sw * 1.6 + 8.0 * s;
+        for (k, c) in pal.iter().enumerate() {
+            draw_rectangle(x, y, sw, sw, Color::from_rgba(c.0, c.1, c.2, 255));
+            if cur as usize == k {
+                draw_rectangle_lines(x - 2.0, y - 2.0, sw + 4.0, sw + 4.0, 3.0, ACCENT);
+            }
+            if app.ui.hover(x, y, sw, sw) && app.ui.pressed {
+                app.settings.look[i] = k as u8;
+            }
+            x += sw + 6.0 * s;
+        }
+        y += sw + 22.0 * s;
+    }
+    // простой предпросмотр: фигурка из прямоугольников
+    let l = model::look_with(app.settings.look, hash_seed(&app.settings.name));
+    let (px, py) = (w / 2.0 - 30.0 * s, y + 10.0 * s);
+    let u = 10.0 * s;
+    draw_rectangle(px + u, py, 4.0 * u, 4.0 * u, l.skin);
+    draw_rectangle(px + u, py, 4.0 * u, 1.2 * u, l.hair);
+    draw_rectangle(px + u, py + 4.0 * u, 4.0 * u, 5.0 * u, l.shirt);
+    draw_rectangle(px - 0.6 * u, py + 4.0 * u, 1.6 * u, 4.5 * u, l.shirt);
+    draw_rectangle(px + 5.0 * u, py + 4.0 * u, 1.6 * u, 4.5 * u, l.shirt);
+    draw_rectangle(px + u, py + 9.0 * u, 4.0 * u, 4.5 * u, l.pants);
+    if app.ui.button((w - 240.0 * s) / 2.0, h - 60.0 * s, 240.0 * s, 42.0 * s, "Готово") || is_key_pressed(KeyCode::Escape) {
+        app.settings.save();
+        return Some(Screen::Settings);
     }
     None
 }

@@ -98,6 +98,7 @@ pub fn screen(app: &mut App) -> Option<Screen> {
             g.ents.spawn_drop(ri, left, p, 0.3);
         }
         g.toast = Some((format!("Куплено: {} ×{rn}", ri.name()), 1.5));
+        g.unlock(crate::ach::TRADE);
         app.sfx.push((crate::music::Sfx::Pickup, 0.6));
     }
     if !app.just_opened && (is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::E)) {

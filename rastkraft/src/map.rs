@@ -12,7 +12,60 @@ pub const N: usize = 384;
 /// Масштабы: блоков на пиксель.
 pub const SCALES: [f32; 6] = [0.5, 1.0, 2.0, 4.0, 8.0, 16.0];
 
+/// Мини-карта в углу экрана.
+#[derive(Default)]
+pub struct MiniMap {
+    tex: Option<(Texture2D, Vec2, Dim)>,
+    pending: Option<(Receiver<Vec<u8>>, Vec2, Dim)>,
+}
+
+const MINI: usize = 112;
+
+impl MiniMap {
+    pub fn draw(&mut self, seed: u32, dim: Dim, me: Vec2, yaw: f32, markers: &[Marker], x: f32, y: f32, size: f32) {
+        if let Some((rx, c, d)) = &self.pending {
+            if let Ok(px) = rx.try_recv() {
+                let t = Texture2D::from_rgba8(MINI as u16, MINI as u16, &px);
+                t.set_filter(FilterMode::Nearest);
+                self.tex = Some((t, *c, *d));
+                self.pending = None;
+            }
+        }
+        let need = self.tex.as_ref().is_none_or(|(_, c, d)| *d != dim || (*c - me).abs().max_element() > 20.0);
+        if need && self.pending.is_none() {
+            let (tx, rx) = channel();
+            let c = me;
+            std::thread::spawn(move || {
+                let _ = tx.send(render_n(seed, dim, c, 1.0, MINI));
+            });
+            self.pending = Some((rx, me, dim));
+        }
+        draw_rectangle(x - 3.0, y - 3.0, size + 6.0, size + 6.0, Color::new(0.0, 0.0, 0.0, 0.6));
+        // видно MINI*0.7 блоков вокруг
+        let view = MINI as f32 * 0.7;
+        if let Some((t, c, _)) = &self.tex {
+            let src_x = (me.x - c.x) + MINI as f32 / 2.0 - view / 2.0;
+            let src_y = (me.y - c.y) + MINI as f32 / 2.0 - view / 2.0;
+            draw_texture_ex(t, x, y, WHITE, DrawTextureParams { dest_size: Some(vec2(size, size)), source: Some(Rect::new(src_x, src_y, view, view)), ..Default::default() });
+        }
+        draw_rectangle_lines(x - 2.0, y - 2.0, size + 4.0, size + 4.0, 2.0, Color::new(0.85, 0.7, 0.35, 1.0));
+        let k = size / view;
+        for m in markers {
+            let q = vec2(x + size / 2.0 + (m.pos.x - me.x) * k, y + size / 2.0 + (m.pos.y - me.y) * k);
+            let q = q.clamp(vec2(x + 3.0, y + 3.0), vec2(x + size - 3.0, y + size - 3.0));
+            draw_circle(q.x, q.y, 3.5, m.color);
+        }
+        let c = vec2(x + size / 2.0, y + size / 2.0);
+        let f = vec2(yaw.cos(), yaw.sin());
+        let side = vec2(-f.y, f.x);
+        draw_triangle(c + f * 7.0, c - f * 4.0 + side * 4.0, c - f * 4.0 - side * 4.0, Color::new(1.0, 0.3, 0.25, 1.0));
+        draw_text("С", c.x - 4.0, y + 12.0, 16.0, WHITE);
+    }
+}
+
 pub struct MapView {
+    /// Последняя рамка карты на экране (для щелчков).
+    pub frame: (f32, f32, f32),
     pub center: Vec2,
     pub scale_i: usize,
     tex: Option<(Texture2D, Vec2, f32, Dim)>,
@@ -26,18 +79,22 @@ fn shade(c: [f32; 3], k: f32) -> [u8; 4] {
 
 /// Нарисовать участок мира: каждая точка — колонка генератора.
 fn render(seed: u32, dim: Dim, center: Vec2, scale: f32) -> Vec<u8> {
-    let mut px = vec![0u8; N * N * 4];
+    render_n(seed, dim, center, scale, N)
+}
+
+fn render_n(seed: u32, dim: Dim, center: Vec2, scale: f32, n: usize) -> Vec<u8> {
+    let mut px = vec![0u8; n * n * 4];
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(8);
-    let rows = N.div_ceil(threads);
+    let rows = n.div_ceil(threads);
     std::thread::scope(|sc| {
-        for (ci, part) in px.chunks_mut(rows * N * 4).enumerate() {
+        for (ci, part) in px.chunks_mut(rows * n * 4).enumerate() {
             sc.spawn(move || {
-                for (ly, line) in part.chunks_mut(N * 4).enumerate() {
+                for (ly, line) in part.chunks_mut(n * 4).enumerate() {
                     let j = ci * rows + ly;
-                    let wz = (center.y + (j as f32 - N as f32 / 2.0) * scale).floor() as i32;
+                    let wz = (center.y + (j as f32 - n as f32 / 2.0) * scale).floor() as i32;
                     let mut prev_h: Option<i32> = None;
-                    for i in 0..N {
-                        let wx = (center.x + (i as f32 - N as f32 / 2.0) * scale).floor() as i32;
+                    for i in 0..n {
+                        let wx = (center.x + (i as f32 - n as f32 / 2.0) * scale).floor() as i32;
                         let c = match dim {
                             Dim::Overworld => {
                                 let col = worldgen::column(seed, wx, wz);
@@ -92,7 +149,17 @@ pub struct Marker {
 
 impl MapView {
     pub fn new(center: Vec2) -> Self {
-        MapView { center, scale_i: 2, tex: None, pending: None, drag: None }
+        MapView { frame: (0.0, 0.0, 1.0), center, scale_i: 2, tex: None, pending: None, drag: None }
+    }
+
+    /// Точка мира под экранной точкой (если она на карте).
+    pub fn screen_to_world(&self, q: Vec2) -> Option<Vec2> {
+        let (x0, y0, size) = self.frame;
+        if q.x < x0 || q.y < y0 || q.x > x0 + size || q.y > y0 + size {
+            return None;
+        }
+        let ppu = size / N as f32;
+        Some(vec2(self.center.x + (q.x - x0 - size / 2.0) / ppu * self.scale(), self.center.y + (q.y - y0 - size / 2.0) / ppu * self.scale()))
     }
 
     pub fn scale(&self) -> f32 {
@@ -110,6 +177,7 @@ impl MapView {
         let ppu = size / N as f32; // экранных пикселей на пиксель карты
         let scale = self.scale();
         let to_screen = |p: Vec2, center: Vec2| vec2(x0 + size / 2.0 + (p.x - center.x) / scale * ppu, y0 + size / 2.0 + (p.y - center.y) / scale * ppu);
+        self.frame = (x0, y0, size);
         let to_world = |q: Vec2, center: Vec2| vec2(center.x + (q.x - x0 - size / 2.0) / ppu * scale, center.y + (q.y - y0 - size / 2.0) / ppu * scale);
 
         // ввод: масштаб, перетаскивание, центр на игроке
@@ -242,7 +310,7 @@ impl MapView {
         };
         let by = y0 + size + 24.0 * s;
         ui.text(&info, x0, by, 14.0, WHITE);
-        let help = format!("Колесо — масштаб (1 пикс. = {} бл.) · ЛКМ — двигать · Пробел — к себе · M или Esc — закрыть", scale);
+        let help = format!("Колесо — масштаб (1 пикс. = {} бл.) · ЛКМ — двигать · ПКМ — поставить/убрать метку · Пробел — к себе · M — закрыть", scale);
         ui.text(&help, x0, by + 20.0 * s, 12.0, GRAY);
         if let Some(name) = hover {
             ui.set_tooltip(name, Some("Постройка".into()));

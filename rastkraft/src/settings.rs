@@ -29,6 +29,9 @@ pub struct Settings {
     pub sound_vol: f32,
     /// Размер плитки текстур в пикселях: 8, 16, 32, 64, 128, 256 (применяется после перезапуска).
     pub tex_res: u32,
+    pub minimap: bool,
+    /// Внешность: рубашка, штаны, волосы, кожа (номера в палитрах).
+    pub look: [u8; 4],
 }
 
 impl Default for Settings {
@@ -55,6 +58,8 @@ impl Default for Settings {
             music_vol: 0.6,
             sound_vol: 0.8,
             tex_res: 16,
+            minimap: true,
+            look: [255; 4],
         }
     }
 }
@@ -101,6 +106,13 @@ impl Settings {
                 "music_vol" => s.music_vol = v.parse().unwrap_or(s.music_vol),
                 "sound_vol" => s.sound_vol = v.parse().unwrap_or(s.sound_vol),
                 "tex_res" => s.tex_res = v.parse().unwrap_or(s.tex_res),
+                "minimap" => s.minimap = b,
+                "look" => {
+                    let v: Vec<u8> = v.split(',').filter_map(|x| x.parse().ok()).collect();
+                    if v.len() == 4 {
+                        s.look = [v[0], v[1], v[2], v[3]];
+                    }
+                }
                 _ => {}
             }
         }
@@ -129,7 +141,7 @@ impl Settings {
 
     pub fn save(&self) {
         let text = format!(
-            "render_dist={}\nfov={}\nsensitivity={}\nbrightness={}\nfog={}\nclouds={}\nsmooth_light={}\nview_bob={}\nshow_fps={}\ngui_scale={}\ndifficulty={}\ninvert_mouse={}\npvp={}\nname={}\nrender_scale={}\nauto_dist={}\nopt_level={}\nfps_limit={}\nmusic_vol={}\nsound_vol={}\ntex_res={}\n",
+            "render_dist={}\nfov={}\nsensitivity={}\nbrightness={}\nfog={}\nclouds={}\nsmooth_light={}\nview_bob={}\nshow_fps={}\ngui_scale={}\ndifficulty={}\ninvert_mouse={}\npvp={}\nname={}\nrender_scale={}\nauto_dist={}\nopt_level={}\nfps_limit={}\nmusic_vol={}\nsound_vol={}\ntex_res={}\nminimap={}\nlook={},{},{},{}\n",
             self.render_dist,
             self.fov,
             self.sensitivity,
@@ -150,7 +162,12 @@ impl Settings {
             self.fps_limit,
             self.music_vol,
             self.sound_vol,
-            self.tex_res
+            self.tex_res,
+            self.minimap as u8,
+            self.look[0],
+            self.look[1],
+            self.look[2],
+            self.look[3]
         );
         let _ = std::fs::write(path(), text);
     }

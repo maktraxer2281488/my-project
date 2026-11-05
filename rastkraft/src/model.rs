@@ -396,6 +396,29 @@ pub struct PlayerLook {
     pub hair: Color,
 }
 
+pub const SHIRTS: [(u8, u8, u8); 8] = [(60, 120, 200), (200, 70, 60), (70, 160, 90), (230, 170, 40), (140, 80, 190), (40, 40, 50), (240, 240, 240), (240, 130, 170)];
+pub const PANTS: [(u8, u8, u8); 6] = [(50, 50, 90), (40, 40, 44), (110, 80, 50), (60, 100, 60), (150, 40, 40), (180, 180, 190)];
+pub const HAIRS: [(u8, u8, u8); 6] = [(70, 46, 30), (30, 26, 24), (200, 160, 80), (150, 60, 30), (230, 230, 230), (90, 60, 160)];
+pub const SKINS: [(u8, u8, u8); 5] = [(236, 190, 150), (200, 150, 110), (150, 100, 70), (250, 210, 180), (110, 70, 50)];
+
+/// Внешность из настроек (255 — выбрать по имени).
+pub fn look_with(choice: [u8; 4], seed: u32) -> PlayerLook {
+    let mut l = look_for(seed);
+    if choice[0] != 255 {
+        l.shirt = col(SHIRTS[choice[0] as usize % SHIRTS.len()]);
+    }
+    if choice[1] != 255 {
+        l.pants = col(PANTS[choice[1] as usize % PANTS.len()]);
+    }
+    if choice[2] != 255 {
+        l.hair = col(HAIRS[choice[2] as usize % HAIRS.len()]);
+    }
+    if choice[3] != 255 {
+        l.skin = col(SKINS[choice[3] as usize % SKINS.len()]);
+    }
+    l
+}
+
 pub fn look_for(seed: u32) -> PlayerLook {
     let h = |k| crate::blocks::hash(seed as i32, k, 4242);
     let shirts = [(60, 120, 200), (200, 70, 60), (70, 160, 90), (230, 170, 40), (140, 80, 190), (40, 40, 50)];

@@ -156,6 +156,11 @@ pub fn update_signals(app: &mut App, dim: Dim, c: IVec3) {
             }
         }
     }
+    if edits.iter().any(|(_, b)| *b == LAMP_ON) {
+        if let Some(g) = app.game.as_mut() {
+            g.unlock(crate::ach::ENGINEER);
+        }
+    }
     for (p, b) in edits {
         edit_block(app, dim, p, b, true);
     }
