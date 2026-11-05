@@ -28,6 +28,7 @@ mod shapes;
 mod skins;
 mod structures;
 mod touch;
+mod guide;
 mod packs;
 mod ui;
 mod workers;
@@ -410,6 +411,8 @@ struct App {
     export_rx: Option<std::sync::mpsc::Receiver<String>>,
     book_tab: usize,
     book_scroll: f32,
+    /// Открытая глава гайда.
+    guide_ch: usize,
     book_sel: Option<usize>,
     book_back: Vec<usize>,
     book_search: String,
@@ -4159,6 +4162,7 @@ async fn amain() {
         export_rx: None,
         book_tab: 0,
         book_scroll: 0.0,
+        guide_ch: 0,
         book_sel: None,
         book_back: Vec::new(),
         book_search: String::new(),
@@ -4604,6 +4608,8 @@ async fn amain() {
                             }
                             app.book_tab = std::env::var("RK_TAB").ok().and_then(|t| t.parse().ok()).unwrap_or(0);
                             app.book_sel = std::env::var("RK_BOOKSEL").ok().and_then(|t| t.parse().ok());
+                            app.book_tab = std::env::var("RK_BOOKTAB").ok().and_then(|t| t.parse().ok()).unwrap_or(app.book_tab);
+                            app.guide_ch = std::env::var("RK_GUIDE").ok().and_then(|t| t.parse().ok()).unwrap_or(0);
                             if let Ok(q) = std::env::var("RK_BOOKQ") {
                                 app.book_search = q;
                             }
@@ -4844,7 +4850,9 @@ fn open_recipe_book(app: &mut App) {
 }
 
 /// Разделы книги рецептов.
-const BOOK_TABS: [&str; 8] = ["Все", "Можно сделать", "Блоки", "Оружие", "Броня", "Еда", "Зелья", "Прочее"];
+const BOOK_TABS: [&str; 9] = ["Все", "Можно сделать", "Блоки", "Оружие", "Броня", "Еда", "Зелья", "Прочее", "Гайд"];
+/// Вкладка гайда в книге.
+const GUIDE_TAB: usize = 8;
 
 fn book_tab_of(r: &crafting::Recipe) -> usize {
     match r.out.0 {
@@ -4924,10 +4932,10 @@ fn recipe_book_screen(app: &mut App) -> Option<Screen> {
     } else {
         app.ui.text(&format!("{}{caret}", app.book_search), lx + 8.0 * s, sy + 19.0 * s, 14.0, ink);
     }
-    let tab_w = (lw - 3.0 * 6.0 * s) / 4.0;
+    let tab_w = (lw - 4.0 * 6.0 * s) / 5.0;
     for (i, name) in BOOK_TABS.iter().enumerate() {
-        let x = lx + (i % 4) as f32 * (tab_w + 6.0 * s);
-        let y = sy + 36.0 * s + (i / 4) as f32 * 30.0 * s;
+        let x = lx + (i % 5) as f32 * (tab_w + 6.0 * s);
+        let y = sy + 36.0 * s + (i / 5) as f32 * 30.0 * s;
         let hov = app.ui.hover(x, y, tab_w, 25.0 * s);
         let on = app.book_tab == i;
         draw_rectangle(x, y, tab_w, 25.0 * s, if on { Color::from_rgba(120, 80, 46, 255) } else if hov { Color::from_rgba(214, 196, 156, 255) } else { Color::from_rgba(224, 208, 170, 255) });
@@ -4936,6 +4944,82 @@ fn recipe_book_screen(app: &mut App) -> Option<Screen> {
             app.book_tab = i;
             app.book_scroll = 0.0;
         }
+    }
+    // ---------- гайд: главы слева, текст справа ----------
+    if app.book_tab == GUIDE_TAB {
+        let n = guide::CHAPTERS.len() + 1;
+        let top = sy + 104.0 * s;
+        let row = ((by + bh - 20.0 * s - top) / n as f32).min(26.0 * s);
+        for i in 0..n {
+            let title = if i < guide::CHAPTERS.len() { guide::CHAPTERS[i].title } else { "20. Все рецепты по станциям" };
+            let y = top + i as f32 * row;
+            let on = app.guide_ch == i;
+            let hov = app.ui.hover(lx, y, lw, row - 2.0 * s);
+            if on || hov {
+                draw_rectangle(lx, y, lw, row - 2.0 * s, if on { Color::from_rgba(214, 190, 140, 255) } else { Color::from_rgba(228, 214, 180, 255) });
+            }
+            app.ui.text(title, lx + 8.0 * s, y + row * 0.68, 13.0, if on { ink } else { faded });
+            if hov && app.ui.pressed {
+                app.guide_ch = i;
+                app.book_scroll = 0.0;
+            }
+        }
+        // текст главы с переносом строк и прокруткой
+        let rx = bx + half + 26.0 * s;
+        let rw = half - 52.0 * s;
+        let lines: Vec<String> = if app.guide_ch < guide::CHAPTERS.len() { guide::CHAPTERS[app.guide_ch].text.iter().map(|t| t.to_string()).collect() } else { guide::all_recipes_text() };
+        let title = if app.guide_ch < guide::CHAPTERS.len() { guide::CHAPTERS[app.guide_ch].title } else { "Все рецепты по станциям" };
+        app.ui.text(title, rx, by + 38.0 * s, 20.0, ink);
+        let mut wrapped: Vec<(String, bool)> = Vec::new();
+        for l in &lines {
+            let head = l.starts_with("==");
+            if l.is_empty() {
+                wrapped.push((String::new(), false));
+                continue;
+            }
+            let mut cur = String::new();
+            for word in l.split(' ') {
+                let tryw = if cur.is_empty() { word.to_string() } else { format!("{cur} {word}") };
+                if app.ui.measure(&tryw, 14.0) > rw && !cur.is_empty() {
+                    wrapped.push((std::mem::take(&mut cur), head));
+                    cur = word.to_string();
+                } else {
+                    cur = tryw;
+                }
+            }
+            wrapped.push((cur, head));
+            if app.guide_ch < guide::CHAPTERS.len() {
+                wrapped.push((String::new(), false));
+            }
+        }
+        let lh = 20.0 * s;
+        let area_top = by + 56.0 * s;
+        let area_h = by + bh - 30.0 * s - area_top;
+        let vis = (area_h / lh).floor().max(1.0) as usize;
+        let max_scroll = wrapped.len().saturating_sub(vis) as f32;
+        let wheel = mouse_wheel().1;
+        if wheel != 0.0 && app.ui.hover(bx + half, by, half, bh) {
+            app.book_scroll = (app.book_scroll - wheel.signum() * 3.0).clamp(0.0, max_scroll);
+        }
+        // перетаскивание пальцем / мышью
+        if app.ui.down && app.ui.hover(bx + half, area_top, half, area_h) {
+            let dy = mouse_delta_position().y * screen_height() / 2.0;
+            app.book_scroll = (app.book_scroll + dy / lh).clamp(0.0, max_scroll);
+        }
+        let first = app.book_scroll.floor() as usize;
+        for (k, (l, head)) in wrapped.iter().skip(first).take(vis).enumerate() {
+            app.ui.text(l, rx, area_top + (k as f32 + 0.8) * lh, 14.0, if *head { good } else { ink });
+        }
+        if max_scroll > 0.0 {
+            let kk = app.book_scroll / max_scroll;
+            draw_rectangle(bx + bw - 14.0 * s, area_top + kk * (area_h - 30.0 * s), 6.0 * s, 30.0 * s, faded);
+        }
+        app.ui.text("Колесо мыши или палец — листать. Esc — закрыть", rx, by + bh - 12.0 * s, 12.0, faded);
+        if !app.just_opened && (close || is_key_pressed(KeyCode::Escape)) {
+            return Some(Screen::Playing);
+        }
+        let _ = bad;
+        return None;
     }
     let q = app.book_search.to_lowercase();
     let list: Vec<usize> = (0..all.len())
