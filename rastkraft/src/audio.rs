@@ -34,9 +34,16 @@ fn cache_path(t: Track) -> Option<std::path::PathBuf> {
     Some(crate::save::data_dir().join("music_cache").join(format!("{}_v2.wav", t.file())))
 }
 
+/// Песни rtxx131, вшитые как есть (OGG): (мелодия, запись).
+const SONGS: &[(Track, &[u8])] = &[(Track::Menu, include_bytes!("../assets/music/menu_rtxx131.ogg"))];
+
 /// Готовая запись мелодии в WAV: вшитая, сохранённая ранее или сочинённая заново.
 /// Сочинённая в игре мелодия совпадает с записью байт в байт — качество то же.
 fn track_wav(t: Track) -> Vec<u8> {
+    // настоящая песня вместо сочинённой
+    if let Some(w) = SONGS.iter().find(|(st, _)| *st == t).and_then(|(_, b)| ogg_to_wav(b)) {
+        return w;
+    }
     match embedded(t) {
         Some(b) if EMBED_OGG => return ogg_to_wav(b).unwrap_or_else(|| music::wav(&music::render(t))),
         Some(b) => return b.to_vec(),
@@ -202,7 +209,7 @@ impl Audio {
             }
         } else if cur.is_none() {
             if let Some(w) = want {
-                if let Some(bytes) = embedded(w).filter(|_| !EMBED_OGG) {
+                if let Some(bytes) = embedded(w).filter(|_| !EMBED_OGG && !SONGS.iter().any(|(st, _)| *st == w)) {
                     self.start(w, bytes);
                     return;
                 }
@@ -326,5 +333,13 @@ mod tests {
         let b = track_wav(t);
         assert_eq!(a, b);
         assert!(t0.elapsed().as_secs_f32() < 1.0, "с диска должно быть быстро");
+    }
+
+    /// Песня rtxx131 читается и даёт ту же длину, что и файл (~32 с).
+    #[test]
+    fn rtx_song_decodes() {
+        let w = track_wav(Track::Menu);
+        let secs = wav_secs(&w);
+        assert!((secs - 31.8).abs() < 0.5, "{secs}");
     }
 }

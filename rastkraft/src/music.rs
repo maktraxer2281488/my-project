@@ -34,7 +34,7 @@ pub const TRACKS: [Track; 16] = [
 impl Track {
     pub fn title(self) -> &'static str {
         match self {
-            Track::Menu => "Расткрафт",
+            Track::Menu => "Расткрафт — rtxx131",
             Track::Meadow => "Утро на лугах",
             Track::Desert => "Песчаный караван",
             Track::Taiga => "Снег над тайгой",
