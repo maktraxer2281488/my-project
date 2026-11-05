@@ -14,3 +14,10 @@ opt-level = 3
 
 [profile.release]
 opt-level = 3
+
+# сборочный скрипт пишет музыку — пусть он тоже будет быстрым
+[profile.release.build-override]
+opt-level = 3
+
+[profile.dev.build-override]
+opt-level = 3

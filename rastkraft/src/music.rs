@@ -16,9 +16,20 @@ pub enum Track {
     Caves,
     Heaven,
     Boss,
+    Ocean,
+    Dawn,
+    Dusk,
+    Village,
+    Aurora,
+    Clouds,
+    Fury,
+    Workshop,
 }
 
-pub const TRACKS: [Track; 8] = [Track::Menu, Track::Meadow, Track::Desert, Track::Taiga, Track::Night, Track::Caves, Track::Heaven, Track::Boss];
+pub const TRACKS: [Track; 16] = [
+    Track::Menu, Track::Meadow, Track::Desert, Track::Taiga, Track::Night, Track::Caves, Track::Heaven, Track::Boss,
+    Track::Ocean, Track::Dawn, Track::Dusk, Track::Village, Track::Aurora, Track::Clouds, Track::Fury, Track::Workshop,
+];
 
 impl Track {
     pub fn title(self) -> &'static str {
@@ -31,6 +42,14 @@ impl Track {
             Track::Caves => "Глубина",
             Track::Heaven => "Небесные сады",
             Track::Boss => "Битва",
+            Track::Ocean => "Морской бриз",
+            Track::Dawn => "Рассвет",
+            Track::Dusk => "Закат над холмами",
+            Track::Village => "Деревенская ярмарка",
+            Track::Aurora => "Северное сияние",
+            Track::Clouds => "Над облаками",
+            Track::Fury => "Ярость",
+            Track::Workshop => "Мастерская",
         }
     }
     pub fn file(self) -> &'static str {
@@ -43,6 +62,14 @@ impl Track {
             Track::Caves => "06_caves",
             Track::Heaven => "07_heaven",
             Track::Boss => "08_boss",
+            Track::Ocean => "09_ocean",
+            Track::Dawn => "10_dawn",
+            Track::Dusk => "11_dusk",
+            Track::Village => "12_village",
+            Track::Aurora => "13_aurora",
+            Track::Clouds => "14_clouds",
+            Track::Fury => "15_fury",
+            Track::Workshop => "16_workshop",
         }
     }
 }
@@ -112,6 +139,7 @@ const MINOR: &[i32] = &[0, 2, 3, 5, 7, 8, 10];
 const HIJAZ: &[i32] = &[0, 1, 4, 5, 7, 8, 10];
 const LYDIAN: &[i32] = &[0, 2, 4, 6, 7, 9, 11];
 const DORIAN: &[i32] = &[0, 2, 3, 5, 7, 9, 10];
+const MIXO: &[i32] = &[0, 2, 4, 5, 7, 9, 10];
 
 fn song(t: Track) -> Song {
     match t {
@@ -123,6 +151,14 @@ fn song(t: Track) -> Song {
         Track::Caves => Song { bpm: 50.0, root: 49, scale: MINOR, prog: &[0, 0, 5, 0, 0, 1, 5, 0], seed: 67, pad: false, arp: None, melody: Some(Inst::Bell), bass: false, drums: 0, drone: true, drips: true, density: 0.2 },
         Track::Heaven => Song { bpm: 76.0, root: 65, scale: LYDIAN, prog: &[0, 1, 0, 6, 0, 1, 2, 4], seed: 79, pad: true, arp: Some(Inst::Bell), melody: Some(Inst::Flute), bass: false, drums: 0, drone: false, drips: false, density: 0.55 },
         Track::Boss => Song { bpm: 140.0, root: 50, scale: MINOR, prog: &[0, 5, 6, 0, 0, 5, 3, 4], seed: 97, pad: false, arp: Some(Inst::Pluck), melody: Some(Inst::Lead), bass: true, drums: 3, drone: false, drips: false, density: 0.85 },
+        Track::Ocean => Song { bpm: 72.0, root: 62, scale: MIXO, prog: &[0, 6, 3, 0, 0, 6, 4, 3], seed: 103, pad: true, arp: Some(Inst::Bell), melody: Some(Inst::Flute), bass: true, drums: 0, drone: false, drips: false, density: 0.5 },
+        Track::Dawn => Song { bpm: 66.0, root: 64, scale: MAJOR, prog: &[0, 3, 5, 4, 0, 3, 1, 4], seed: 109, pad: true, arp: Some(Inst::Bell), melody: Some(Inst::Bell), bass: false, drums: 0, drone: false, drips: false, density: 0.4 },
+        Track::Dusk => Song { bpm: 74.0, root: 58, scale: DORIAN, prog: &[0, 3, 0, 6, 0, 3, 4, 6], seed: 113, pad: true, arp: Some(Inst::Pluck), melody: Some(Inst::Flute), bass: true, drums: 0, drone: false, drips: false, density: 0.5 },
+        Track::Village => Song { bpm: 112.0, root: 65, scale: MAJOR, prog: &[0, 3, 4, 0, 5, 3, 4, 0], seed: 127, pad: false, arp: Some(Inst::Pluck), melody: Some(Inst::Flute), bass: true, drums: 1, drone: false, drips: false, density: 0.8 },
+        Track::Aurora => Song { bpm: 64.0, root: 54, scale: MINOR, prog: &[0, 5, 6, 4, 0, 5, 3, 6], seed: 131, pad: true, arp: Some(Inst::Bell), melody: Some(Inst::Bell), bass: false, drums: 0, drone: true, drips: false, density: 0.35 },
+        Track::Clouds => Song { bpm: 70.0, root: 62, scale: LYDIAN, prog: &[0, 1, 4, 0, 0, 1, 2, 4], seed: 137, pad: true, arp: Some(Inst::Pluck), melody: Some(Inst::Bell), bass: false, drums: 0, drone: false, drips: false, density: 0.45 },
+        Track::Fury => Song { bpm: 160.0, root: 52, scale: HIJAZ, prog: &[0, 1, 0, 6, 0, 1, 5, 6], seed: 149, pad: false, arp: Some(Inst::Pluck), melody: Some(Inst::Lead), bass: true, drums: 3, drone: true, drips: false, density: 0.9 },
+        Track::Workshop => Song { bpm: 100.0, root: 60, scale: MAJOR, prog: &[0, 4, 5, 3, 1, 4, 0, 4], seed: 151, pad: true, arp: Some(Inst::Pluck), melody: Some(Inst::Bell), bass: true, drums: 2, drone: false, drips: false, density: 0.65 },
     }
 }
 

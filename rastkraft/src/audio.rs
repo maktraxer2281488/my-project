@@ -6,6 +6,19 @@ use macroquad::audio::{self, PlaySoundParams, Sound};
 use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, channel};
 
+// готовые записи мелодий, вшитые в exe при сборке (см. build.rs)
+include!(concat!(env!("OUT_DIR"), "/music_embed.rs"));
+
+/// Вшитая запись мелодии, если есть.
+fn embedded(t: Track) -> Option<&'static [u8]> {
+    EMBEDDED.iter().find(|(n, _)| *n == t.file()).map(|(_, b)| *b)
+}
+
+/// Длительность WAV (16 бит, стерео, 44.1 кГц) в секундах.
+fn wav_secs(bytes: &[u8]) -> f32 {
+    (bytes.len().saturating_sub(44)) as f32 / 4.0 / music::RATE as f32
+}
+
 /// Выполнить «асинхронную» загрузку звука сразу: на ПК она не ждёт ничего.
 fn block_on<F: std::future::Future>(f: F) -> F::Output {
     let mut f = std::pin::pin!(f);
@@ -24,7 +37,11 @@ fn load(bytes: &[u8]) -> Option<Sound> {
 pub struct Audio {
     pub enabled: bool,
     current: Option<(Track, Sound)>,
-    want: Option<Track>,
+    /// Подходящие сейчас мелодии (по месту и времени).
+    want: &'static [Track],
+    /// Сколько ещё играть текущей мелодии до смены на следующую.
+    left: f32,
+    turn: usize,
     pending: Option<(Track, Receiver<Vec<u8>>)>,
     fade: f32,
     sent_vol: f32,
@@ -38,7 +55,7 @@ impl Audio {
         // на Linux без устройства звука (сервер, контейнер) звук не включаем
         let device = !cfg!(target_os = "linux") || std::path::Path::new("/dev/snd").exists();
         let enabled = device && std::env::var("RK_NOAUDIO").is_err();
-        let mut a = Audio { enabled, current: None, want: None, pending: None, fade: 0.0, sent_vol: -1.0, sfx: HashMap::new(), now_playing: None };
+        let mut a = Audio { enabled, current: None, want: &[], left: 0.0, turn: 0, pending: None, fade: 0.0, sent_vol: -1.0, sfx: HashMap::new(), now_playing: None };
         if enabled {
             for s in music::SFX {
                 if let Some(snd) = load(&music::wav(&music::render_sfx(s))) {
@@ -49,8 +66,19 @@ impl Audio {
         a
     }
 
-    pub fn want(&mut self, t: Option<Track>) {
-        self.want = t;
+    pub fn want(&mut self, set: &'static [Track]) {
+        self.want = set;
+    }
+
+    fn start(&mut self, w: Track, bytes: &[u8]) {
+        if let Some(s) = load(bytes) {
+            audio::play_sound(&s, PlaySoundParams { looped: true, volume: 0.0 });
+            self.sent_vol = 0.0;
+            self.fade = 0.0;
+            self.left = wav_secs(bytes);
+            self.current = Some((w, s));
+            self.now_playing = Some((format!("♪ {}", w.title()), 5.0));
+        }
     }
 
     pub fn play(&self, s: Sfx, volume: f32) {
@@ -73,7 +101,25 @@ impl Audio {
             return;
         }
         let cur = self.current.as_ref().map(|c| c.0);
-        let want = if music_vol > 0.01 { self.want } else { None };
+        self.left -= dt;
+        // мелодия доиграла — дальше следующая из подходящих (если их несколько)
+        let finished = cur.is_some() && self.left <= 0.0 && self.want.len() > 1;
+        let want = if music_vol <= 0.01 || self.want.is_empty() {
+            None
+        } else if let Some(c) = cur.filter(|c| self.want.contains(c) && !finished) {
+            Some(c)
+        } else {
+            let mut pick = self.want[self.turn % self.want.len()];
+            if Some(pick) == cur && self.want.len() > 1 {
+                self.turn += 1;
+                pick = self.want[self.turn % self.want.len()];
+            }
+            Some(pick)
+        };
+        if finished {
+            self.turn += 1;
+            self.left = f32::MAX;
+        }
         if cur.is_some() && cur != want {
             // затухание старой мелодии
             self.fade -= dt / 1.5;
@@ -85,17 +131,15 @@ impl Audio {
             }
         } else if cur.is_none() {
             if let Some(w) = want {
+                if let Some(bytes) = embedded(w) {
+                    self.start(w, bytes);
+                    return;
+                }
                 match &self.pending {
                     Some((pt, rx)) if *pt == w => {
                         if let Ok(bytes) = rx.try_recv() {
                             self.pending = None;
-                            if let Some(s) = load(&bytes) {
-                                audio::play_sound(&s, PlaySoundParams { looped: true, volume: 0.0 });
-                                self.sent_vol = 0.0;
-                                self.fade = 0.0;
-                                self.current = Some((w, s));
-                                self.now_playing = Some((format!("♪ {}", w.title()), 5.0));
-                            }
+                            self.start(w, &bytes);
                         }
                     }
                     _ => {
@@ -126,7 +170,8 @@ pub fn export_music() -> std::io::Result<std::path::PathBuf> {
     let dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("music"))).unwrap_or_else(|| "music".into());
     std::fs::create_dir_all(&dir)?;
     for t in music::TRACKS {
-        std::fs::write(dir.join(format!("{}.wav", t.file())), music::wav(&music::render(t)))?;
+        let bytes = embedded(t).map(|b| b.to_vec()).unwrap_or_else(|| music::wav(&music::render(t)));
+        std::fs::write(dir.join(format!("{}.wav", t.file())), bytes)?;
     }
     Ok(dir)
 }

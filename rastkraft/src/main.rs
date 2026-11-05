@@ -3236,10 +3236,10 @@ async fn main() {
             }
         }
         // музыка по обстановке и звуки кадра
-        let track = match (&app.game, app.screen) {
-            (None, _) | (_, Screen::Title | Screen::Worlds | Screen::NewWorld | Screen::Multiplayer) => Some(music::Track::Menu),
-            (Some(_), Screen::Loading) => None,
-            (Some(g), _) => Some(music_for(g)),
+        let track: &'static [music::Track] = match (&app.game, app.screen) {
+            (None, _) | (_, Screen::Title | Screen::Worlds | Screen::NewWorld | Screen::Multiplayer) => &[music::Track::Menu],
+            (Some(_), Screen::Loading) => &[],
+            (Some(g), _) => music_for(g),
         };
         app.audio.want(track);
         app.audio.update(dt, app.settings.music_vol);
@@ -3609,26 +3609,32 @@ fn recipe_book_screen(app: &mut App) -> Option<Screen> {
     None
 }
 
-/// Какая мелодия подходит к месту и времени.
-fn music_for(g: &Game) -> music::Track {
+/// Какие мелодии подходят к месту и времени (играют по очереди).
+fn music_for(g: &Game) -> &'static [music::Track] {
+    use music::Track as T;
     let p = g.player.body.pos;
-    if g.mobs.list.iter().any(|m| m.is_boss() && m.alive() && (m.body.pos - p).length() < 48.0) {
-        return music::Track::Boss;
+    if let Some(b) = g.mobs.list.iter().find(|m| m.is_boss() && m.alive() && (m.body.pos - p).length() < 48.0) {
+        return if b.enraged { &[T::Fury] } else { &[T::Boss, T::Fury] };
     }
     if g.dim == Dim::Heaven {
-        return music::Track::Heaven;
+        return &[T::Heaven, T::Clouds];
     }
     let (x, y, z) = (p.x.floor() as i32, (p.y + 1.6).floor() as i32, p.z.floor() as i32);
     if y < 56 && !g.world().sky_exposed(x, y, z) {
-        return music::Track::Caves;
+        return &[T::Caves];
     }
+    let biome = worldgen::column(g.seed, x, z).biome;
     if g.daylight() < 0.3 {
-        return music::Track::Night;
+        return if biome == worldgen::Biome::Taiga { &[T::Aurora, T::Night] } else { &[T::Night, T::Dusk] };
     }
-    match worldgen::column(g.seed, x, z).biome {
-        worldgen::Biome::Desert => music::Track::Desert,
-        worldgen::Biome::Taiga => music::Track::Taiga,
-        _ => music::Track::Meadow,
+    if g.creative {
+        return &[T::Workshop, T::Meadow, T::Village];
+    }
+    match biome {
+        worldgen::Biome::Desert => &[T::Desert, T::Dusk],
+        worldgen::Biome::Taiga => &[T::Taiga, T::Aurora],
+        worldgen::Biome::Ocean => &[T::Ocean, T::Dawn],
+        _ => &[T::Meadow, T::Village, T::Dawn],
     }
 }
 
