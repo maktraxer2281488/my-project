@@ -8,6 +8,119 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 
 pub const PORT: u16 = 7777;
+/// Порт ретранслятора для игры через интернет.
+pub const RELAY_PORT: u16 = 7780;
+
+// ---------- ретранслятор ----------
+// Запускается на компьютере с внешним адресом: `rastkraft --relay [порт]`.
+// Хозяин мира держит с ним управляющее соединение («HOST код»), гости приходят с «JOIN код»,
+// а для каждого гостя хозяин открывает отдельный канал («ACCEPT номер»), который ретранслятор
+// склеивает с гостем. Сами сообщения игры идут без изменений.
+
+/// Прочитать строку по одному байту (чтобы не забрать лишнего из потока).
+fn read_line_raw(s: &mut TcpStream) -> Option<String> {
+    let mut out = Vec::new();
+    let mut b = [0u8; 1];
+    while out.len() < 256 {
+        if s.read(&mut b).ok()? == 0 {
+            return None;
+        }
+        if b[0] == b'\n' {
+            return String::from_utf8(out).ok();
+        }
+        out.push(b[0]);
+    }
+    None
+}
+
+fn pipe(a: TcpStream, b: TcpStream) {
+    let (Ok(mut a2), Ok(mut b2)) = (a.try_clone(), b.try_clone()) else { return };
+    let (mut a, mut b) = (a, b);
+    std::thread::spawn(move || {
+        let _ = std::io::copy(&mut a, &mut b2);
+        let _ = b2.shutdown(std::net::Shutdown::Both);
+    });
+    std::thread::spawn(move || {
+        let _ = std::io::copy(&mut b, &mut a2);
+        let _ = a2.shutdown(std::net::Shutdown::Both);
+    });
+}
+
+/// Сервер-ретранслятор (без окна). Пишет журнал в relay.log рядом с программой.
+pub fn run_relay(port: u16) {
+    let log = |m: String| {
+        let path = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("relay.log"))).unwrap_or_else(|| "relay.log".into());
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            let _ = writeln!(f, "{m}");
+        }
+        println!("{m}");
+    };
+    let listener = match TcpListener::bind(("0.0.0.0", port)) {
+        Ok(l) => l,
+        Err(e) => {
+            log(format!("Не удалось занять порт {port}: {e}"));
+            return;
+        }
+    };
+    log(format!("Ретранслятор Расткрафта работает на порту {port}"));
+    let rooms: Arc<Mutex<HashMap<String, TcpStream>>> = Arc::new(Mutex::new(HashMap::new()));
+    let waiting: Arc<Mutex<HashMap<u32, TcpStream>>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut next_id: u32 = 1;
+    for mut s in listener.incoming().flatten() {
+        let _ = s.set_nodelay(true);
+        let Some(line) = read_line_raw(&mut s) else { continue };
+        let mut it = line.split_whitespace();
+        match (it.next(), it.next()) {
+            (Some("HOST"), Some(room)) => {
+                log(format!("Открыта комната {room}"));
+                rooms.lock().unwrap().insert(room.to_string(), s);
+            }
+            (Some("JOIN"), Some(room)) => {
+                let mut r = rooms.lock().unwrap();
+                let sent = r.get_mut(room).is_some_and(|ctrl| writeln!(ctrl, "NEW {next_id}").is_ok());
+                if sent {
+                    waiting.lock().unwrap().insert(next_id, s);
+                    log(format!("Гость {next_id} входит в комнату {room}"));
+                    next_id += 1;
+                } else {
+                    r.remove(room);
+                    log(format!("Комнаты {room} нет"));
+                }
+            }
+            (Some("ACCEPT"), Some(id)) => {
+                if let Some(guest) = id.parse().ok().and_then(|id: u32| waiting.lock().unwrap().remove(&id)) {
+                    pipe(s, guest);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Хозяин мира: зарегистрировать комнату на ретрансляторе и проводить гостей к своему серверу.
+pub fn relay_host(relay: &str, room: &str) -> std::io::Result<()> {
+    let addr = if relay.contains(':') { relay.to_string() } else { format!("{relay}:{RELAY_PORT}") };
+    let mut ctrl = TcpStream::connect(&addr)?;
+    writeln!(ctrl, "HOST {room}")?;
+    std::thread::spawn(move || {
+        while let Some(line) = read_line_raw(&mut ctrl) {
+            let Some(id) = line.strip_prefix("NEW ") else { continue };
+            let (addr, id) = (addr.clone(), id.trim().to_string());
+            std::thread::spawn(move || {
+                let Ok(mut up) = TcpStream::connect(&addr) else { return };
+                if writeln!(up, "ACCEPT {id}").is_err() {
+                    return;
+                }
+                if let Ok(local) = TcpStream::connect(("127.0.0.1", PORT)) {
+                    let _ = local.set_nodelay(true);
+                    let _ = up.set_nodelay(true);
+                    pipe(up, local);
+                }
+            });
+        }
+    });
+    Ok(())
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PState {
@@ -339,8 +452,15 @@ impl Net {
 
     /// Подключиться к хосту.
     pub fn join(addr: &str, name: &str) -> std::io::Result<Net> {
-        let addr = if addr.contains(':') { addr.to_string() } else { format!("{addr}:{PORT}") };
-        let s = TcpStream::connect(&addr)?;
+        // «адрес#КОД» — через ретранслятор
+        let (addr, room) = match addr.split_once('#') {
+            Some((a, r)) => (if a.contains(':') { a.to_string() } else { format!("{a}:{RELAY_PORT}") }, Some(r.trim().to_string())),
+            None => (if addr.contains(':') { addr.to_string() } else { format!("{addr}:{PORT}") }, None),
+        };
+        let mut s = TcpStream::connect(&addr)?;
+        if let Some(r) = &room {
+            writeln!(s, "JOIN {r}")?;
+        }
         let _ = s.set_nodelay(true);
         let (tx, rx) = channel();
         let r = s.try_clone()?;

@@ -32,6 +32,8 @@ pub struct Settings {
     pub minimap: bool,
     /// Внешность: рубашка, штаны, волосы, кожа (номера в палитрах).
     pub look: [u8; 4],
+    /// Адрес ретранслятора для игры через интернет.
+    pub relay: String,
 }
 
 impl Default for Settings {
@@ -60,6 +62,7 @@ impl Default for Settings {
             tex_res: 16,
             minimap: true,
             look: [255; 4],
+            relay: String::new(),
         }
     }
 }
@@ -107,6 +110,7 @@ impl Settings {
                 "sound_vol" => s.sound_vol = v.parse().unwrap_or(s.sound_vol),
                 "tex_res" => s.tex_res = v.parse().unwrap_or(s.tex_res),
                 "minimap" => s.minimap = b,
+                "relay" => s.relay = v.to_string(),
                 "look" => {
                     let v: Vec<u8> = v.split(',').filter_map(|x| x.parse().ok()).collect();
                     if v.len() == 4 {
@@ -141,7 +145,7 @@ impl Settings {
 
     pub fn save(&self) {
         let text = format!(
-            "render_dist={}\nfov={}\nsensitivity={}\nbrightness={}\nfog={}\nclouds={}\nsmooth_light={}\nview_bob={}\nshow_fps={}\ngui_scale={}\ndifficulty={}\ninvert_mouse={}\npvp={}\nname={}\nrender_scale={}\nauto_dist={}\nopt_level={}\nfps_limit={}\nmusic_vol={}\nsound_vol={}\ntex_res={}\nminimap={}\nlook={},{},{},{}\n",
+            "render_dist={}\nfov={}\nsensitivity={}\nbrightness={}\nfog={}\nclouds={}\nsmooth_light={}\nview_bob={}\nshow_fps={}\ngui_scale={}\ndifficulty={}\ninvert_mouse={}\npvp={}\nname={}\nrender_scale={}\nauto_dist={}\nopt_level={}\nfps_limit={}\nmusic_vol={}\nsound_vol={}\ntex_res={}\nminimap={}\nlook={},{},{},{}\nrelay={}\n",
             self.render_dist,
             self.fov,
             self.sensitivity,
@@ -167,7 +171,8 @@ impl Settings {
             self.look[0],
             self.look[1],
             self.look[2],
-            self.look[3]
+            self.look[3],
+            self.relay
         );
         let _ = std::fs::write(path(), text);
     }

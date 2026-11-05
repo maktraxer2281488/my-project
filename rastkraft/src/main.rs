@@ -84,6 +84,7 @@ enum Screen {
     Enchant,
     Achievements,
     Look,
+    Relay,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -2862,7 +2863,11 @@ fn pause_screen(app: &mut App) -> Option<Screen> {
             app.ui.text_center(&format!("{info} · игроков: {}", peers + 1), w / 2.0, y + bh * 0.6, 15.0, ACCENT);
         }
         None => {
-            if app.ui.button(bx, y, bw, bh, "Открыть для сети (PvP)") {
+            let half = (bw - 8.0 * s) / 2.0;
+            if app.ui.button(bx + half + 8.0 * s, y, half, bh, "Через интернет…") {
+                next = Some(Screen::Relay);
+            }
+            if app.ui.button(bx, y, half, bh, "Открыть для сети") {
                 match Net::host(&app.settings.name) {
                     Ok(n) => {
                         let g = app.game.as_mut().unwrap();
@@ -3248,7 +3253,7 @@ fn draw_hud(app: &mut App) {
         draw_rectangle(cx0, cy, cw, 20.0 * s, Color::new(0.0, 0.0, 0.0, 0.35));
         let yaw = g.player.yaw;
         let fov_h = 2.0;
-        let mut mark = |ang: f32, label: &str, col: Color, size: f32| {
+        let mark = |ang: f32, label: &str, col: Color, size: f32| {
             let mut d = ang - yaw;
             while d > std::f32::consts::PI {
                 d -= std::f32::consts::TAU;
@@ -3673,8 +3678,18 @@ async fn splash(font: &Font, prep: &std::thread::JoinHandle<()>) {
     }
 }
 
-#[macroquad::main(window_conf)]
-async fn main() {
+fn main() {
+    // режим ретранслятора для игры через интернет — без окна
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(i) = args.iter().position(|a| a == "--relay") {
+        let port = args.get(i + 1).and_then(|p| p.parse().ok()).unwrap_or(net::RELAY_PORT);
+        net::run_relay(port);
+        return;
+    }
+    macroquad::Window::from_config(window_conf(), amain());
+}
+
+async fn amain() {
     let font = load_ttf_font_from_bytes(include_bytes!("../assets/DejaVuSans-Bold.ttf")).expect("шрифт");
     // тяжёлая подготовка (атлас, рецепты) — в фоне, пока идёт заставка
     let prep = std::thread::spawn(|| {
@@ -3797,6 +3812,11 @@ async fn main() {
         if std::env::var("RK_HOST").is_ok() {
             if let Ok(n) = Net::host(&app.settings.name) {
                 app.game.as_mut().unwrap().net = Some(n);
+            }
+            if let Some((relay, room)) = std::env::var("RK_RELAY_HOST").ok().as_deref().and_then(|v| v.split_once('#')).map(|(a, b)| (a.to_string(), b.to_string())) {
+                if let Err(e) = net::relay_host(&relay, &room) {
+                    eprintln!("NETLOG relay error {e}");
+                }
             }
         }
     }
@@ -4038,6 +4058,7 @@ async fn main() {
             Screen::Enchant => enchant_screen(&mut app),
             Screen::Achievements => achievements_screen(&mut app),
             Screen::Look => look_screen(&mut app),
+            Screen::Relay => relay_screen(&mut app),
             Screen::Loading => {
                 let (w, h) = (screen_width(), screen_height());
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.07, 0.08, 0.1, 1.0));
@@ -4843,6 +4864,78 @@ fn look_screen(app: &mut App) -> Option<Screen> {
     if app.ui.button((w - 240.0 * s) / 2.0, h - 60.0 * s, 240.0 * s, 42.0 * s, "Готово") || is_key_pressed(KeyCode::Escape) {
         app.settings.save();
         return Some(Screen::Settings);
+    }
+    None
+}
+
+/// Открыть мир через ретранслятор: ввести его адрес, получить код комнаты.
+fn relay_screen(app: &mut App) -> Option<Screen> {
+    let (w, h) = (screen_width(), screen_height());
+    let s = app.ui.s;
+    draw_rectangle(0.0, 0.0, w, h, Color::new(0.03, 0.04, 0.06, 0.92));
+    app.ui.text_center("Игра через интернет", w / 2.0, 80.0 * s, 28.0, WHITE);
+    let lines = [
+        "Нужен ретранслятор — компьютер с внешним адресом (например, арендованный сервер).",
+        "На нём запустите: rastkraft --relay   (порт 7780 должен быть открыт).",
+        "Здесь впишите его адрес. Друг вводит в «Сетевой игре»: адрес#КОД.",
+    ];
+    for (i, l) in lines.iter().enumerate() {
+        app.ui.text_center(l, w / 2.0, 120.0 * s + i as f32 * 22.0 * s, 14.0, GRAY);
+    }
+    if !app.just_opened {
+        while let Some(c) = get_char_pressed() {
+            if !c.is_control() && app.settings.relay.chars().count() < 60 {
+                app.settings.relay.push(c);
+            }
+        }
+        if is_key_pressed(KeyCode::Backspace) {
+            app.settings.relay.pop();
+        }
+    } else {
+        while get_char_pressed().is_some() {}
+    }
+    let bw = 520.0 * s;
+    let bx = (w - bw) / 2.0;
+    let y = 200.0 * s;
+    draw_rectangle(bx, y, bw, 40.0 * s, Color::new(0.12, 0.13, 0.16, 1.0));
+    draw_rectangle_lines(bx, y, bw, 40.0 * s, 2.0, ACCENT);
+    let caret = if (app.time * 2.0).fract() < 0.5 { "|" } else { "" };
+    let shown = if app.settings.relay.is_empty() { format!("адрес ретранслятора, например 203.0.113.5{caret}") } else { format!("{}{caret}", app.settings.relay) };
+    app.ui.text(&shown, bx + 12.0 * s, y + 26.0 * s, 15.0, if app.settings.relay.is_empty() { GRAY } else { WHITE });
+    if app.ui.button(bx, y + 60.0 * s, bw, 44.0 * s, "Открыть мир через ретранслятор") && !app.settings.relay.is_empty() {
+        app.settings.save();
+        let room = format!("{:04}", (app.time * 7919.0) as u32 % 10000);
+        let relay = app.settings.relay.clone();
+        // сначала обычный сервер на этом компьютере, затем комната на ретрансляторе
+        let have_net = app.game.as_ref().is_some_and(|g| g.net.is_some());
+        let net_ok = have_net || match Net::host(&app.settings.name) {
+            Ok(n) => {
+                app.game.as_mut().unwrap().net = Some(n);
+                true
+            }
+            Err(e) => {
+                app.status = Some((format!("Не удалось открыть сервер: {e}"), 5.0));
+                false
+            }
+        };
+        if net_ok {
+            match net::relay_host(&relay, &room) {
+                Ok(()) => {
+                    let msg = format!("Код комнаты: {room}. Друг вводит: {relay}#{room}");
+                    let g = app.game.as_mut().unwrap();
+                    g.say(msg.clone());
+                    g.toast = Some((msg.clone(), 10.0));
+                    if let Some(n) = g.net.as_mut() {
+                        n.info = msg;
+                    }
+                    return Some(Screen::Playing);
+                }
+                Err(e) => app.status = Some((format!("Ретранслятор не отвечает: {e}"), 5.0)),
+            }
+        }
+    }
+    if app.ui.button(bx, y + 116.0 * s, bw, 44.0 * s, "Назад") || is_key_pressed(KeyCode::Escape) {
+        return Some(Screen::Paused);
     }
     None
 }
