@@ -324,6 +324,10 @@ pub const MOB_DROP2: u16 = EXTRA0 + EXTRA_COUNT;
 /// Предметы призыва боссов (по одному на босса).
 pub const SUMMON0: u16 = MOB_DROP2 + (crate::mobdefs::MOBS.len() as u16 - 100);
 pub const SUMMON_COUNT: u16 = 6;
+/// Вёдра (v0.15): пустое, с водой, с лавой.
+pub const BUCKET: u16 = SUMMON0 + SUMMON_COUNT;
+pub const WATER_BUCKET: u16 = BUCKET + 1;
+pub const LAVA_BUCKET: u16 = BUCKET + 2;
 
 /// Трофей существа.
 pub fn mob_drop(def: usize) -> u16 {
@@ -530,6 +534,10 @@ fn build_things() -> Vec<ThingDef> {
     t("Проклятый анкх", m, Horn, (250, 200, 60), (40, 90, 160));
     t("Кристалл вечной зимы", m, Gem, (140, 220, 255), (60, 120, 255));
     t("Чёрный нимб", m, Orb, (60, 50, 70), (255, 60, 60));
+    // v0.15
+    t("Ведро", m, Bucket, (190, 194, 204), (60, 60, 66));
+    t("Ведро воды", m, Bucket, (190, 194, 204), (60, 120, 220));
+    t("Ведро лавы", m, Bucket, (190, 194, 204), (250, 120, 30));
     v
 }
 
@@ -601,6 +609,8 @@ impl Item {
             Item::Tool(..) | Item::Armor(..) => 1,
             Item::Thing(RECIPE_BOOK) => 1,
             Item::Thing(t) if summon_boss(t).is_some() => 1,
+            Item::Thing(WATER_BUCKET | LAVA_BUCKET) => 1,
+            Item::Thing(BUCKET) => 16,
             Item::Thing(t) if matches!(thing(t).kind, TKind::Potion(..)) => 8,
             Item::Empty => 0,
             _ => 64,

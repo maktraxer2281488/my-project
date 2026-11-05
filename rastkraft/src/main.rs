@@ -14,6 +14,7 @@ mod model;
 mod audio;
 mod music;
 mod map;
+mod mech;
 mod net;
 mod opt;
 mod player;
@@ -89,6 +90,8 @@ enum Field {
 
 struct Game {
     worlds: [World; 2],
+    /// Механизмы и жидкости.
+    mech: mech::Mech,
     dim: Dim,
     seed: u32,
     name: String,
@@ -138,6 +141,7 @@ impl Game {
         player.starter_kit(creative);
         Game {
             worlds: [World::new(Dim::Overworld, seed), World::new(Dim::Heaven, seed.wrapping_add(17))],
+            mech: mech::Mech::default(),
             dim: Dim::Overworld,
             seed,
             name: name.to_string(),
@@ -715,8 +719,37 @@ fn process_net(app: &mut App) {
     } else {
         g.net = Some(n);
     }
+    let host_side = app.game.as_ref().is_some_and(|g| g.net.as_ref().is_some_and(|n| n.host));
     for (d, p, b) in edits {
+        let old = app.game.as_ref().map_or(AIR, |g| g.worlds[d as usize].get(p.x, p.y, p.z));
         edit_block(app, d, p, b, false);
+        // хозяин мира считает механизмы и воду и за правки гостей
+        if host_side {
+            after_edit(app, d, p, old, b);
+        }
+    }
+}
+
+/// После правки блока: пересчитать сигналы и разбудить жидкости рядом.
+fn after_edit(app: &mut App, dim: Dim, p: IVec3, old: u16, new: u16) {
+    let near = |f: &dyn Fn(u16) -> bool| {
+        app.game.as_ref().is_some_and(|g| {
+            let w = &g.worlds[dim as usize];
+            [IVec3::X, IVec3::NEG_X, IVec3::Y, IVec3::NEG_Y, IVec3::Z, IVec3::NEG_Z].iter().any(|d| {
+                let q = p + *d;
+                f(w.get(q.x, q.y, q.z))
+            })
+        })
+    };
+    let wake_fluid = fluid(old).is_some() || fluid(new).is_some() || new == AIR && near(&|b| fluid(b).is_some());
+    let wake_mech = mech::is_mech(old) || mech::is_mech(new) || near(&mech::is_mech);
+    if wake_fluid {
+        if let Some(g) = app.game.as_mut() {
+            g.mech.schedule(p);
+        }
+    }
+    if wake_mech {
+        mech::update_signals(app, dim, p);
     }
 }
 
@@ -1362,6 +1395,66 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                 g.player.eat_t = 0.0;
             }
             // двери, люки, калитки открываются по ПКМ (с Shift — ставим блок рядом)
+            // вёдра: набрать или вылить жидкость
+            if !used && rmb_p {
+                if let Item::Thing(t) = held {
+                    if t == items::BUCKET {
+                        // ищем источник воды или лавы по лучу
+                        let mut found = None;
+                        for k in 1..50 {
+                            let q = (eye + dir * (k as f32 * 0.1)).floor().as_ivec3();
+                            let bq = world.get(q.x, q.y, q.z);
+                            if matches!(bq, WATER | LAVA) {
+                                found = Some((q, bq));
+                                break;
+                            }
+                            if is_solid(bq) {
+                                break;
+                            }
+                        }
+                        if let Some((q, bq)) = found {
+                            edits.push((q, AIR));
+                            let sel = g.player.selected;
+                            g.player.inv.take_one(sel);
+                            let full = Item::Thing(if bq == WATER { items::WATER_BUCKET } else { items::LAVA_BUCKET });
+                            let left = g.player.inv.add(full, 1);
+                            if left > 0 {
+                                g.ents.spawn_drop(full, 1, g.player.body.pos + vec3(0.0, 1.0, 0.0), 0.3);
+                            }
+                            used = true;
+                        }
+                    } else if t == items::WATER_BUCKET || t == items::LAVA_BUCKET {
+                        if let Some((_, prev, _)) = target_block {
+                            let cur = world.get(prev.x, prev.y, prev.z);
+                            if cur == AIR || def(cur).shape == blocks::Shape::Cross || fluid(cur).is_some_and(|(_, l)| l > 0) {
+                                edits.push((prev, if t == items::WATER_BUCKET { WATER } else { LAVA }));
+                                if !creative {
+                                    let sel = g.player.selected;
+                                    g.player.inv.slots[sel] = Stack::new(Item::Thing(items::BUCKET), 1);
+                                }
+                                used = true;
+                            }
+                        }
+                    }
+                }
+            }
+            // рычаг и кнопка
+            if !used && rmb_p {
+                if let Some((h, _, b)) = target_block {
+                    match b {
+                        LEVER_OFF | LEVER_ON => {
+                            edits.push((h, if b == LEVER_OFF { LEVER_ON } else { LEVER_OFF }));
+                            used = true;
+                        }
+                        BUTTON => {
+                            edits.push((h, BUTTON_ON));
+                            g.mech.buttons.push((h, 1.0));
+                            used = true;
+                        }
+                        _ => {}
+                    }
+                }
+            }
             if !used && rmb_p && !is_key_down(KeyCode::LeftShift) {
                 if let Some((h, _, b)) = target_block {
                     if let Some(nb2) = shapes::toggled(b) {
@@ -1385,6 +1478,10 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                     let hit_t = block_hit.map_or(0.0, |(_, _, t)| t);
                     let hit_y = eye.y + dir.y * hit_t - prev.y as f32;
                     let mut nb = shapes::placed(nb, g.player.yaw, hit_y, prev.y < h.y);
+                    if nb == PUSHER0 {
+                        let d = if g.player.pitch < -0.8 { 4 } else { shapes::facing(g.player.yaw) as u16 };
+                        nb = PUSHER0 + d * 2;
+                    }
                     let mut at = prev;
                     let mut ok = replace;
                     // полублок на такой же полублок — целый блок
@@ -1443,6 +1540,12 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
         }
     }
     app.sfx.append(&mut sfx);
+    // механизмы и жидкости считает хозяин мира или одиночная игра
+    if app.game.as_ref().is_some_and(|g| !g.is_client()) {
+        let dim = app.game.as_ref().unwrap().dim;
+        mech::plates_and_buttons(app, dim, dt);
+        mech::fluid_tick(app, dim, dt);
+    }
 
     let dim = app.game.as_ref().unwrap().dim;
     for (_, b) in &edits {
@@ -1458,8 +1561,13 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                 }
             }
         }
-        let old_form = app.game.as_ref().and_then(|g| shapes::form(g.world().get(p.x, p.y, p.z)));
+        let old_b = app.game.as_ref().map_or(AIR, |g| g.world().get(p.x, p.y, p.z));
+        let old_form = shapes::form(old_b);
         edit_block(app, dim, p, b, true);
+        let simulate = app.game.as_ref().is_some_and(|g| !g.is_client());
+        if simulate {
+            after_edit(app, dim, p, old_b, b);
+        }
         // сломали половину двери — вторая тоже исчезает
         if b == AIR {
             if let Some(shapes::Form::Door { upper, .. }) = old_form {
@@ -3308,6 +3416,34 @@ async fn main() {
                         }
                         for (q, b) in put {
                             edit_block(&mut app, dim, q, b, false);
+                        }
+                    }
+                }
+                // испытание механизмов и воды
+                if std::env::var("RK_MECH").is_ok() && (shot_frames == 25 || shot_frames == 32) {
+                    if let Some(g) = app.game.as_ref() {
+                        let p = g.player.body.pos.floor().as_ivec3();
+                        let dim = g.dim;
+                        let gy = g.world().surface_y(p.x + 6, p.z);
+                        let base = ivec3(p.x + 6, gy, p.z - 4);
+                        if shot_frames == 25 {
+                            let mut put: Vec<(IVec3, u16)> = vec![(base, LEVER_OFF)];
+                            for k in 1..6 {
+                                put.push((base + ivec3(0, 0, k), shapes::WIRE0));
+                            }
+                            put.push((base + ivec3(0, 0, 6), LAMP_OFF));
+                            put.push((base + ivec3(1, 0, 3), PUSHER0));
+                            put.push((base + ivec3(2, 0, 3), BRICKS));
+                            put.push((base + ivec3(-1, 0, 5), shapes::id(shapes::Form::Door { m: 11, dir: 0, open: false, upper: false })));
+                            put.push((base + ivec3(-1, 1, 5), shapes::id(shapes::Form::Door { m: 11, dir: 0, open: false, upper: true })));
+                            put.push((base + ivec3(0, 3, 10), WATER));
+                            for (q, b) in put {
+                                edit_block(&mut app, dim, q, b, false);
+                                after_edit(&mut app, dim, q, AIR, b);
+                            }
+                        } else {
+                            edit_block(&mut app, dim, base, LEVER_ON, false);
+                            after_edit(&mut app, dim, base, LEVER_OFF, LEVER_ON);
                         }
                     }
                 }

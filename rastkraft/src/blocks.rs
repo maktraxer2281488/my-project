@@ -320,7 +320,41 @@ pub const PAPER_LANTERN: u16 = 378;
 pub const WEAPON_RACK: u16 = 379;
 pub const TAPESTRY: u16 = 380;
 pub const RUG_BLOCK: u16 = 381;
-pub const BLOCK_COUNT: usize = crate::shapes::FORM_END as usize;
+// ---- v0.15: механизмы и текучие жидкости ----
+pub const LEVER_OFF: u16 = crate::shapes::FORM_END;
+pub const LEVER_ON: u16 = LEVER_OFF + 1;
+pub const BUTTON: u16 = LEVER_OFF + 2;
+pub const BUTTON_ON: u16 = LEVER_OFF + 3;
+pub const LAMP_OFF: u16 = LEVER_OFF + 4;
+pub const LAMP_ON: u16 = LEVER_OFF + 5;
+pub const SIGNAL_BLOCK: u16 = LEVER_OFF + 6;
+/// Толкатель: 5 направлений (+x, −x, +z, −z, вверх) × (покой, сработал).
+pub const PUSHER0: u16 = LEVER_OFF + 7;
+/// Текущая вода, уровни 1..7 (чем больше, тем дальше от источника).
+pub const WATER_FLOW1: u16 = PUSHER0 + 10;
+/// Текущая лава, уровни 1..3.
+pub const LAVA_FLOW1: u16 = WATER_FLOW1 + 7;
+pub const BLOCK_COUNT: usize = (LAVA_FLOW1 + 3) as usize;
+
+/// Уровень жидкости: (вода?, уровень; 0 — источник).
+pub fn fluid(b: u16) -> Option<(bool, u8)> {
+    match b {
+        WATER => Some((true, 0)),
+        LAVA => Some((false, 0)),
+        _ if (WATER_FLOW1..WATER_FLOW1 + 7).contains(&b) => Some((true, (b - WATER_FLOW1 + 1) as u8)),
+        _ if (LAVA_FLOW1..LAVA_FLOW1 + 3).contains(&b) => Some((false, (b - LAVA_FLOW1 + 1) as u8)),
+        _ => None,
+    }
+}
+
+pub fn fluid_block(water: bool, level: u8) -> u16 {
+    match (water, level) {
+        (true, 0) => WATER,
+        (false, 0) => LAVA,
+        (true, l) => WATER_FLOW1 + (l.min(7) - 1) as u16,
+        (false, l) => LAVA_FLOW1 + (l.min(3) - 1) as u16,
+    }
+}
 
 pub fn is_leaves(b: u16) -> bool {
     matches!(b, OAK_LEAVES | SPRUCE_LEAVES | BIRCH_LEAVES | SAKURA_LEAVES | PALM_LEAVES | GOLDEN_LEAVES | MAPLE_LEAVES | EBONY_LEAVES | WILLOW_LEAVES | ACACIA_LEAVES | MANGROVE_LEAVES | CEDAR_LEAVES)
@@ -1460,6 +1494,7 @@ fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
     put(BONE_BLOCK, "Костяной блок", [bt2, t, bt2], Cube, 1.5, Pickaxe, Decor, 0);
 
 
+
     // ===================== v0.9: новые блоки =====================
     let oak_pl = || t_planks(rgb(196, 152, 96), 510);
     // породы деревьев: (бревно, имена, кора, древесина, листва, вкрапления)
@@ -1866,17 +1901,102 @@ fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
                 Form::Fence { .. } => "Забор",
                 Form::Gate { .. } => "Калитка",
                 Form::Pane => "Стеклянная панель",
+                _ => "Блок",
             };
             let name = if f == Form::Pane { kind.to_string() } else { format!("{kind}: {}", bd.name.to_lowercase()) };
             let cat = if !canon { Cat::Hidden } else if matches!(f, Form::Slab { .. } | Form::Stairs { .. }) { Cat::Building } else { Cat::Decor };
             let hard = if matches!(f, Form::Pane) { 0.3 } else { bd.hardness * 0.8 };
             defs[b as usize] = Some(BlockDef { name: leak(name), tex: bd.tex, shape: Shape::Form, solid: false, light: 0, hardness: hard, tool: bd.tool, cat });
         };
-        for b in sh::SLAB0..sh::FORM_END {
+        for b in sh::SLAB0..sh::PLATE0 {
             let f = sh::form(b).unwrap();
             reg_form(b, f, &mut defs);
         }
         door_tex_out = door_tex;
+    }
+    // ===================== v0.15: механизмы и жидкости =====================
+    {
+        let st = defs[STONE as usize].as_ref().unwrap().tex;
+        let wt = defs[WATER as usize].as_ref().unwrap().tex;
+        let lt = defs[LAVA as usize].as_ref().unwrap().tex;
+        let mut put = |id: u16, name: &'static str, tex: [u16; 3], shape: Shape, hardness: f32, tool: ToolNeed, cat: Cat, light: u8| {
+            let solid = matches!(shape, Shape::Cube | Shape::Cutout);
+            defs[id as usize] = Some(BlockDef { name, tex, shape, solid, light, hardness, tool, cat });
+        };
+        let wood = rgb(120, 82, 44);
+        let lever = |on: bool| move |x: i32, y: i32| {
+            let base = y >= 12 && (4..=11).contains(&x);
+            let (hx, hy) = if on { (11 - (15 - y) / 2, y) } else { (4 + (15 - y) / 2, y) };
+            let handle = y >= 2 && y < 12 && (x - hx).abs() <= 0 && hy >= 2;
+            let knob = y <= 3 && ((on && (10..=12).contains(&x)) || (!on && (3..=5).contains(&x)));
+            if base { rgb(110, 112, 118) } else if knob { if on { rgb(250, 80, 60) } else { rgb(140, 40, 30) } } else if handle { wood } else { CLEAR }
+        };
+        let t = a.add(lever(false));
+        put(LEVER_OFF, "Рычаг", [t; 3], Cross, 0.3, Any, Decor, 0);
+        let t = a.add(lever(true));
+        put(LEVER_ON, "Рычаг (вкл.)", [t; 3], Cross, 0.3, Any, Hidden, 0);
+        let button = |on: bool| move |x: i32, y: i32| {
+            let r = ((x as f32 - 7.5).powi(2) + (y as f32 - 9.5).powi(2)).sqrt();
+            if r < 3.5 { if on { rgb(250, 200, 80) } else { rgb(150, 150, 156) } } else if r < 4.6 && y >= 6 { rgb(80, 80, 86) } else { CLEAR }
+        };
+        let t = a.add(button(false));
+        put(BUTTON, "Кнопка", [t; 3], Cross, 0.3, Any, Decor, 0);
+        let t = a.add(button(true));
+        put(BUTTON_ON, "Кнопка (нажата)", [t; 3], Cross, 0.3, Any, Hidden, 0);
+        let lamp = |on: bool| move |x: i32, y: i32| {
+            let frame = x == 0 || y == 0 || x == 15 || y == 15 || x == 7 || y == 7;
+            if frame { rgb(90, 70, 50) } else if on { mix(rgb(255, 210, 120), rgb(255, 250, 220), hash(x, y, 1301)) } else { shade(rgb(120, 80, 50), 0.8 + hash(x, y, 1302) * 0.2) }
+        };
+        let t = a.add(lamp(false));
+        put(LAMP_OFF, "Сигнальная лампа", [t; 3], Cube, 0.5, Any, Decor, 0);
+        let t = a.add(lamp(true));
+        put(LAMP_ON, "Сигнальная лампа (горит)", [t; 3], Cube, 0.5, Any, Hidden, 15);
+        let t = a.add(move |x, y| {
+            let (d1, _, _) = cells(x, y, 1303, 4);
+            if d1 < 1.0 { rgb(255, 90, 70) } else { shade(rgb(180, 30, 30), 0.85 + hash(x, y, 1304) * 0.2) }
+        });
+        put(SIGNAL_BLOCK, "Блок сигнала", [t; 3], Cube, 1.5, Pickaxe, Decor, 0);
+        // толкатель: лицевая сторона с поршнем, бока — доски с железом
+        let face = a.add(move |x, y| {
+            let edge = x <= 1 || y <= 1 || x >= 14 || y >= 14;
+            if edge { rgb(110, 112, 118) } else { shade(rgb(196, 152, 96), 0.9 + hash(x / 4, y, 1305) * 0.15) }
+        });
+        let face_on = a.add(move |x, y| {
+            let edge = x <= 1 || y <= 1 || x >= 14 || y >= 14;
+            if edge { rgb(110, 112, 118) } else if (6..=9).contains(&x) && (6..=9).contains(&y) { rgb(200, 200, 210) } else { shade(rgb(196, 152, 96), 0.75) }
+        });
+        let side = a.add(move |x, y| {
+            if y <= 3 { shade(rgb(196, 152, 96), 0.9 + hash(x / 4, y, 1306) * 0.15) } else if y == 4 { rgb(80, 80, 86) } else { t_cobble(rgb(130, 132, 140), None, 1307)(x, y) }
+        });
+        let back = a.add(t_cobble(rgb(120, 122, 130), None, 1308));
+        for d in 0..5u16 {
+            for on in 0..2u16 {
+                let f = if on == 1 { face_on } else { face };
+                let tex = if d == 4 { [f, side, back] } else { [side, side, back] };
+                let name = if d == 0 && on == 0 { "Толкатель" } else { "Толкатель (вариант)" };
+                let cat = if d == 0 && on == 0 { Decor } else { Hidden };
+                put(PUSHER0 + d * 2 + on, name, tex, Cube, 1.5, Pickaxe, cat, 0);
+            }
+        }
+        // провод и плита — фигурные
+        let wire = |on: bool| move |x: i32, y: i32| {
+            let line = (7..=8).contains(&x) || (7..=8).contains(&y);
+            let dot = ((x - 7) as f32 + 0.5).abs() < 2.5 && ((y - 7) as f32 + 0.5).abs() < 2.5;
+            if line || dot { if on { mix(rgb(255, 60, 40), rgb(255, 180, 120), hash(x, y, 1309) * 0.4) } else { shade(rgb(110, 20, 20), 0.9 + hash(x, y, 1310) * 0.2) } } else { CLEAR }
+        };
+        let t = a.add(wire(false));
+        put(crate::shapes::WIRE0, "Сигнальный провод", [t; 3], Form, 0.1, Any, Decor, 0);
+        let t = a.add(wire(true));
+        put(crate::shapes::WIRE0 + 1, "Сигнальный провод (вкл.)", [t; 3], Form, 0.1, Any, Hidden, 0);
+        put(crate::shapes::PLATE0, "Нажимная плита", st, Form, 0.5, Pickaxe, Decor, 0);
+        put(crate::shapes::PLATE0 + 1, "Нажимная плита (нажата)", st, Form, 0.5, Pickaxe, Hidden, 0);
+        // текущие жидкости — те же текстуры
+        for l in 0..7 {
+            put(WATER_FLOW1 + l, "Текущая вода", wt, Liquid, 0.0, Any, Hidden, 0);
+        }
+        for l in 0..3 {
+            put(LAVA_FLOW1 + l, "Текущая лава", lt, Liquid, 0.0, Any, Hidden, 13 - l as u8 * 2);
+        }
     }
     // портал проходим насквозь
     let portal = defs[PORTAL as usize].as_mut().unwrap();

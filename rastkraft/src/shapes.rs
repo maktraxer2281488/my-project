@@ -28,7 +28,9 @@ pub const TRAP0: u16 = DOOR0 + 12 * 16;
 pub const FENCE0: u16 = TRAP0 + 12 * 16;
 pub const GATE0: u16 = FENCE0 + 11;
 pub const PANE: u16 = GATE0 + 11 * 4;
-pub const FORM_END: u16 = PANE + 1;
+pub const PLATE0: u16 = PANE + 1;
+pub const WIRE0: u16 = PLATE0 + 2;
+pub const FORM_END: u16 = WIRE0 + 2;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Form {
@@ -41,6 +43,10 @@ pub enum Form {
     /// axis 0 — калитка поперёк оси z (перегораживает проход по z), 1 — поперёк x.
     Gate { m: u8, axis: u8, open: bool },
     Pane,
+    /// Нажимная плита.
+    Plate { on: bool },
+    /// Сигнальный провод.
+    Wire { on: bool },
 }
 
 pub fn form(b: u16) -> Option<Form> {
@@ -64,8 +70,12 @@ pub fn form(b: u16) -> Option<Form> {
     } else if b < PANE {
         let k = b - GATE0;
         Form::Gate { m: (k / 4) as u8, axis: ((k % 4) / 2) as u8, open: k % 2 == 1 }
-    } else {
+    } else if b == PANE {
         Form::Pane
+    } else if b < WIRE0 {
+        Form::Plate { on: b == PLATE0 + 1 }
+    } else {
+        Form::Wire { on: b == WIRE0 + 1 }
     };
     Some(f)
 }
@@ -79,6 +89,8 @@ pub fn id(f: Form) -> u16 {
         Form::Fence { m } => FENCE0 + m as u16,
         Form::Gate { m, axis, open } => GATE0 + m as u16 * 4 + axis as u16 * 2 + open as u16,
         Form::Pane => PANE,
+        Form::Plate { on } => PLATE0 + on as u16,
+        Form::Wire { on } => WIRE0 + on as u16,
     }
 }
 
@@ -90,6 +102,8 @@ pub fn canon(b: u16) -> u16 {
         Some(Form::Door { m, .. }) => id(Form::Door { m, dir: 0, open: false, upper: false }),
         Some(Form::Trapdoor { m, .. }) => id(Form::Trapdoor { m, dir: 0, open: false, top: false }),
         Some(Form::Gate { m, .. }) => id(Form::Gate { m, axis: 0, open: false }),
+        Some(Form::Plate { .. }) => PLATE0,
+        Some(Form::Wire { .. }) => WIRE0,
         _ => b,
     }
 }
@@ -101,6 +115,8 @@ pub fn base(f: Form) -> u16 {
         Form::Door { m, .. } | Form::Trapdoor { m, .. } => DOOR_MATS[m as usize],
         Form::Fence { m } | Form::Gate { m, .. } => FENCE_MATS[m as usize],
         Form::Pane => GLASS,
+        Form::Plate { .. } => STONE,
+        Form::Wire { on } => WIRE0 + on as u16,
     }
 }
 
@@ -222,6 +238,16 @@ pub fn boxes(f: Form, conn: [bool; 4], collide: bool, out: &mut Vec<Bx>) {
                 }
             }
         }
+        Form::Plate { on } => {
+            if !collide {
+                out.push((vec3(P, 0.0, P), vec3(15.0 * P, if on { 0.5 * P } else { P }, 15.0 * P)));
+            }
+        }
+        Form::Wire { .. } => {
+            if !collide {
+                out.push((Vec3::ZERO, vec3(1.0, 0.5 * P, 1.0)));
+            }
+        }
         Form::Pane => {
             out.push((vec3(7.0 * P, 0.0, 7.0 * P), vec3(9.0 * P, 1.0, 9.0 * P)));
             let any = conn.iter().any(|c| *c);
@@ -262,5 +288,5 @@ pub fn conn_at(get: impl Fn(i32, i32, i32) -> u16, f: Form, x: i32, y: i32, z: i
 
 /// Двери, люки и панели рисуются с прозрачностью.
 pub fn cutout(f: Form) -> bool {
-    matches!(f, Form::Door { .. } | Form::Trapdoor { .. } | Form::Pane)
+    matches!(f, Form::Door { .. } | Form::Trapdoor { .. } | Form::Pane | Form::Wire { .. })
 }

@@ -71,6 +71,7 @@ pub enum Icon {
     Scroll,
     Gear,
     Pearl,
+    Bucket,
 }
 
 fn hsh(x: i32, y: i32, s: u32) -> f32 {
@@ -485,6 +486,16 @@ fn region(icon: Icon, xi: i32, yi: i32) -> u8 {
             let a = dy.atan2(dx);
             let tooth = (a * 8.0 / std::f32::consts::TAU * 2.0).rem_euclid(2.0) < 1.0;
             if r < 2.0 { 0 } else if r < 5.0 || (r < 6.6 && tooth) { if dx < 0.0 && dy < 0.0 { 3 } else { 1 } } else { 0 }
+        }
+        Bucket => {
+            let inside = y > 4.0 && y < 14.0 && (x - 8.0).abs() < 5.5 - (y - 4.0) * 0.12;
+            if inside {
+                if y < 6.5 { 2 } else if (x - 8.0).abs() > 4.3 - (y - 4.0) * 0.12 { 3 } else { 1 }
+            } else if seg(x, y, 3.0, 5.0, 8.0, 1.5).0 < 0.6 || seg(x, y, 13.0, 5.0, 8.0, 1.5).0 < 0.6 {
+                3
+            } else {
+                0
+            }
         }
         Pearl => {
             if ell(x, y, 8.0, 8.5, 4.5, 4.5) {

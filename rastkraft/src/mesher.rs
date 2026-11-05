@@ -282,7 +282,8 @@ struct Key {
     tile: u16,
     light: [u8; 4],
     pass: Pass,
-    lowered: bool,
+    /// Насколько опущена поверхность жидкости (в восьмых блока).
+    drop: u8,
 }
 
 const SX: usize = CS as usize;
@@ -338,8 +339,14 @@ pub fn build(n: &Nbhd, smooth: bool) -> MeshData {
                     continue;
                 }
                 let liquid = d.shape == Shape::Liquid;
-                let lowered = liquid && n.get(x, y + 1, z) != b;
-                let to_water = b == WATER;
+                // поверхность жидкости ниже, чем дальше от источника
+                let fl = fluid(b);
+                let drop: u8 = match fl {
+                    Some((w, lvl)) if fluid(n.get(x, y + 1, z)).is_none_or(|(w2, _)| w2 != w) => (1 + lvl * if w { 1 } else { 2 }).min(7),
+                    _ => 0,
+                };
+                let lowered = drop > 0;
+                let to_water = fl.is_some_and(|(w, _)| w);
                 let leaves = is_leaves(b);
                 let pass = if to_water {
                     Pass::Water
@@ -416,7 +423,7 @@ pub fn build(n: &Nbhd, smooth: bool) -> MeshData {
                     let uniform = lights.iter().all(|l| *l == lights[0]);
                     let mergeable = uniform && !(liquid && fi != 2);
                     if mergeable {
-                        mask[mi(fi, x, y, z)] = Some(Key { tile, light: lights[0], pass, lowered });
+                        mask[mi(fi, x, y, z)] = Some(Key { tile, light: lights[0], pass, drop });
                         continue;
                     }
                     // одиночная грань
@@ -426,7 +433,7 @@ pub fn build(n: &Nbhd, smooth: bool) -> MeshData {
                     for (i, c) in corners.iter().enumerate() {
                         let mut cy = c[1];
                         if lowered && cy > 0.5 {
-                            cy = 0.875;
+                            cy = 1.0 - drop as f32 / 8.0;
                         }
                         q[i] = V::new([x as f32 + c[0], y as f32 + cy, z as f32 + c[2]], uvs[i], org, lights[i]);
                     }
@@ -499,8 +506,8 @@ pub fn build(n: &Nbhd, smooth: bool) -> MeshData {
                         pos[na] = sl as f32 + c[na];
                         pos[ta] = a0 as f32 + c[ta] * w as f32;
                         pos[tb] = b0 as f32 + c[tb] * h as f32;
-                        if key.lowered && fi == 2 {
-                            pos[1] -= 0.125;
+                        if key.drop > 0 && fi == 2 {
+                            pos[1] -= key.drop as f32 / 8.0;
                         }
                         let u = if c[uax] == corners[1][uax] { eu } else { 0.0 };
                         let v = if c[vax] == corners[0][vax] { ev } else { 0.0 };

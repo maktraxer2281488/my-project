@@ -444,6 +444,15 @@ fn build() -> Vec<Recipe> {
             r((b(sh::id(Form::Gate { m, axis: 0, open: false })), 1), &[(b(mat), 2), (t(it::STICK), 4)], Workbench);
         }
         r((b(sh::PANE), 16), &[(b(GLASS), 6)], Workbench);
+        // механизмы
+        r((b(LEVER_OFF), 1), &[(t(it::STICK), 1), (b(COBBLE), 1)], Hand);
+        r((b(BUTTON), 1), &[(b(STONE), 1)], Hand);
+        r((b(sh::PLATE0), 1), &[(b(STONE), 2)], Workbench);
+        r((b(sh::WIRE0), 8), &[(t(it::COPPER_INGOT), 1), (t(it::COAL), 1)], Workbench);
+        r((b(LAMP_OFF), 1), &[(b(GLOWSTONE), 1), (b(sh::WIRE0), 4)], Workbench);
+        r((b(SIGNAL_BLOCK), 1), &[(t(it::RUBY), 1), (t(it::COPPER_INGOT), 4)], Anvil);
+        r((b(PUSHER0), 1), &[(b(OAK_PLANKS), 3), (b(COBBLE), 4), (t(it::IRON_INGOT), 1), (b(sh::WIRE0), 1)], Workbench);
+        r((t(it::BUCKET), 1), &[(t(it::IRON_INGOT), 3)], Workbench);
     }
     // ===== v0.11: призыв боссов =====
     use crate::mobdefs::by_name;
