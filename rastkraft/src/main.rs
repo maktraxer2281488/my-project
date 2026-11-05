@@ -3447,6 +3447,36 @@ fn draw_hud(app: &mut App) {
         let a = (1.0 - g.sleep_t / 2.5).clamp(0.0, 1.0);
         draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.03, a * 0.95));
     }
+    // табличка существа под прицелом: имя, характер, здоровье
+    if app.screen == Screen::Playing {
+        let eye = g.player.eye();
+        let dir = g.player.forward();
+        let wall = g.world().raycast(eye, dir, 16.0).map_or(16.0, |(b, _, _)| (b.as_vec3() + Vec3::splat(0.5) - eye).length());
+        let target = g.mobs.list.iter().filter(|m| m.alive()).filter_map(|m| m.ray_hit(eye, dir).filter(|t| *t < 16.0 && *t < wall + 0.5).map(|t| (m, t))).min_by(|a, b| a.1.total_cmp(&b.1));
+        if let Some((m, _)) = target {
+            let d = &mobdefs::MOBS[m.def];
+            let (kind, col) = if d.flags & mobdefs::BOSS != 0 {
+                ("босс", Color::new(1.0, 0.3, 0.9, 1.0))
+            } else if d.friendly && d.flags & mobdefs::NEUTRAL == 0 {
+                ("дружелюбный", Color::new(0.5, 1.0, 0.55, 1.0))
+            } else if d.friendly || d.flags & mobdefs::NEUTRAL != 0 {
+                ("нейтральный — не злите", Color::new(1.0, 0.9, 0.4, 1.0))
+            } else {
+                ("опасный", Color::new(1.0, 0.42, 0.38, 1.0))
+            };
+            let tame = if m.owner.is_some() { " · ваш питомец" } else { "" };
+            let line2 = format!("{kind}{tame}");
+            let tw = app.ui.measure(d.name, 17.0).max(app.ui.measure(&line2, 12.0)) + 28.0 * s;
+            let (bx, by) = ((w - tw) / 2.0, 44.0 * s);
+            draw_rectangle(bx, by, tw, 56.0 * s, Color::new(0.03, 0.03, 0.05, 0.6));
+            app.ui.text_center(d.name, w / 2.0, by + 20.0 * s, 17.0, col);
+            app.ui.text_center(&line2, w / 2.0, by + 36.0 * s, 12.0, Color::new(0.85, 0.85, 0.85, 1.0));
+            let k = (m.health / d.hp).clamp(0.0, 1.0);
+            let (hx, hw) = (bx + 12.0 * s, tw - 24.0 * s);
+            draw_rectangle(hx, by + 43.0 * s, hw, 6.0 * s, Color::new(0.2, 0.05, 0.05, 0.9));
+            draw_rectangle(hx, by + 43.0 * s, hw * k, 6.0 * s, Color::new(0.9 - k * 0.6, 0.25 + k * 0.6, 0.25, 1.0));
+        }
+    }
 
     if !g.third_person {
         let c = Color::new(1.0, 1.0, 1.0, 0.85);
