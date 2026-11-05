@@ -78,6 +78,20 @@ impl Ui {
         self.button_full(x, y, w, h, label, true, 12.5)
     }
 
+    /// Невидимая кнопка поверх картинки (кнопки нарисованы на самом фоне):
+    /// при наведении — светлая подсветка и белая рамка.
+    pub fn hot_area(&mut self, x: f32, y: f32, w: f32, h: f32) -> bool {
+        let hov = self.hover(x, y, w, h);
+        if hov {
+            draw_rectangle(x, y, w, h, Color::new(1.0, 1.0, 1.0, if self.down { 0.22 } else { 0.12 }));
+            draw_rectangle_lines(x, y, w, h, 3.0 * self.s, Color::new(1.0, 1.0, 1.0, 0.9));
+        }
+        if hov && self.pressed {
+            self.clicked = true;
+        }
+        hov && self.pressed
+    }
+
     fn button_full(&mut self, x: f32, y: f32, w: f32, h: f32, label: &str, enabled: bool, size: f32) -> bool {
         let hov = enabled && self.hover(x, y, w, h);
         let bg = if !enabled {
@@ -228,4 +242,35 @@ pub fn iso_cube(atlas: &Texture2D, top: u16, side: u16, cx: f32, cy: f32, s: f32
     quad([l, c, c + down, l + down], side, 0.78);
     quad([c, r, r + down, c + down], side, 0.6);
     draw_mesh(&Mesh { vertices: verts, indices: idx, texture: Some(atlas.clone()) });
+}
+
+/// Фоновая картинка меню без искажений.
+/// Переводит координаты исходной картинки в экранные.
+#[derive(Clone, Copy)]
+pub struct Cover {
+    pub ox: f32,
+    pub oy: f32,
+    pub k: f32,
+}
+
+impl Cover {
+    /// Картинка целиком (ничего не обрезано); пустые края заполнены
+    /// той же картинкой, растянутой и затемнённой.
+    pub fn draw(tex: &Texture2D) -> Cover {
+        let (w, h) = (screen_width(), screen_height());
+        let (iw, ih) = (tex.width(), tex.height());
+        let kc = (w / iw).max(h / ih);
+        draw_texture_ex(tex, (w - iw * kc) / 2.0, (h - ih * kc) / 2.0, Color::new(0.5, 0.5, 0.5, 1.0), DrawTextureParams { dest_size: Some(vec2(iw * kc, ih * kc)), ..Default::default() });
+        let k = (w / iw).min(h / ih);
+        let c = Cover { ox: (w - iw * k) / 2.0, oy: (h - ih * k) / 2.0, k };
+        draw_texture_ex(tex, c.ox, c.oy, WHITE, DrawTextureParams { dest_size: Some(vec2(iw * k, ih * k)), ..Default::default() });
+        c
+    }
+    /// Прямоугольник картинки (x0, y0)–(x1, y1) на экране: (x, y, ширина, высота).
+    pub fn rect(&self, x0: f32, y0: f32, x1: f32, y1: f32) -> (f32, f32, f32, f32) {
+        (self.ox + x0 * self.k, self.oy + y0 * self.k, (x1 - x0) * self.k, (y1 - y0) * self.k)
+    }
+    pub fn pt(&self, x: f32, y: f32) -> (f32, f32) {
+        (self.ox + x * self.k, self.oy + y * self.k)
+    }
 }

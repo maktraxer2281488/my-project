@@ -67,6 +67,11 @@ fn window_conf() -> macroquad::conf::Conf {
             window_resizable: true,
             fullscreen: cfg!(target_os = "android"),
             high_dpi: cfg!(target_os = "android"),
+            icon: Some(macroquad::miniquad::conf::Icon {
+                small: *include_bytes!("../assets/icon/icon16.rgba"),
+                medium: *include_bytes!("../assets/icon/icon32.rgba"),
+                big: *include_bytes!("../assets/icon/icon64.rgba"),
+            }),
             platform: macroquad::miniquad::conf::Platform { swap_interval: Some(vsync as i32), ..Default::default() },
             ..Default::default()
         },
@@ -391,6 +396,9 @@ struct App {
     pack_active: String,
     /// Найденные текстур-паки (для экрана «Текстуры и небо»).
     pack_list: Vec<String>,
+    /// Фоны меню (дизайн kornijavvhe).
+    title_bg: Texture2D,
+    mp_bg: Texture2D,
     /// Звуки, накопленные за кадр (проигрываются после обновления мира).
     sfx: Vec<(music::Sfx, f32)>,
     export_rx: Option<std::sync::mpsc::Receiver<String>>,
@@ -2370,48 +2378,35 @@ fn backdrop(app: &App) {
 }
 
 fn draw_title(app: &mut App) -> Option<Screen> {
-    let (w, h) = (screen_width(), screen_height());
+    let (_, h) = (screen_width(), screen_height());
     let s = app.ui.s;
-    backdrop(app);
-    let title = "РАСТКРАФТ";
-    let size = 92.0;
-    let tw = app.ui.measure(title, size);
-    let ty = h * 0.24;
-    for k in (1..=6).rev() {
-        let o = k as f32 * 1.5 * s;
-        app.ui.text(title, (w - tw) / 2.0 + o, ty + o, size, Color::new(0.35, 0.16, 0.05, 1.0));
-    }
-    app.ui.text(title, (w - tw) / 2.0, ty, size, ACCENT);
-    let pulse = 1.0 + (app.time * 3.0).sin() * 0.04;
-    app.ui.text_center("воксельная песочница на Rust", w / 2.0, ty + 48.0 * s, 20.0 * pulse, WHITE);
-
-    let bw = 380.0 * s;
-    let bh = 46.0 * s;
-    let bx = (w - bw) / 2.0;
-    let mut y = h * 0.38;
+    // фон с нарисованными кнопками (дизайн kornijavvhe); нажатия — по местам кнопок
+    let c = ui::Cover::draw(&app.title_bg);
     let mut next = None;
-    if app.ui.button(bx, y, bw, bh, "Одиночная игра") {
+    let r = |x0, y0, x1, y1| c.rect(x0, y0, x1, y1);
+    let (x, y, bw, bh) = r(425.0, 248.0, 853.0, 323.0);
+    if app.ui.hot_area(x, y, bw, bh) || is_key_pressed(KeyCode::Enter) {
         app.worlds_list = save::list_worlds();
         next = Some(Screen::Worlds);
     }
-    y += bh + 10.0 * s;
-    if app.ui.button(bx, y, bw, bh, "Сетевая игра") {
+    let (x, y, bw, bh) = r(426.0, 352.0, 853.0, 419.0);
+    if app.ui.hot_area(x, y, bw, bh) {
         next = Some(Screen::Multiplayer);
     }
-    y += bh + 10.0 * s;
-    if app.ui.button(bx, y, bw, bh, "Достижения") {
+    let (x, y, bw, bh) = r(426.0, 457.0, 853.0, 527.0);
+    if app.ui.hot_area(x, y, bw, bh) {
         next = Some(Screen::Achievements);
     }
-    y += bh + 8.0 * s;
-    if app.ui.button(bx, y, bw, bh, "Настройки") {
+    let (x, y, bw, bh) = r(426.0, 562.0, 855.0, 642.0);
+    if app.ui.hot_area(x, y, bw, bh) {
         app.settings_back = Screen::Title;
         next = Some(Screen::Settings);
     }
-    y += bh + 10.0 * s;
-    if app.ui.button(bx, y, bw, bh, "Выход") {
+    let (x, y, bw, bh) = r(422.0, 675.0, 858.0, 743.0);
+    if app.ui.hot_area(x, y, bw, bh) {
         std::process::exit(0);
     }
-    app.ui.text("Версия 0.3", 10.0 * s, h - 12.0 * s, 13.0, Color::new(1.0, 1.0, 1.0, 0.7));
+    app.ui.text("Версия 0.20", 10.0 * s, h - 12.0 * s, 13.0, Color::new(1.0, 1.0, 1.0, 0.8));
     next
 }
 
@@ -2536,51 +2531,67 @@ fn try_join(app: &mut App, addr: &str) {
     }
 }
 
+/// Поле ввода прямо на картинке: текст тёмный, у активного — белая рамка.
+fn photo_field(app: &mut App, field: Field, x: f32, y: f32, w: f32, h: f32) {
+    let s = app.ui.s;
+    let active = app.focus == field;
+    if app.ui.pressed && app.ui.hover(x, y, w, h) {
+        app.focus = field;
+    }
+    if active {
+        draw_rectangle_lines(x + 6.0 * s, y + 6.0 * s, w - 12.0 * s, h - 12.0 * s, 3.0 * s, Color::new(1.0, 1.0, 1.0, 0.9));
+    }
+    let value = match field {
+        Field::Ip => &mut app.ip_input,
+        Field::Nick => &mut app.settings.name,
+        _ => return,
+    };
+    if active {
+        while let Some(c) = get_char_pressed() {
+            if !c.is_control() && value.chars().count() < 32 {
+                value.push(c);
+            }
+        }
+        if is_key_pressed(KeyCode::Backspace) {
+            value.pop();
+        }
+    }
+    let caret = if active && (app.time * 2.0).fract() < 0.5 { "|" } else { "" };
+    let shown = format!("{value}{caret}");
+    let size = (h / s * 0.3).clamp(14.0, 26.0);
+    app.ui.text_center(&shown, x + w / 2.0, y + h / 2.0 + size * s * 0.36, size, Color::new(0.35, 0.18, 0.22, 1.0));
+}
+
+/// Кнопка на картинке: подпись поверх нарисованной «таблетки».
+fn photo_button(app: &mut App, x: f32, y: f32, w: f32, h: f32, label: &str) -> bool {
+    let s = app.ui.s;
+    let hit = app.ui.hot_area(x, y, w, h);
+    let size = (h / s * 0.36).clamp(12.0, 22.0);
+    let tw = app.ui.measure(label, size);
+    let fs = (size * s).round().max(6.0) as u16;
+    draw_text_ex(label, x + (w - tw) / 2.0, y + h / 2.0 + size * s * 0.36, TextParams { font: Some(&app.ui.font), font_size: fs, color: Color::new(0.38, 0.2, 0.25, 1.0), ..Default::default() });
+    hit
+}
+
 fn multiplayer_screen(app: &mut App) -> Option<Screen> {
     let (w, h) = (screen_width(), screen_height());
     let s = app.ui.s;
-    draw_rectangle(0.0, 0.0, w, h, Color::new(0.08, 0.09, 0.12, 1.0));
-    app.ui.text_center("Сетевая игра", w / 2.0, h * 0.08, 32.0, WHITE);
+    // фон с нарисованными полями и кнопками (дизайн kornijavvhe)
+    let c = ui::Cover::draw(&app.mp_bg);
     if app.finder.is_none() {
         app.finder = net::Finder::start();
     }
-    let col_w = (w * 0.42).min(520.0 * s);
-    let gap = 24.0 * s;
-    let lx = w / 2.0 - col_w - gap / 2.0;
-    let rx = w / 2.0 + gap / 2.0;
-    let bh = 42.0 * s;
-    let top = h * 0.14;
     let mut join: Option<String> = None;
-
-    // левая колонка: имя, найденные игры
-    let mut y = top + 18.0 * s;
-    text_field(app, Field::Nick, lx, y, col_w, bh, "Ваше имя:");
-    y += bh + 30.0 * s;
-    app.ui.text("Игры в вашей сети (находятся сами):", lx, y, 16.0, ACCENT);
-    y += 12.0 * s;
-    let found = app.finder.as_ref().map(|f| f.list()).unwrap_or_default();
-    if found.is_empty() {
-        app.ui.text("Пока никого… Друг должен нажать Esc → «Открыть для сети».", lx, y + 26.0 * s, 13.0, GRAY);
-    }
-    for f in found.iter().take(5) {
-        draw_rectangle(lx, y + 6.0 * s, col_w, bh + 8.0 * s, Color::new(0.13, 0.16, 0.14, 0.95));
-        app.ui.text(&f.info, lx + 10.0 * s, y + 26.0 * s, 14.0, WHITE);
-        app.ui.text(&f.addr, lx + 10.0 * s, y + 44.0 * s, 12.0, GRAY);
-        if app.pending_net.is_none() && app.ui.button(lx + col_w - 110.0 * s, y + 12.0 * s, 100.0 * s, bh - 4.0 * s, "Войти") {
-            join = Some(f.addr.clone());
-        }
-        y += bh + 14.0 * s;
-    }
-
-    // правая колонка: свои серверы и прямое подключение
-    let mut y = top + 18.0 * s;
-    text_field(app, Field::Ip, rx, y, col_w, bh, "Адрес (IP или имя:порт):");
-    y += bh + 8.0 * s;
-    let half = (col_w - 8.0 * s) / 2.0;
-    if app.pending_net.is_none() && (app.ui.button(rx, y, half, bh, "Подключиться") || (is_key_pressed(KeyCode::Enter) && app.focus == Field::Ip)) {
+    let (x, y, fw, fh) = c.rect(80.0, 185.0, 565.0, 295.0);
+    photo_field(app, Field::Nick, x, y, fw, fh);
+    let (x, y, fw, fh) = c.rect(655.0, 185.0, 1138.0, 300.0);
+    photo_field(app, Field::Ip, x, y, fw, fh);
+    let (x, y, bw, bh) = c.rect(615.0, 318.0, 878.0, 377.0);
+    if app.pending_net.is_none() && (photo_button(app, x, y, bw, bh, "Подключиться") || (is_key_pressed(KeyCode::Enter) && app.focus == Field::Ip)) {
         join = Some(app.ip_input.clone());
     }
-    if app.ui.button(rx + half + 8.0 * s, y, half, bh, "Сохранить в список") && !app.ip_input.trim().is_empty() {
+    let (x, y, bw, bh) = c.rect(895.0, 320.0, 1152.0, 378.0);
+    if photo_button(app, x, y, bw, bh, "Сохранить") && !app.ip_input.trim().is_empty() {
         let mut list = load_servers();
         let addr = app.ip_input.trim().to_string();
         if !list.iter().any(|(_, a)| *a == addr) {
@@ -2588,48 +2599,61 @@ fn multiplayer_screen(app: &mut App) -> Option<Screen> {
             save_servers(&list);
         }
     }
-    y += bh + 26.0 * s;
-    app.ui.text("Мои серверы:", rx, y, 16.0, ACCENT);
-    y += 12.0 * s;
+    let row_h = 46.0 * s;
+    let panel = Color::new(0.12, 0.06, 0.1, 0.72);
+    // найденные в сети игры: поверх подсказки «Пока никого…»
+    let found = app.finder.as_ref().map(|f| f.list()).unwrap_or_default();
+    if !found.is_empty() {
+        let (lx, ly, lw, _) = c.rect(90.0, 385.0, 645.0, 430.0);
+        draw_rectangle(lx, ly, lw, row_h * found.len().min(4) as f32 + 10.0 * s, panel);
+        for (i, f) in found.iter().take(4).enumerate() {
+            let y = ly + 5.0 * s + i as f32 * row_h;
+            app.ui.text(&f.info, lx + 10.0 * s, y + 20.0 * s, 14.0, WHITE);
+            app.ui.text(&f.addr, lx + 10.0 * s, y + 38.0 * s, 12.0, Color::new(1.0, 0.85, 0.9, 1.0));
+            if app.pending_net.is_none() && app.ui.button_small(lx + lw - 100.0 * s, y + 6.0 * s, 90.0 * s, row_h - 12.0 * s, "Войти") {
+                join = Some(f.addr.clone());
+            }
+        }
+    }
+    // свои серверы: поверх подсказки «Список пуст…»
     let mut list = load_servers();
     let mut remove: Option<usize> = None;
-    if list.is_empty() {
-        app.ui.text("Список пуст — введите адрес и нажмите «Сохранить».", rx, y + 26.0 * s, 13.0, GRAY);
-    }
-    for (i, (name, addr)) in list.iter().enumerate().take(5) {
-        draw_rectangle(rx, y + 6.0 * s, col_w, bh + 8.0 * s, Color::new(0.13, 0.14, 0.18, 0.95));
-        app.ui.text(name, rx + 10.0 * s, y + 26.0 * s, 14.0, WHITE);
-        app.ui.text(addr, rx + 10.0 * s, y + 44.0 * s, 12.0, GRAY);
-        if app.pending_net.is_none() && app.ui.button(rx + col_w - 200.0 * s, y + 12.0 * s, 92.0 * s, bh - 4.0 * s, "Войти") {
-            join = Some(addr.clone());
+    if !list.is_empty() {
+        let (rx, ry, rw, _) = c.rect(630.0, 445.0, 1190.0, 490.0);
+        draw_rectangle(rx, ry, rw, row_h * list.len().min(4) as f32 + 10.0 * s, panel);
+        for (i, (name, addr)) in list.iter().enumerate().take(4) {
+            let y = ry + 5.0 * s + i as f32 * row_h;
+            app.ui.text(name, rx + 10.0 * s, y + 20.0 * s, 14.0, WHITE);
+            app.ui.text(addr, rx + 10.0 * s, y + 38.0 * s, 12.0, Color::new(1.0, 0.95, 0.75, 1.0));
+            if app.pending_net.is_none() && app.ui.button_small(rx + rw - 190.0 * s, y + 6.0 * s, 86.0 * s, row_h - 12.0 * s, "Войти") {
+                join = Some(addr.clone());
+            }
+            if app.ui.button_small(rx + rw - 96.0 * s, y + 6.0 * s, 86.0 * s, row_h - 12.0 * s, "Удалить") {
+                remove = Some(i);
+            }
         }
-        if app.ui.button(rx + col_w - 100.0 * s, y + 12.0 * s, 90.0 * s, bh - 4.0 * s, "Удалить") {
-            remove = Some(i);
-        }
-        y += bh + 14.0 * s;
     }
     if let Some(i) = remove {
         list.remove(i);
         save_servers(&list);
     }
-
-    let hy = h * 0.74;
-    let hints = [
-        "В одной сети (Wi-Fi дома): друг открывает мир (Esc → «Открыть для сети»), игра появится слева сама.",
-        "Через интернет: хосту нужен проброс порта 7777 на роутере, либо бесплатный туннель playit.gg,",
-        "либо оба ставят Radmin VPN / ZeroTier — тогда это как одна сеть. Мир, существа и время общие.",
-    ];
-    for (i, l) in hints.iter().enumerate() {
-        app.ui.text_center(l, w / 2.0, hy + i as f32 * 20.0 * s, 13.0, Color::new(0.75, 0.78, 0.85, 1.0));
-    }
+    // внизу: подсказка про интернет и «Назад»
+    let hint = "Через интернет: проброс порта 7777, туннель playit.gg или Radmin VPN / ZeroTier";
+    let hw = app.ui.measure(hint, 13.0) + 24.0 * s;
+    draw_rectangle((w - hw) / 2.0, h - 98.0 * s, hw, 26.0 * s, Color::new(0.0, 0.0, 0.0, 0.45));
+    app.ui.text_center(hint, w / 2.0, h - 80.0 * s, 13.0, WHITE);
     if app.pending_net.is_some() {
-        app.ui.text_center("Подключение…", w / 2.0, h * 0.86, 18.0, ACCENT);
+        app.ui.text_center("Подключение…", w / 2.0, h - 110.0 * s, 18.0, WHITE);
     }
     let mut next = None;
     if let Some(addr) = join {
         try_join(app, &addr);
     }
-    if app.ui.button((w - 300.0 * s) / 2.0, h * 0.89, 300.0 * s, bh, "Назад") || (is_key_pressed(KeyCode::Escape) && app.focus != Field::Ip) {
+    let (bw, bh) = (240.0 * s, 42.0 * s);
+    let (bx, by) = ((w - bw) / 2.0, h - bh - 12.0 * s);
+    draw_rectangle(bx, by, bw, bh, Color::new(1.0, 0.85, 0.92, 0.92));
+    draw_rectangle_lines(bx, by, bw, bh, 2.0, Color::new(1.0, 1.0, 1.0, 0.9));
+    if photo_button(app, bx, by, bw, bh, "Назад") || (is_key_pressed(KeyCode::Escape) && app.focus != Field::Ip) {
         app.pending_net = None;
         app.focus = Field::None;
         next = Some(Screen::Title);
@@ -3761,33 +3785,54 @@ fn render_world(app: &mut App) {
 async fn splash(font: &Font, prep: &std::thread::JoinHandle<()>) {
     const LINE1: &str = "Эта игра полностью сделана и написана";
     const LINE2: &str = "maktraxer228";
-    const TOTAL: f32 = 3.6;
+    // соавторы: ник и за что отвечала
+    const CREDITS: [(&str, &str); 2] = [("kornijavvhe", "дизайн"), ("rtxx131", "музыка")];
+    const TOTAL: f32 = 5.0;
     let mut t = 0.0f32;
     loop {
         t += get_frame_time().min(0.05);
-        let skip = get_last_key_pressed().is_some() || is_mouse_button_pressed(MouseButton::Left);
+        let skip = get_last_key_pressed().is_some() || is_mouse_button_pressed(MouseButton::Left) || !touches().is_empty();
         if (t >= TOTAL || (skip && t > 0.3)) && prep.is_finished() {
             break;
         }
-        let a = if t < 0.8 { t / 0.8 } else if t > TOTAL - 0.8 { ((TOTAL - t) / 0.8).max(0.0) } else { 1.0 };
-        let a = a * a * (3.0 - 2.0 * a);
+        let fade = |t: f32| {
+            let a = if t < 0.8 { t / 0.8 } else if t > TOTAL - 0.8 { ((TOTAL - t) / 0.8).max(0.0) } else { 1.0 };
+            let a = a.clamp(0.0, 1.0);
+            a * a * (3.0 - 2.0 * a)
+        };
+        let a = fade(t);
         clear_background(BLACK);
         let (w, h) = (screen_width(), screen_height());
-        let k = (h / 720.0).clamp(0.6, 3.0);
+        let k = (h / 720.0).clamp(0.6, 3.0).min(w / 1100.0);
         let s1 = (30.0 * k) as u16;
         let s2 = (64.0 * k) as u16;
+        let cy = h / 2.0 - 70.0 * k;
         let d1 = measure_text(LINE1, Some(font), s1, 1.0);
         let d2 = measure_text(LINE2, Some(font), s2, 1.0);
-        draw_text_ex(LINE1, (w - d1.width) / 2.0, h / 2.0 - 30.0 * k, TextParams { font: Some(font), font_size: s1, color: Color::new(0.85, 0.85, 0.9, a), ..Default::default() });
+        draw_text_ex(LINE1, (w - d1.width) / 2.0, cy - 30.0 * k, TextParams { font: Some(font), font_size: s1, color: Color::new(0.85, 0.85, 0.9, a), ..Default::default() });
         // имя автора — с тёплым свечением
         for (o, al) in [(3.0, 0.12), (1.5, 0.2)] {
-            draw_text_ex(LINE2, (w - d2.width) / 2.0 + o * k, h / 2.0 + 50.0 * k + o * k, TextParams { font: Some(font), font_size: s2, color: Color::new(1.0, 0.55, 0.1, a * al), ..Default::default() });
+            draw_text_ex(LINE2, (w - d2.width) / 2.0 + o * k, cy + 50.0 * k + o * k, TextParams { font: Some(font), font_size: s2, color: Color::new(1.0, 0.55, 0.1, a * al), ..Default::default() });
         }
-        draw_text_ex(LINE2, (w - d2.width) / 2.0, h / 2.0 + 50.0 * k, TextParams { font: Some(font), font_size: s2, color: Color::new(1.0, 0.75, 0.25, a), ..Default::default() });
+        draw_text_ex(LINE2, (w - d2.width) / 2.0, cy + 50.0 * k, TextParams { font: Some(font), font_size: s2, color: Color::new(1.0, 0.75, 0.25, a), ..Default::default() });
         let lw = d2.width * a;
-        draw_rectangle((w - lw) / 2.0, h / 2.0 + 66.0 * k, lw, 2.0 * k, Color::new(1.0, 0.7, 0.2, a * 0.8));
+        draw_rectangle((w - lw) / 2.0, cy + 66.0 * k, lw, 2.0 * k, Color::new(1.0, 0.7, 0.2, a * 0.8));
+        // соавторы появляются чуть позже
+        let s3 = (34.0 * k) as u16;
+        let s4 = (22.0 * k) as u16;
+        let cols = [Color::new(1.0, 0.62, 0.82, 1.0), Color::new(0.62, 0.86, 1.0, 1.0)];
+        for (i, (nick, role)) in CREDITS.iter().enumerate() {
+            let ac = fade((t - 0.5 - i as f32 * 0.35).max(0.0)) * a.min(1.0);
+            let x = w / 2.0 + (i as f32 - 0.5) * 380.0 * k;
+            let y = cy + 150.0 * k;
+            let dn = measure_text(nick, Some(font), s3, 1.0);
+            let dr = measure_text(role, Some(font), s4, 1.0);
+            let c = cols[i];
+            draw_text_ex(nick, x - dn.width / 2.0, y, TextParams { font: Some(font), font_size: s3, color: Color::new(c.r, c.g, c.b, ac), ..Default::default() });
+            draw_text_ex(role, x - dr.width / 2.0, y + 32.0 * k, TextParams { font: Some(font), font_size: s4, color: Color::new(0.8, 0.8, 0.85, ac), ..Default::default() });
+        }
         if let Ok(p) = std::env::var("RK_SPLASH_SHOT") {
-            if t > 1.5 {
+            if t > 2.0 {
                 get_screen_data().export_png(&p);
                 std::process::exit(0);
             }
@@ -3906,6 +3951,8 @@ async fn amain() {
         style_active: 1,
         pack_active: String::new(),
         pack_list: Vec::new(),
+        title_bg: Texture2D::from_file_with_format(include_bytes!("../assets/ui/title.jpg"), None),
+        mp_bg: Texture2D::from_file_with_format(include_bytes!("../assets/ui/multiplayer.jpg"), None),
         sfx: Vec::new(),
         export_rx: None,
         book_tab: 0,

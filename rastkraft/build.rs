@@ -15,6 +15,21 @@ fn main() {
     println!("cargo:rerun-if-env-changed=RK_NO_EMBED");
     let out = std::env::var("OUT_DIR").unwrap();
     let android = std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|t| t == "android");
+    // иконка exe (Windows): ресурс собирается windres из mingw
+    if std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|t| t == "windows") {
+        println!("cargo:rerun-if-changed=assets/icon/rastkraft.ico");
+        let dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        let rc = format!("{out}/icon.rc");
+        std::fs::write(&rc, format!("1 ICON \"{}\"\n", format!("{dir}/assets/icon/rastkraft.ico").replace('\\', "/"))).unwrap();
+        let obj = format!("{out}/icon.o");
+        for tool in ["x86_64-w64-mingw32-windres", "windres"] {
+            let ok = std::process::Command::new(tool).args([rc.as_str(), "-O", "coff", "-o", obj.as_str()]).status().is_ok_and(|s| s.success());
+            if ok {
+                println!("cargo:rustc-link-arg-bins={obj}");
+                break;
+            }
+        }
+    }
     // RK_SMALL=1 — лёгкий exe: вшить сжатые OGG из tools/musicpack вместо WAV
     println!("cargo:rerun-if-env-changed=RK_SMALL");
     let ogg_dir = std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("target/android-assets/music");

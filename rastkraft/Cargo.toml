@@ -9,6 +9,8 @@ macroquad = { version = "0.4", features = ["audio"] }
 lewton = "0.9"
 # сохранение шаблона текстур-пака
 png = "0.17"
+# фоны меню в JPEG (включает чтение JPEG в macroquad)
+image = { version = "0.24", default-features = false, features = ["jpeg"] }
 
 [profile.dev]
 opt-level = 1
@@ -37,6 +39,9 @@ target_sdk_version = 33
 min_sdk_version = 21
 build_targets = ["aarch64-linux-android", "armv7-linux-androideabi"]
 fullscreen = true
+# иконка приложения
+res = "android/res"
+icon = "@mipmap/ic_launcher"
 opengles_version_major = 2
 opengles_version_minor = 0
 
