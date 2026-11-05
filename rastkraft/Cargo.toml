@@ -55,3 +55,5 @@ name = "android.permission.CHANGE_WIFI_MULTICAST_STATE"
 
 [package.metadata.android.activity_attributes]
 "android:screenOrientation" = "sensorLandscape"
+# без этого Android 12+ отказывается ставить APK («пакет недействителен»)
+"android:exported" = "true"
