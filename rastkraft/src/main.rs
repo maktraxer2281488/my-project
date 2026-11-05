@@ -3660,6 +3660,25 @@ fn draw_hud(app: &mut App) {
                 app.ui.sprite(blocks::item_tile(tile), x0 + i as f32 * (hs + 1.0), ay, hs, 0.0, WHITE);
             }
         }
+        // воздух под водой: пузырьки над сытостью (лопаются по одному)
+        if g.player.air < player::AIR_MAX - 0.01 {
+            let by = hy - hs * 0.55 - 6.0 * s;
+            let n = (g.player.air / player::AIR_MAX * 10.0).ceil() as i32;
+            for i in 0..10 {
+                let cx = x0 + total - (i as f32 + 0.5) * (hs + 1.0);
+                let cy = by;
+                if (i as i32) < n {
+                    draw_circle(cx, cy, hs * 0.42, Color::new(0.2, 0.45, 0.85, 0.95));
+                    draw_circle(cx, cy, hs * 0.34, Color::new(0.55, 0.8, 1.0, 0.95));
+                    draw_circle(cx - hs * 0.12, cy - hs * 0.12, hs * 0.09, WHITE);
+                } else {
+                    draw_circle_lines(cx, cy, hs * 0.36, 1.5, Color::new(0.6, 0.8, 1.0, 0.35));
+                }
+            }
+            if g.player.air <= 0.0 {
+                app.ui.text_center("Нечем дышать — всплывайте!", w / 2.0, by - 16.0 * s, 15.0, Color::new(1.0, 0.5, 0.45, 1.0));
+            }
+        }
     }
 
     if g.label_t > 0.0 {
@@ -3801,7 +3820,7 @@ fn render_world(app: &mut App) {
         eye -= dir * back;
     }
     let zoom = is_key_down(KeyCode::C) && app.screen == Screen::Playing;
-    let fovy = app.settings.fov.to_radians() * if zoom { 0.35 } else { 1.0 };
+    let fovy = app.settings.fov.to_radians() * if zoom { 0.35 } else { g.player.fov_k };
     let aspect = screen_width() / screen_height().max(1.0);
     let proj = Mat4::perspective_rh_gl(fovy, aspect, 0.05, 1500.0);
     let view = Mat4::look_to_rh(Vec3::ZERO, dir, cam_up);

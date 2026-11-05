@@ -495,16 +495,46 @@ impl Net {
 
 pub const BEACON_PORT: u16 = 7778;
 
-/// Хост раз в секунду сообщает в локальную сеть: «здесь идёт игра».
+/// Порт, на который ищущие игру шлют запрос «кто тут играет?».
+pub const QUERY_PORT: u16 = 7779;
+
+/// Адрес рассылки своей подсети (например, 192.168.1.255).
+fn subnet_broadcast() -> Option<String> {
+    let ip = local_ip();
+    let mut parts: Vec<&str> = ip.split('.').collect();
+    if parts.len() != 4 || ip.starts_with("127.") {
+        return None;
+    }
+    parts[3] = "255";
+    Some(parts.join("."))
+}
+
+/// Хост раз в секунду сообщает в локальную сеть: «здесь идёт игра»,
+/// и лично отвечает тем, кто спросил (телефоны часто не слышат общую рассылку).
 pub fn start_beacon(info: std::sync::Arc<std::sync::Mutex<String>>) {
+    let info2 = info.clone();
     std::thread::spawn(move || {
         let Ok(sock) = std::net::UdpSocket::bind("0.0.0.0:0") else { return };
         let _ = sock.set_broadcast(true);
         loop {
             let msg = format!("RASTKRAFT1|{}", info.lock().unwrap());
             let _ = sock.send_to(msg.as_bytes(), ("255.255.255.255", BEACON_PORT));
+            if let Some(b) = subnet_broadcast() {
+                let _ = sock.send_to(msg.as_bytes(), (b.as_str(), BEACON_PORT));
+            }
             let _ = sock.send_to(msg.as_bytes(), ("127.0.0.1", BEACON_PORT));
             std::thread::sleep(std::time::Duration::from_millis(1000));
+        }
+    });
+    // ответы на запросы
+    std::thread::spawn(move || {
+        let Ok(sock) = std::net::UdpSocket::bind(("0.0.0.0", QUERY_PORT)) else { return };
+        let mut buf = [0u8; 64];
+        while let Ok((n, from)) = sock.recv_from(&mut buf) {
+            if &buf[..n] == b"RKQ" {
+                let msg = format!("RASTKRAFT1|{}", info2.lock().unwrap());
+                let _ = sock.send_to(msg.as_bytes(), (from.ip(), BEACON_PORT));
+            }
         }
     });
 }
@@ -520,6 +550,13 @@ pub struct Found {
 /// Слушает маяки хостов в локальной сети.
 pub struct Finder {
     pub found: std::sync::Arc<std::sync::Mutex<Vec<Found>>>,
+    alive: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Drop for Finder {
+    fn drop(&mut self) {
+        self.alive.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 impl Finder {
@@ -538,7 +575,21 @@ impl Finder {
                 list.push(Found { addr, info: info.to_string(), seen: std::time::Instant::now() });
             }
         });
-        Some(Finder { found })
+        // сами спрашиваем «кто тут играет?» — хост ответит лично
+        let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let a2 = alive.clone();
+        std::thread::spawn(move || {
+            let Ok(q) = std::net::UdpSocket::bind("0.0.0.0:0") else { return };
+            let _ = q.set_broadcast(true);
+            while a2.load(std::sync::atomic::Ordering::Relaxed) {
+                let _ = q.send_to(b"RKQ", ("255.255.255.255", QUERY_PORT));
+                if let Some(b) = subnet_broadcast() {
+                    let _ = q.send_to(b"RKQ", (b.as_str(), QUERY_PORT));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1200));
+            }
+        });
+        Some(Finder { found, alive })
     }
 
     pub fn list(&self) -> Vec<Found> {

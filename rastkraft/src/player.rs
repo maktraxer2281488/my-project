@@ -167,6 +167,9 @@ pub const EYE: f32 = 1.62;
 pub const MAX_HEALTH: f32 = 20.0;
 pub const MAX_HUNGER: f32 = 20.0;
 
+/// Сколько секунд можно не дышать под водой.
+pub const AIR_MAX: f32 = 15.0;
+
 pub struct Player {
     pub body: Body,
     /// Опыт (всего очков).
@@ -180,6 +183,14 @@ pub struct Player {
     pub flying: bool,
     pub in_water: bool,
     pub eye_in_water: bool,
+    /// Запас воздуха под водой (с).
+    pub air: f32,
+    drown_t: f32,
+    /// Время с прошлого нажатия W (двойное нажатие — бег).
+    w_tap: f32,
+    sprint_latch: bool,
+    /// Плавное расширение обзора при беге (множитель поля зрения).
+    pub fov_k: f32,
     pub health: f32,
     pub hunger: f32,
     pub saturation: f32,
@@ -211,6 +222,11 @@ impl Player {
             flying: false,
             in_water: false,
             eye_in_water: false,
+            air: AIR_MAX,
+            drown_t: 0.0,
+            w_tap: 9.0,
+            sprint_latch: false,
+            fov_k: 1.0,
             health: MAX_HEALTH,
             hunger: MAX_HUNGER,
             saturation: 5.0,
@@ -384,12 +400,14 @@ impl Player {
     }
 
     pub fn update(&mut self, world: &World, dt: f32, creative: bool, can_move: bool, difficulty: u8) {
+        self.w_tap += dt;
         let at = |p: Vec3| world.get(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
         let feet_b = at(self.body.pos + vec3(0.0, 0.3, 0.0));
         self.in_water = feet_b == WATER || feet_b == LAVA;
         let in_lava = self.body.touches(world, 0.0, |b| b == LAVA);
         let climbing = self.body.touches(world, 0.0, is_climbable);
-        self.eye_in_water = at(self.eye()) == WATER;
+        let eye_b = at(self.eye());
+        self.eye_in_water = eye_b == WATER || fluid(eye_b).is_some_and(|(w, _)| w);
         let in_web = self.body.touches(world, 0.0, |b| b == COBWEB);
         let below = at(self.body.pos - vec3(0.0, 0.05, 0.0));
 
@@ -415,11 +433,27 @@ impl Player {
                 wish += fwd * t.mv.y + right * t.mv.x;
             }
             jump = is_key_down(KeyCode::Space) || t.down(crate::touch::Act::Jump);
-            sprint = (is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::R) || t.down(crate::touch::Act::Sprint)) && (creative || self.hunger > 6.0);
+            // двойное нажатие W — бег, пока идёте вперёд
+            if is_key_pressed(KeyCode::W) {
+                if self.w_tap < 0.3 {
+                    self.sprint_latch = true;
+                }
+                self.w_tap = 0.0;
+            }
+            if !is_key_down(KeyCode::W) {
+                self.sprint_latch = false;
+            }
+            sprint = (is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::R) || self.sprint_latch || t.down(crate::touch::Act::Sprint)) && (creative || self.hunger > 6.0);
             sneak = is_key_down(KeyCode::LeftShift) || t.down(crate::touch::Act::Sneak);
         }
         let wish = wish.normalize_or_zero();
         self.sprinting = sprint && wish != Vec3::ZERO;
+        if !self.sprinting {
+            self.sprint_latch = false;
+        }
+        // при беге обзор чуть шире — чувствуется скорость
+        let fov_target = if self.sprinting && !self.in_water { 1.12 } else { 1.0 };
+        self.fov_k += (fov_target - self.fov_k) * (dt * 8.0).min(1.0);
         if !creative {
             self.flying = false;
         }
@@ -512,6 +546,20 @@ impl Player {
         }
 
         // опасные блоки
+        // дыхание: под водой воздух кончается, потом — урон
+        if self.eye_in_water && !creative {
+            self.air = (self.air - dt).max(0.0);
+            if self.air <= 0.0 {
+                self.drown_t -= dt;
+                if self.drown_t <= 0.0 {
+                    self.hurt(2.0, Vec3::ZERO, true);
+                    self.drown_t = 1.0;
+                }
+            }
+        } else {
+            self.air = (self.air + dt * 6.0).min(AIR_MAX);
+            self.drown_t = 0.0;
+        }
         self.hazard_t -= dt;
         let fire_res = self.has(Eff::FireRes);
         if !creative && self.hazard_t <= 0.0 {

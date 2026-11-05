@@ -197,6 +197,8 @@ struct State {
     look: Option<Look>,
     /// Пальцы на кнопках.
     buttons: HashMap<u64, Act>,
+    /// Пальцы на кнопках действий: (место нажатия, прошлое положение) — ими тоже можно вертеть камеру.
+    btn_drag: HashMap<u64, (Vec2, Vec2)>,
     /// Где джойстик рисовать (центр, отклонение).
     stick_draw: Option<(Vec2, Vec2)>,
     /// Залипающие кнопки (бег, присед): включены ли.
@@ -221,8 +223,15 @@ pub fn is_mobile() -> bool {
 /// `hotbar` — прямоугольник панели быстрого доступа (x, y, ширина ячейки, шаг, 9 ячеек).
 pub fn update(layout: &Layout, enabled: bool, playing: bool, hotbar: (f32, f32, f32, f32)) {
     let (w, h) = (screen_width(), screen_height());
-    ST.with(|st| {
-        let mut st = st.borrow_mut();
+    let list = touches();
+    let now = get_time();
+    ST.with(|st| process(&mut st.borrow_mut(), &list, now, w, h, layout, enabled, playing, hotbar));
+}
+
+/// Разбор касаний одного кадра (отдельно от macroquad — чтобы проверять тестами).
+#[allow(clippy::too_many_arguments)]
+fn process(st: &mut State, list: &[Touch], now: f64, w: f32, h: f32, layout: &Layout, enabled: bool, playing: bool, hotbar: (f32, f32, f32, f32)) {
+    {
         let prev_down = st.out.down;
         let toggled = st.toggled;
         st.out = Out { active: enabled, ..Default::default() };
@@ -230,6 +239,7 @@ pub fn update(layout: &Layout, enabled: bool, playing: bool, hotbar: (f32, f32, 
             st.stick = None;
             st.look = None;
             st.buttons.clear();
+            st.btn_drag.clear();
             st.stick_draw = None;
             return;
         }
@@ -240,14 +250,16 @@ pub fn update(layout: &Layout, enabled: bool, playing: bool, hotbar: (f32, f32, 
         };
         let stick_r = 0.13 * h * layout.scale;
         let tap_slop = h * 0.025;
-        let now = get_time();
-        for t in touches() {
+        for t in list.iter().cloned() {
             let p = t.position;
             match t.phase {
                 TouchPhase::Started => {
                     // кнопка?
                     if let Some(a) = ACTS.iter().copied().filter(|a| (p - center(*a)).length() < r_of(*a) * 1.15).min_by(|a, b| (p - center(*a)).length().total_cmp(&(p - center(*b)).length())) {
                         st.buttons.insert(t.id, a);
+                        if matches!(a, Act::Attack | Act::Use | Act::Jump) {
+                            st.btn_drag.insert(t.id, (p, p));
+                        }
                         st.out.pressed[a as usize] = true;
                         if matches!(a, Act::Sneak | Act::Sprint) {
                             st.toggled[a as usize] = !toggled[a as usize];
@@ -297,6 +309,13 @@ pub fn update(layout: &Layout, enabled: bool, playing: bool, hotbar: (f32, f32, 
                     if let Some(a) = st.buttons.get(&t.id).copied() {
                         st.out.down[a as usize] = true;
                     }
+                    // ведут пальцем от кнопки действия — поворачиваем камеру (кнопка остаётся нажатой)
+                    if let Some((start, last)) = st.btn_drag.get(&t.id).copied() {
+                        if (p - start).length() > tap_slop {
+                            st.out.look += p - last;
+                        }
+                        st.btn_drag.insert(t.id, (start, p));
+                    }
                 }
                 TouchPhase::Ended | TouchPhase::Cancelled => {
                     if st.stick.is_some_and(|(id, _)| id == t.id) {
@@ -311,6 +330,7 @@ pub fn update(layout: &Layout, enabled: bool, playing: bool, hotbar: (f32, f32, 
                         st.look = None;
                     }
                     st.buttons.remove(&t.id);
+                    st.btn_drag.remove(&t.id);
                 }
             }
         }
@@ -325,7 +345,7 @@ pub fn update(layout: &Layout, enabled: bool, playing: bool, hotbar: (f32, f32, 
             }
         }
         let _ = prev_down;
-    });
+    }
 }
 
 fn quad(a: Vec2, b: Vec2, c: Vec2, d: Vec2, col: Color) {
@@ -488,4 +508,52 @@ pub fn draw(layout: &Layout, ui: &crate::ui::Ui, creative: bool) {
             draw_button(act, vec2(x * w, y * h), r * h * layout.scale, st.out.down[act as usize], a, layout.labels, ui);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tc(id: u64, phase: TouchPhase, x: f32, y: f32) -> Touch {
+        Touch { id, phase, position: vec2(x, y) }
+    }
+
+    /// Бег джойстиком (палец до упора вперёд) и одновременный поворот камеры вторым пальцем.
+    #[test]
+    fn look_while_running() {
+        let l = Layout::default();
+        let (w, h) = (1600.0, 720.0);
+        let hot = (500.0, 650.0, 46.0, 51.0);
+        let mut st = State::default();
+        let mut run = |st: &mut State, list: &[Touch], t: f64| {
+            process(st, list, t, w, h, &l, true, true, hot);
+            st.out
+        };
+        // левый палец ставим на джойстик и уводим вперёд до упора
+        run(&mut st, &[tc(1, TouchPhase::Started, 250.0, 520.0)], 0.0);
+        run(&mut st, &[tc(1, TouchPhase::Moved, 250.0, 380.0)], 0.02);
+        // правый палец — по пустому месту справа, ведём вбок
+        let o = run(&mut st, &[tc(1, TouchPhase::Stationary, 250.0, 380.0), tc(2, TouchPhase::Started, 1100.0, 300.0)], 0.04);
+        assert!(o.down(Act::Sprint), "бег");
+        let mut total = 0.0;
+        for k in 1..10 {
+            let o = run(&mut st, &[tc(1, TouchPhase::Stationary, 250.0, 380.0), tc(2, TouchPhase::Moved, 1100.0 + k as f32 * 20.0, 300.0)], 0.04 + k as f64 * 0.016);
+            assert!(o.mv.y > 0.9, "движение вперёд не должно сбрасываться");
+            total += o.look.x;
+        }
+        assert!(total > 150.0, "поворот при беге: {total}");
+        // правый палец отпустили и поставили на кнопку прыжка — ведём от неё
+        run(&mut st, &[tc(1, TouchPhase::Stationary, 250.0, 380.0), tc(2, TouchPhase::Ended, 1280.0, 300.0)], 0.3);
+        let (jx, jy, _) = l.get(Act::Jump);
+        let j = vec2(jx * w, jy * h);
+        let o = run(&mut st, &[tc(1, TouchPhase::Stationary, 250.0, 380.0), tc(3, TouchPhase::Started, j.x, j.y)], 0.32);
+        assert!(o.pressed(Act::Jump));
+        let mut turn = 0.0;
+        for k in 1..8 {
+            let o = run(&mut st, &[tc(1, TouchPhase::Stationary, 250.0, 380.0), tc(3, TouchPhase::Moved, j.x - k as f32 * 15.0, j.y)], 0.32 + k as f64 * 0.016);
+            assert!(o.down(Act::Sprint) && o.mv.y > 0.9);
+            turn += o.look.x;
+        }
+        assert!(turn < -60.0, "поворот от кнопки: {turn}");
+    }
 }
