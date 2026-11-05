@@ -1534,8 +1534,11 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                 }
             }
             let tc = touch::out();
+            // короткое касание экрана: по существу или игроку — удар, иначе — «ставить»
+            let tap_hit = tc.tap && (mob_hit.is_some() || player_hit.is_some());
+            let tap_use = tc.tap && !tap_hit;
             let (lmb, lmb_p) = if tc.active {
-                (tc.down(touch::Act::Attack), tc.pressed(touch::Act::Attack))
+                (tc.down(touch::Act::Attack) || tap_hit, tc.pressed(touch::Act::Attack) || tap_hit)
             } else {
                 (is_mouse_button_down(MouseButton::Left), is_mouse_button_pressed(MouseButton::Left))
             };
@@ -1553,7 +1556,7 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                 }
             }
             let (rmb, rmb_p) = if tc.active {
-                (tc.down(touch::Act::Use), tc.pressed(touch::Act::Use))
+                (tc.down(touch::Act::Use) || tap_use, tc.pressed(touch::Act::Use) || tap_use)
             } else {
                 (is_mouse_button_down(MouseButton::Right), is_mouse_button_pressed(MouseButton::Right))
             };
@@ -3428,7 +3431,9 @@ fn draw_hud(app: &mut App) {
             app.ui.text(l, 14.0 * s, (26.0 + i as f32 * 20.0) * s, 14.0, WHITE);
         }
     } else if app.settings.show_fps {
-        app.ui.text(&format!("{:.0} FPS", app.fps), 12.0 * s, 24.0 * s, 15.0, Color::new(1.0, 1.0, 0.6, 0.95));
+        // при сенсорном управлении слева вверху кнопки — счётчик ниже них
+        let fy = if app.settings.touch { screen_height() * 0.16 + 20.0 * s } else { 24.0 * s };
+        app.ui.text(&format!("{:.0} FPS", app.fps), 12.0 * s, fy, 15.0, Color::new(1.0, 1.0, 0.6, 0.95));
     }
 }
 
@@ -5041,7 +5046,9 @@ fn controls_screen(app: &mut App) -> Option<Screen> {
     draw_rectangle(0.0, 0.0, w, h, Color::new(0.12, 0.16, 0.12, 1.0));
     // «мир» на фоне для наглядности
     draw_rectangle(0.0, h * 0.62, w, h * 0.38, Color::new(0.35, 0.55, 0.3, 1.0));
-    app.ui.text_center("Перетащите кнопки, выберите кнопку и меняйте её размер", w / 2.0, h * 0.2, 16.0, WHITE);
+    app.ui.text_center("Перетащите кнопки, выберите кнопку и меняйте её размер", w / 2.0, h * 0.19, 16.0, WHITE);
+    let hint = if app.touch_layout.tap { "Касание экрана: коротко — поставить блок или ударить, удерживать — ломать" } else { "Касание экрана выключено: ставьте и ломайте кнопками" };
+    app.ui.text_center(hint, w / 2.0, h * 0.25, 12.0, Color::new(0.85, 0.9, 0.8, 1.0));
     let mouse = app.ui.mouse;
     // выбор и перетаскивание
     if app.ui.pressed {
@@ -5056,7 +5063,7 @@ fn controls_screen(app: &mut App) -> Option<Screen> {
     if let Some(a) = app.touch_edit {
         if app.ui.down && mouse.y < h * 0.98 {
             let (x, y, r) = app.touch_layout.get(a);
-            let inside_panel = mouse.y > h * 0.3 && mouse.y < h * 0.52 && mouse.x > w * 0.25 && mouse.x < w * 0.75;
+            let inside_panel = mouse.y > h * 0.3 && mouse.y < h * 0.3 + 200.0 * s && mouse.x > w * 0.25 && mouse.x < w * 0.75;
             let (cx, cy) = (x * w, y * h);
             if !inside_panel && (mouse - vec2(cx, cy)).length() < r * h * app.touch_layout.scale * 3.0 {
                 app.touch_layout.pos.insert(a, ((mouse.x / w).clamp(0.02, 0.98), (mouse.y / h).clamp(0.02, 0.98), r));
@@ -5071,8 +5078,8 @@ fn controls_screen(app: &mut App) -> Option<Screen> {
     // панель настроек
     let pw = w * 0.5;
     let (px, py) = (w * 0.25, h * 0.3);
-    draw_rectangle(px, py, pw, h * 0.22, Color::new(0.0, 0.0, 0.0, 0.7));
     let bh = 32.0 * s;
+    draw_rectangle(px, py, pw, 26.0 * s + bh * 5.0 + 8.0 * s, Color::new(0.0, 0.0, 0.0, 0.7));
     let label = app.touch_edit.map_or("Кнопка не выбрана".to_string(), |a| format!("Размер «{}»", a.label()));
     if let Some(a) = app.touch_edit {
         let (x, y, r) = app.touch_layout.get(a);
@@ -5085,8 +5092,17 @@ fn controls_screen(app: &mut App) -> Option<Screen> {
     app.touch_layout.opacity = app.ui.slider(22, px + 10.0 * s, py + 12.0 * s + bh, pw - 20.0 * s, bh, &format!("Прозрачность: {:.0}%", op * 100.0), op, 0.1, 1.0);
     let sc = app.touch_layout.scale;
     app.touch_layout.scale = app.ui.slider(23, px + 10.0 * s, py + 16.0 * s + bh * 2.0, pw - 20.0 * s, bh, &format!("Все кнопки: {:.0}%", sc * 100.0), sc, 0.6, 1.8);
-    let by = py + 22.0 * s + bh * 3.0;
     let half = (pw - 30.0 * s) / 2.0;
+    let ty = py + 20.0 * s + bh * 3.0;
+    let lab = format!("Подписи: {}", if app.touch_layout.labels { "Вкл" } else { "Выкл" });
+    if app.ui.button_small(px + 10.0 * s, ty, half, bh, &lab) {
+        app.touch_layout.labels = !app.touch_layout.labels;
+    }
+    let tap = format!("Касание экрана: {}", if app.touch_layout.tap { "Вкл" } else { "Выкл" });
+    if app.ui.button_small(px + 20.0 * s + half, ty, half, bh, &tap) {
+        app.touch_layout.tap = !app.touch_layout.tap;
+    }
+    let by = ty + bh + 6.0 * s;
     if app.ui.button_small(px + 10.0 * s, by, half, bh, "Сбросить") {
         app.touch_layout = touch::Layout::default();
         app.touch_edit = None;

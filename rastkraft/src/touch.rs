@@ -30,20 +30,21 @@ pub const ACTS: [Act; 14] = [
 ];
 
 impl Act {
+    /// Подпись под кнопкой.
     pub fn label(self) -> &'static str {
         match self {
-            Act::Jump => "▲",
-            Act::Attack => "Удар",
-            Act::Use => "Исп.",
-            Act::Sneak => "Присед",
+            Act::Jump => "Прыжок",
+            Act::Attack => "Ломать",
+            Act::Use => "Ставить",
+            Act::Sneak => "Присесть",
             Act::Sprint => "Бег",
             Act::Inventory => "Сумка",
-            Act::Pause => "II",
+            Act::Pause => "Меню",
             Act::Map => "Карта",
-            Act::Book => "Книга",
+            Act::Book => "Рецепты",
             Act::Chat => "Чат",
             Act::Fly => "Полёт",
-            Act::Camera => "Вид",
+            Act::Camera => "Камера",
             Act::Drop => "Бросить",
             Act::Players => "Игроки",
         }
@@ -100,6 +101,8 @@ pub struct Out {
     pub pressed: [bool; 14],
     /// Нажатая ячейка панели быстрого доступа.
     pub hotbar: Option<usize>,
+    /// Короткое касание экрана: по существу — удар, иначе — поставить/использовать.
+    pub tap: bool,
 }
 
 impl Out {
@@ -117,11 +120,15 @@ pub struct Layout {
     pub pos: HashMap<Act, (f32, f32, f32)>,
     pub opacity: f32,
     pub scale: f32,
+    /// Подписи под кнопками.
+    pub labels: bool,
+    /// Касание экрана — поставить/использовать, удержание — ломать/бить.
+    pub tap: bool,
 }
 
 impl Default for Layout {
     fn default() -> Self {
-        Layout { pos: ACTS.iter().map(|a| (*a, a.default_pos())).collect(), opacity: 0.55, scale: 1.0 }
+        Layout { pos: ACTS.iter().map(|a| (*a, a.default_pos())).collect(), opacity: 0.6, scale: 1.0, labels: true, tap: true }
     }
 }
 
@@ -137,6 +144,8 @@ impl Layout {
         }).collect();
         v.push(format!("opacity:{:.2}:0:0", self.opacity));
         v.push(format!("scale:{:.2}:0:0", self.scale));
+        v.push(format!("labels:{}:0:0", self.labels as u8));
+        v.push(format!("tap:{}:0:0", self.tap as u8));
         v.join(";")
     }
     pub fn from_text(t: &str) -> Layout {
@@ -150,6 +159,8 @@ impl Layout {
             match f[0] {
                 "opacity" => l.opacity = num(1).unwrap_or(l.opacity).clamp(0.1, 1.0),
                 "scale" => l.scale = num(1).unwrap_or(l.scale).clamp(0.6, 1.8),
+                "labels" => l.labels = f[1] != "0",
+                "tap" => l.tap = f[1] != "0",
                 k => {
                     if let (Some(a), Some(x), Some(y), Some(r)) = (ACTS.iter().find(|a| a.key() == k), num(1), num(2), num(3)) {
                         l.pos.insert(*a, (x.clamp(0.0, 1.0), y.clamp(0.0, 1.0), r.clamp(0.02, 0.2)));
@@ -161,13 +172,29 @@ impl Layout {
     }
 }
 
+/// Палец, которым водят по экрану: обзор, касание и удержание.
+#[derive(Clone, Copy)]
+struct Look {
+    id: u64,
+    last: Vec2,
+    start: Vec2,
+    t0: f64,
+    /// Насколько далеко палец уходил от места касания.
+    moved: f32,
+    /// Палец держат на месте — ломаем/бьём.
+    holding: bool,
+}
+
+/// Сколько держать палец, чтобы начать ломать (с).
+const HOLD_TIME: f64 = 0.3;
+
 #[derive(Default)]
 struct State {
     out: Out,
     /// Палец на джойстике: (номер касания, центр).
     stick: Option<(u64, Vec2)>,
-    /// Палец обзора: (номер касания, прошлое положение).
-    look: Option<(u64, Vec2)>,
+    /// Палец обзора.
+    look: Option<Look>,
     /// Пальцы на кнопках.
     buttons: HashMap<u64, Act>,
     /// Где джойстик рисовать (центр, отклонение).
@@ -212,6 +239,8 @@ pub fn update(layout: &Layout, enabled: bool, playing: bool, hotbar: (f32, f32, 
             vec2(x * w, y * h)
         };
         let stick_r = 0.13 * h * layout.scale;
+        let tap_slop = h * 0.025;
+        let now = get_time();
         for t in touches() {
             let p = t.position;
             match t.phase {
@@ -234,7 +263,7 @@ pub fn update(layout: &Layout, enabled: bool, playing: bool, hotbar: (f32, f32, 
                     if p.x < w * 0.42 && p.y > h * 0.3 && st.stick.is_none() {
                         st.stick = Some((t.id, p));
                     } else if st.look.is_none() {
-                        st.look = Some((t.id, p));
+                        st.look = Some(Look { id: t.id, last: p, start: p, t0: now, moved: 0.0, holding: false });
                     }
                 }
                 TouchPhase::Moved | TouchPhase::Stationary => {
@@ -251,11 +280,19 @@ pub fn update(layout: &Layout, enabled: bool, playing: bool, hotbar: (f32, f32, 
                             }
                         }
                     }
-                    if let Some((id, last)) = st.look {
-                        if id == t.id {
-                            st.out.look += p - last;
-                            st.look = Some((id, p));
+                    if let Some(mut l) = st.look.filter(|l| l.id == t.id) {
+                        st.out.look += p - l.last;
+                        l.last = p;
+                        l.moved = l.moved.max((p - l.start).length());
+                        // держат палец на месте — начинаем ломать
+                        if layout.tap && !l.holding && l.moved < tap_slop && now - l.t0 > HOLD_TIME {
+                            l.holding = true;
+                            st.out.pressed[Act::Attack as usize] = true;
                         }
+                        if l.holding {
+                            st.out.down[Act::Attack as usize] = true;
+                        }
+                        st.look = Some(l);
                     }
                     if let Some(a) = st.buttons.get(&t.id).copied() {
                         st.out.down[a as usize] = true;
@@ -266,7 +303,11 @@ pub fn update(layout: &Layout, enabled: bool, playing: bool, hotbar: (f32, f32, 
                         st.stick = None;
                         st.stick_draw = None;
                     }
-                    if st.look.is_some_and(|(id, _)| id == t.id) {
+                    if let Some(l) = st.look.filter(|l| l.id == t.id) {
+                        // короткое касание на месте — поставить блок/использовать
+                        if layout.tap && t.phase == TouchPhase::Ended && !l.holding && l.moved < tap_slop && now - l.t0 < HOLD_TIME {
+                            st.out.tap = true;
+                        }
                         st.look = None;
                     }
                     st.buttons.remove(&t.id);
@@ -287,6 +328,147 @@ pub fn update(layout: &Layout, enabled: bool, playing: bool, hotbar: (f32, f32, 
     });
 }
 
+fn quad(a: Vec2, b: Vec2, c: Vec2, d: Vec2, col: Color) {
+    draw_triangle(a, b, c, col);
+    draw_triangle(a, c, d, col);
+}
+
+fn line(a: Vec2, b: Vec2, w: f32, col: Color) {
+    draw_line(a.x, a.y, b.x, b.y, w, col);
+}
+
+/// Нарисовать значок действия в круге радиуса `r` с центром `c`.
+pub fn draw_icon(act: Act, c: Vec2, r: f32, col: Color) {
+    let u = r * 0.55;
+    let lw = (r * 0.11).max(2.0);
+    let v = |x: f32, y: f32| c + vec2(x * u, y * u);
+    let dim = Color::new(col.r * 0.75, col.g * 0.75, col.b * 0.75, col.a);
+    let dark = Color::new(col.r * 0.5, col.g * 0.5, col.b * 0.5, col.a);
+    let bg = Color::new(0.05, 0.06, 0.08, col.a);
+    match act {
+        Act::Jump => {
+            draw_triangle(v(0.0, -0.95), v(-0.85, 0.05), v(0.85, 0.05), col);
+            quad(v(-0.3, 0.0), v(0.3, 0.0), v(0.3, 0.85), v(-0.3, 0.85), col);
+        }
+        Act::Attack => {
+            // кирка
+            let (a, b) = (v(-0.75, 0.8), v(0.35, -0.3));
+            line(a, b, lw * 1.3, Color::new(0.75, 0.55, 0.3, col.a));
+            let head = [v(-0.45, -0.55), v(0.0, -0.75), v(0.45, -0.6), v(0.75, -0.2), v(0.65, 0.3)];
+            for k in 0..4 {
+                line(head[k], head[k + 1], lw * 1.8, col);
+            }
+        }
+        Act::Use => {
+            // блок
+            let (t, rr, m, l) = (v(0.0, -0.85), v(0.8, -0.42), v(0.0, 0.0), v(-0.8, -0.42));
+            let d = vec2(0.0, 0.85 * u);
+            quad(t, rr, m, l, col);
+            quad(l, m, m + d, l + d, dim);
+            quad(m, rr, rr + d, m + d, dark);
+        }
+        Act::Sneak => {
+            for k in 0..2 {
+                let y = -0.55 + k as f32 * 0.65;
+                line(v(-0.7, y), v(0.0, y + 0.5), lw * 1.3, col);
+                line(v(0.0, y + 0.5), v(0.7, y), lw * 1.3, col);
+            }
+        }
+        Act::Sprint => {
+            for k in 0..2 {
+                let x = -0.6 + k as f32 * 0.65;
+                line(v(x, -0.7), v(x + 0.5, 0.0), lw * 1.3, col);
+                line(v(x + 0.5, 0.0), v(x, 0.7), lw * 1.3, col);
+            }
+        }
+        Act::Inventory => {
+            // рюкзак: ручка, скруглённый верх, карман
+            draw_circle_lines(c.x, c.y - 0.85 * u, 0.2 * u, lw * 0.8, col);
+            draw_circle(c.x, c.y - 0.2 * u, 0.68 * u, col);
+            quad(v(-0.68, -0.2), v(0.68, -0.2), v(0.68, 0.85), v(-0.68, 0.85), col);
+            quad(v(-0.42, 0.2), v(0.42, 0.2), v(0.42, 0.68), v(-0.42, 0.68), dark);
+            line(v(-0.42, 0.2), v(0.42, 0.2), lw * 0.7, bg);
+        }
+        Act::Pause => {
+            // меню: три полоски
+            for k in 0..3 {
+                let y = -0.55 + k as f32 * 0.55;
+                quad(v(-0.75, y - 0.12), v(0.75, y - 0.12), v(0.75, y + 0.12), v(-0.75, y + 0.12), col);
+            }
+        }
+        Act::Map => {
+            let xs = [-0.85, -0.28, 0.28, 0.85];
+            let top = [-0.6, -0.8, -0.6, -0.8];
+            for k in 0..3 {
+                let cc = if k % 2 == 0 { col } else { dim };
+                quad(v(xs[k], top[k]), v(xs[k + 1], top[k + 1]), v(xs[k + 1], top[k + 1] + 1.4), v(xs[k], top[k] + 1.4), cc);
+            }
+            draw_circle(c.x + 0.1 * u, c.y - 0.05 * u, 0.2 * u, Color::new(0.9, 0.2, 0.15, col.a));
+        }
+        Act::Book => {
+            quad(v(-0.9, -0.6), v(-0.05, -0.45), v(-0.05, 0.75), v(-0.9, 0.6), col);
+            quad(v(0.05, -0.45), v(0.9, -0.6), v(0.9, 0.6), v(0.05, 0.75), dim);
+            for k in 0..3 {
+                let y = -0.2 + k as f32 * 0.3;
+                line(v(-0.7, y), v(-0.25, y + 0.07), lw * 0.6, bg);
+                line(v(0.25, y + 0.07), v(0.7, y), lw * 0.6, bg);
+            }
+        }
+        Act::Chat => {
+            quad(v(-0.85, -0.65), v(0.85, -0.65), v(0.85, 0.35), v(-0.85, 0.35), col);
+            draw_triangle(v(-0.45, 0.3), v(-0.05, 0.3), v(-0.55, 0.85), col);
+            for k in 0..3 {
+                draw_circle(c.x + (k as f32 - 1.0) * 0.45 * u, c.y - 0.15 * u, 0.12 * u, bg);
+            }
+        }
+        Act::Fly => {
+            // крылья
+            for sx in [-1.0f32, 1.0] {
+                draw_triangle(v(0.1 * sx, 0.1), v(0.95 * sx, -0.7), v(0.75 * sx, 0.15), col);
+                draw_triangle(v(0.1 * sx, 0.1), v(0.75 * sx, 0.15), v(0.45 * sx, 0.6), dim);
+            }
+            draw_circle(c.x, c.y + 0.05 * u, 0.2 * u, col);
+        }
+        Act::Camera => {
+            // глаз
+            draw_ellipse(c.x, c.y, 0.9 * u, 0.5 * u, 0.0, col);
+            draw_circle(c.x, c.y, 0.36 * u, bg);
+            draw_circle(c.x, c.y, 0.18 * u, col);
+        }
+        Act::Drop => {
+            quad(v(-0.22, -0.85), v(0.22, -0.85), v(0.22, 0.0), v(-0.22, 0.0), col);
+            draw_triangle(v(-0.6, -0.05), v(0.6, -0.05), v(0.0, 0.55), col);
+            line(v(-0.8, 0.8), v(0.8, 0.8), lw * 1.2, col);
+        }
+        Act::Players => {
+            for (k, dx) in [(1, 0.35f32), (0, -0.3)] {
+                let cc = if k == 1 { dim } else { col };
+                draw_circle(c.x + dx * u, c.y - 0.4 * u, 0.28 * u, cc);
+                draw_circle(c.x + dx * u, c.y + 0.45 * u, 0.42 * u, cc);
+                draw_rectangle(c.x + (dx - 0.42) * u, c.y + 0.45 * u, 0.84 * u, 0.4 * u, cc);
+            }
+        }
+    }
+}
+
+/// Нарисовать одну кнопку: круг, значок и подпись.
+pub fn draw_button(act: Act, c: Vec2, r: f32, on: bool, a: f32, labels: bool, ui: &crate::ui::Ui) {
+    let fill = if on { Color::new(1.0, 0.72, 0.2, (a * 0.85).min(1.0)) } else { Color::new(0.05, 0.06, 0.08, a * 0.6) };
+    draw_circle(c.x, c.y, r, fill);
+    draw_circle_lines(c.x, c.y, r, 2.0, Color::new(1.0, 1.0, 1.0, a * 0.7));
+    let ic = if on { Color::new(0.1, 0.08, 0.02, 1.0) } else { Color::new(1.0, 1.0, 1.0, (a + 0.3).min(1.0)) };
+    draw_icon(act, c, r, ic);
+    if labels {
+        let size = 11.0;
+        let px = size * ui.s;
+        let h = screen_height();
+        // подпись под кнопкой, у нижнего края — над ней
+        let y = if c.y + r + px * 1.2 > h { c.y - r - px * 0.35 } else { c.y + r + px * 0.95 };
+        ui.text_center(act.label(), c.x + 1.0, y + 1.0, size, Color::new(0.0, 0.0, 0.0, (a + 0.2).min(0.9)));
+        ui.text_center(act.label(), c.x, y, size, Color::new(1.0, 1.0, 1.0, (a + 0.35).min(1.0)));
+    }
+}
+
 /// Нарисовать джойстик и кнопки поверх игры.
 pub fn draw(layout: &Layout, ui: &crate::ui::Ui, creative: bool) {
     let (w, h) = (screen_width(), screen_height());
@@ -303,12 +485,7 @@ pub fn draw(layout: &Layout, ui: &crate::ui::Ui, creative: bool) {
                 continue;
             }
             let (x, y, r) = layout.get(act);
-            let (x, y, r) = (x * w, y * h, r * h * layout.scale);
-            let on = st.out.down[act as usize];
-            draw_circle(x, y, r, if on { Color::new(1.0, 0.75, 0.25, a * 0.7) } else { Color::new(0.05, 0.06, 0.08, a * 0.6) });
-            draw_circle_lines(x, y, r, 2.0, Color::new(1.0, 1.0, 1.0, a * 0.7));
-            let size = (r / ui.s * 0.42).clamp(9.0, 22.0);
-            ui.text_center(act.label(), x, y + size * ui.s * 0.36, size, Color::new(1.0, 1.0, 1.0, (a + 0.25).min(1.0)));
+            draw_button(act, vec2(x * w, y * h), r * h * layout.scale, st.out.down[act as usize], a, layout.labels, ui);
         }
     });
 }
