@@ -165,7 +165,15 @@ impl Ui {
             Item::Empty => {}
             Item::Block(b) => {
                 let d = blocks::def(b);
-                if d.shape == Shape::Cross {
+                let flat = match crate::shapes::form(b) {
+                    Some(crate::shapes::Form::Door { m, .. }) => Some(blocks::reg().door_tex[m as usize][1]),
+                    Some(crate::shapes::Form::Trapdoor { m, .. }) => Some(blocks::reg().door_tex[m as usize][2]),
+                    Some(crate::shapes::Form::Pane) => Some(d.tex[1]),
+                    _ => None,
+                };
+                if let Some(t) = flat {
+                    self.sprite(t, x + size * 0.1, y + size * 0.1, size * 0.8, 0.0, WHITE);
+                } else if d.shape == Shape::Cross {
                     self.sprite(d.tex[1], x + size * 0.1, y + size * 0.1, size * 0.8, 0.0, WHITE);
                 } else {
                     iso_cube(&self.atlas, d.tex[0], d.tex[1], x + size / 2.0, y + size / 2.0, size * 0.86);

@@ -20,19 +20,46 @@ impl Body {
         Body { pos, vel: Vec3::ZERO, hw, h, on_ground: false, hit_wall: false }
     }
 
-    pub fn collides_at(&self, world: &World, p: Vec3) -> bool {
+    /// Обойти все твёрдые коробки, пересекающие тело в точке p (у фигурных блоков — их части).
+    /// f возвращает false, чтобы остановиться.
+    fn for_boxes(&self, world: &World, p: Vec3, mut f: impl FnMut(Vec3, Vec3) -> bool) {
         let min = p - vec3(self.hw, 0.0, self.hw);
         let max = p + vec3(self.hw, self.h, self.hw);
-        for y in min.y.floor() as i32..=(max.y - 1e-4).floor() as i32 {
+        let hit = |bmin: Vec3, bmax: Vec3| min.x < bmax.x && max.x > bmin.x && min.y < bmax.y && max.y > bmin.y && min.z < bmax.z && max.z > bmin.z;
+        let mut scratch: Vec<crate::shapes::Bx> = Vec::new();
+        // на клетку ниже — заборы выше полутора блоков
+        for y in min.y.floor() as i32 - 1..=(max.y - 1e-4).floor() as i32 {
             for z in min.z.floor() as i32..=(max.z - 1e-4).floor() as i32 {
                 for x in min.x.floor() as i32..=(max.x - 1e-4).floor() as i32 {
+                    let c = vec3(x as f32, y as f32, z as f32);
                     if world.solid_at(x, y, z) {
-                        return true;
+                        if hit(c, c + Vec3::ONE) && !f(c, c + Vec3::ONE) {
+                            return;
+                        }
+                        continue;
+                    }
+                    let b = world.get(x, y, z);
+                    if let Some(form) = crate::shapes::form(b) {
+                        let conn = crate::shapes::conn_at(|a, b2, c2| world.get(a, b2, c2), form, x, y, z);
+                        crate::shapes::boxes(form, conn, true, &mut scratch);
+                        for (bmin, bmax) in &scratch {
+                            if hit(c + *bmin, c + *bmax) && !f(c + *bmin, c + *bmax) {
+                                return;
+                            }
+                        }
                     }
                 }
             }
         }
-        false
+    }
+
+    pub fn collides_at(&self, world: &World, p: Vec3) -> bool {
+        let mut any = false;
+        self.for_boxes(world, p, |_, _| {
+            any = true;
+            false
+        });
+        any
     }
 
     /// Пересекает ли тело клетку блока.
@@ -86,15 +113,34 @@ impl Body {
             if !self.collides_at(world, self.pos) {
                 continue;
             }
+            // граница ближайшей мешающей коробки по оси движения
+            let (mut lo, mut hi, mut top) = (f32::MAX, f32::MIN, f32::MIN);
+            self.for_boxes(world, self.pos, |bmin, bmax| {
+                lo = lo.min(bmin[axis]);
+                hi = hi.max(bmax[axis]);
+                top = top.max(bmax.y);
+                true
+            });
+            // невысокий порожек (ступенька, полублок) — шагаем наверх
+            if axis != 1 && self.on_ground {
+                let need = top - before.y;
+                if need > 0.0 && need <= 0.6 {
+                    let up = vec3(self.pos.x, before.y + need + 1e-3, self.pos.z);
+                    if !self.collides_at(world, up) {
+                        self.pos = up;
+                        continue;
+                    }
+                }
+            }
             const EPS: f32 = 1e-3;
             match (axis, step > 0.0) {
                 (1, false) => {
-                    self.pos.y = self.pos.y.floor() + 1.0;
+                    self.pos.y = hi;
                     self.on_ground = true;
                 }
-                (1, true) => self.pos.y = (self.pos.y + self.h).floor() - self.h - EPS,
-                (a, true) => self.pos[a] = (self.pos[a] + self.hw).floor() - self.hw - EPS,
-                (a, false) => self.pos[a] = (self.pos[a] - self.hw).floor() + 1.0 + self.hw + EPS,
+                (1, true) => self.pos.y = lo - self.h - EPS,
+                (a, true) => self.pos[a] = lo - self.hw - EPS,
+                (a, false) => self.pos[a] = hi + self.hw + EPS,
             }
             if self.collides_at(world, self.pos) {
                 self.pos = before;

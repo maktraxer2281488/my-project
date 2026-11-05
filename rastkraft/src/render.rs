@@ -47,7 +47,7 @@ void main() {
         p.y += sin(time * 1.6 + w.x * 0.55 + w.z * 0.35) * 0.045 + sin(time * 2.3 + w.z * 0.8) * 0.025 - 0.05;
     }
     gl_Position = mvp * vec4(p, 1.0);
-    uv = in_uvt.xy;
+    uv = in_uvt.xy / 16.0;
     vec4 l = in_light / 255.0;
     float sky = pow(0.8, (1.0 - l.r) * 15.0) * daylight;
     float blk = pow(0.8, (1.0 - l.g) * 15.0) * step(0.01, l.g);

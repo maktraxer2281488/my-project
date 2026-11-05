@@ -165,7 +165,20 @@ impl World {
         while t <= max {
             let b = self.get(p.x, p.y, p.z);
             if b != AIR && blocks::def(b).shape != blocks::Shape::Liquid {
-                return Some((p, prev, t));
+                match crate::shapes::form(b) {
+                    // фигурный блок: попадание только в его части
+                    Some(f) => {
+                        let conn = crate::shapes::conn_at(|a, b2, c| self.get(a, b2, c), f, p.x, p.y, p.z);
+                        let mut bx = Vec::new();
+                        crate::shapes::boxes(f, conn, false, &mut bx);
+                        let c = p.as_vec3();
+                        let best = bx.iter().filter_map(|(mn, mx)| crate::mobs::ray_aabb(origin, dir, c + *mn, c + *mx)).fold(f32::MAX, f32::min);
+                        if best <= max {
+                            return Some((p, prev, best));
+                        }
+                    }
+                    None => return Some((p, prev, t)),
+                }
             }
             prev = p;
             if t_max.x < t_max.y && t_max.x < t_max.z {

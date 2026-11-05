@@ -423,6 +423,28 @@ fn build() -> Vec<Recipe> {
     r((t(it::CHERRIES), 4), &[(b(SAKURA_LEAVES + 0), 4)], Hand);
     r((t(it::GRAPES), 2), &[(b(WILLOW_LEAVES), 4)], Hand);
     r((t(it::LEMON), 2), &[(b(ACACIA_LEAVES), 4)], Hand);
+    // ===== v0.15: фигурные блоки =====
+    {
+        use crate::shapes::{self as sh, Form};
+        for (m, &mat) in sh::SLAB_MATS.iter().enumerate() {
+            let m = m as u8;
+            r((b(sh::id(Form::Slab { m, top: false })), 6), &[(b(mat), 3)], Workbench);
+            r((b(sh::id(Form::Stairs { m, dir: 0, top: false })), 4), &[(b(mat), 6)], Workbench);
+            r((b(mat), 1), &[(b(sh::id(Form::Slab { m, top: false })), 2)], Hand);
+        }
+        for (m, &mat) in sh::DOOR_MATS.iter().enumerate() {
+            let m = m as u8;
+            let src = if m == 11 { t(it::IRON_INGOT) } else { b(mat) };
+            r((b(sh::id(Form::Door { m, dir: 0, open: false, upper: false })), 3), &[(src, 6)], Workbench);
+            r((b(sh::id(Form::Trapdoor { m, dir: 0, open: false, top: false })), 2), &[(src, 6)], Workbench);
+        }
+        for (m, &mat) in sh::FENCE_MATS.iter().enumerate() {
+            let m = m as u8;
+            r((b(sh::id(Form::Fence { m })), 3), &[(b(mat), 4), (t(it::STICK), 2)], Workbench);
+            r((b(sh::id(Form::Gate { m, axis: 0, open: false })), 1), &[(b(mat), 2), (t(it::STICK), 4)], Workbench);
+        }
+        r((b(sh::PANE), 16), &[(b(GLASS), 6)], Workbench);
+    }
     // ===== v0.11: призыв боссов =====
     use crate::mobdefs::by_name;
     let tr = |name: &str| t(items::mob_drop(by_name(name)));

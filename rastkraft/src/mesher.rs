@@ -25,7 +25,9 @@ impl V {
     #[inline]
     pub fn new(pos: [f32; 3], uv: [f32; 2], tile: u16, light: [u8; 4]) -> V {
         let q = |v: f32| (v * 64.0).round().clamp(0.0, 65535.0) as u16;
-        V { pos: [q(pos[0]), q(pos[1]), q(pos[2]), 0], uvt: [uv[0] as u8, uv[1] as u8, (tile & 0xff) as u8, (tile >> 8) as u8], light }
+        // u, v хранятся в 1/16 блока (до 15.9 блока): так можно задавать половинки граней
+        let t = |v: f32| (v * 16.0).round().clamp(0.0, 255.0) as u8;
+        V { pos: [q(pos[0]), q(pos[1]), q(pos[2]), 0], uvt: [t(uv[0]), t(uv[1]), (tile & 0xff) as u8, (tile >> 8) as u8], light }
     }
 }
 
@@ -298,6 +300,7 @@ pub fn build(n: &Nbhd, smooth: bool) -> MeshData {
     build_lod(n, &light, &mut out);
     // объединяемые грани по направлениям: [dir][x][y][z]
     let mut mask: Vec<Option<Key>> = vec![None; 6 * SX * SY * SX];
+    let mut form_boxes: Vec<crate::shapes::Bx> = Vec::with_capacity(8);
     let mi = |dir: usize, x: i32, y: i32, z: i32| ((dir * SX + x as usize) * SY + y as usize) * SX + z as usize;
 
     for y in 0..CH {
@@ -308,6 +311,10 @@ pub fn build(n: &Nbhd, smooth: bool) -> MeshData {
                     continue;
                 }
                 let d = &reg.defs[b as usize];
+                if d.shape == Shape::Form {
+                    emit_form(n, &light, x, y, z, b, &mut out, &mut form_boxes);
+                    continue;
+                }
                 if d.shape == Shape::Cross {
                     let (s, l) = light.at(x, y, z);
                     let org = tile_origin(d.tex[1]);
@@ -465,7 +472,7 @@ pub fn build(n: &Nbhd, smooth: bool) -> MeshData {
                         continue;
                     }
                     let Some(key) = at(a0, b0) else { continue };
-                    let max = if key.pass == Pass::Water || key.light[3] == 251 { 4 } else { 16 };
+                    let max = if key.pass == Pass::Water || key.light[3] == 251 { 4 } else { 15 };
                     let mut w = 1;
                     while a0 + w < ta_n && w < max && !used[(b0 * ta_n + a0 + w) as usize] && at(a0 + w, b0) == Some(key) {
                         w += 1;
@@ -629,7 +636,7 @@ fn build_lod(n: &Nbhd, light: &Light, out: &mut MeshData) {
                     // склеиваем одинаковые грани вдоль x (для граней ±x — только по одной)
                     let mut len = 1;
                     if nrm[0] == 0 {
-                        while x + len < NX && len < 8 {
+                        while x + len < NX && len < 7 {
                             let c2 = get(x + len, y, z);
                             let nb2 = if edge(x + len + nrm[0], z + nrm[2]) { Cell::Air } else { get(x + len + nrm[0], y + nrm[1], z + nrm[2]) };
                             if face(c2, nb2) != Some(key) {
@@ -661,6 +668,76 @@ fn build_lod(n: &Nbhd, light: &Light, out: &mut MeshData) {
                     push_quad(vv, ii, q, false);
                     x += len;
                 }
+            }
+        }
+    }
+}
+
+
+/// Фигурный блок: грани каждой коробки, свет — без сглаживания.
+#[allow(clippy::too_many_arguments)]
+fn emit_form(n: &Nbhd, light: &Light, x: i32, y: i32, z: i32, b: u16, out: &mut MeshData, bx: &mut Vec<crate::shapes::Bx>) {
+    use crate::shapes::{self as sh, Form};
+    let reg = blocks::reg();
+    let Some(f) = sh::form(b) else { return };
+    let conn = sh::conn_at(|a, b2, c| n.get(a, b2, c), f, x, y, z);
+    sh::boxes(f, conn, false, bx);
+    let base = &reg.defs[sh::base(f) as usize];
+    let door = match f {
+        Form::Door { m, upper, .. } => Some(reg.door_tex[m as usize][upper as usize]),
+        Form::Trapdoor { m, .. } => Some(reg.door_tex[m as usize][2]),
+        _ => None,
+    };
+    let cut = sh::cutout(f);
+    let (s0, l0) = light.at(x, y, z);
+    for (min, max) in bx.iter() {
+        for (fi, (nrm, corners, shade)) in FACES.iter().enumerate() {
+            let na = nrm.iter().position(|&v| v != 0).unwrap();
+            let pos_n = nrm[na] > 0;
+            let on_edge = if pos_n { max[na] >= 0.999 } else { min[na] <= 0.001 };
+            if on_edge {
+                let nb = n.get(x + nrm[0], y + nrm[1], z + nrm[2]);
+                if reg.opaque[nb as usize] {
+                    continue;
+                }
+            }
+            let (s1, l1) = light.at(x + nrm[0], y + nrm[1], z + nrm[2]);
+            let lt = [lb(s0.max(s1) as f32), lb(l0.max(l1) as f32), (shade * 255.0) as u8, 255];
+            // большие грани двери/люка — своей плиткой, рёбра — текстурой материала
+            let face_area = {
+                let mut a = 1.0;
+                for k in 0..3 {
+                    if k != na {
+                        a *= max[k] - min[k];
+                    }
+                }
+                a
+            };
+            let tile = match door {
+                Some(t) if face_area > 0.5 => t,
+                _ => match fi {
+                    2 => base.tex[0],
+                    3 => base.tex[2],
+                    _ => base.tex[1],
+                },
+            };
+            let uax = (0..3).find(|&a| corners[0][a] != corners[1][a]).unwrap();
+            let vax = (0..3).find(|&a| corners[0][a] != corners[3][a]).unwrap();
+            let c0 = corners[0];
+            let mut q = [V::new([0.0; 3], [0.0; 2], tile, lt); 4];
+            for (i, c) in corners.iter().enumerate() {
+                let mut p = [0.0f32; 3];
+                for k in 0..3 {
+                    p[k] = if c[k] > 0.5 { max[k] } else { min[k] };
+                }
+                let u = (p[uax] - c0[uax]).abs();
+                let v = 1.0 - (p[vax] - c0[vax]).abs();
+                q[i] = V::new([x as f32 + p[0], y as f32 + p[1], z as f32 + p[2]], [u, v], tile, lt);
+            }
+            if cut {
+                push_quad(&mut out.cutout_v, &mut out.cutout_i, q, false);
+            } else {
+                push_quad(&mut out.opaque_v, &mut out.opaque_i, q, false);
             }
         }
     }

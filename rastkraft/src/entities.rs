@@ -217,6 +217,12 @@ pub fn block_drops(b: u16, held: Item, r: f32) -> Vec<(Item, u16)> {
     if needs_pick && !pick {
         return vec![];
     }
+    match crate::shapes::form(b) {
+        Some(crate::shapes::Form::Door { upper: true, .. }) => return vec![],
+        Some(crate::shapes::Form::Pane) => return vec![],
+        Some(_) => return one(Item::Block(crate::shapes::canon(b))),
+        None => {}
+    }
     match b {
         AIR | WATER | LAVA | BEDROCK | PORTAL => vec![],
         GRASS | SNOW_GRASS | FARMLAND | PODZOL => one(Item::Block(DIRT)),

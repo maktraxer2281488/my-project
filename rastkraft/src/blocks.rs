@@ -14,6 +14,8 @@ pub enum Shape {
     Cutout,
     Liquid,
     Cross,
+    /// Фигурный блок из коробок (см. shapes.rs).
+    Form,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -318,7 +320,7 @@ pub const PAPER_LANTERN: u16 = 378;
 pub const WEAPON_RACK: u16 = 379;
 pub const TAPESTRY: u16 = 380;
 pub const RUG_BLOCK: u16 = 381;
-pub const BLOCK_COUNT: usize = 382;
+pub const BLOCK_COUNT: usize = crate::shapes::FORM_END as usize;
 
 pub fn is_leaves(b: u16) -> bool {
     matches!(b, OAK_LEAVES | SPRUCE_LEAVES | BIRCH_LEAVES | SAKURA_LEAVES | PALM_LEAVES | GOLDEN_LEAVES | MAPLE_LEAVES | EBONY_LEAVES | WILLOW_LEAVES | ACACIA_LEAVES | MANGROVE_LEAVES | CEDAR_LEAVES)
@@ -335,6 +337,8 @@ pub struct Registry {
     pub solid: Vec<bool>,
     /// Сплошная (без дырок) плитка листвы для «быстрой листвы» и дальних чанков; 0 — нет.
     pub solid_leaf: Vec<u16>,
+    /// Плитки дверей и люков по материалу: [низ двери, верх двери, люк].
+    pub door_tex: Vec<[u16; 3]>,
 }
 
 static ALL: OnceLock<(Registry, Vec<u8>, Vec<u16>)> = OnceLock::new();
@@ -894,6 +898,7 @@ fn leak(s: String) -> &'static str {
 
 fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
     let mut a = Atlas { px: vec![0u8; ATLAS * ATLAS * 4], next: 0 };
+    let mut door_tex_out: Vec<[u16; 3]> = Vec::new();
     let mut defs: Vec<Option<BlockDef>> = vec![None; BLOCK_COUNT];
     let mut put = |id: u16, name: &'static str, tex: [u16; 3], shape: Shape, hardness: f32, tool: ToolNeed, cat: Cat, light: u8| {
         let solid = matches!(shape, Shape::Cube | Shape::Cutout);
@@ -1454,6 +1459,7 @@ fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
     let t = a.add(move |x, y| shade(rgb(232, 226, 206), if x % 5 == 0 { 0.85 } else { 0.97 + hash(x, y, 791) * 0.04 }));
     put(BONE_BLOCK, "Костяной блок", [bt2, t, bt2], Cube, 1.5, Pickaxe, Decor, 0);
 
+
     // ===================== v0.9: новые блоки =====================
     let oak_pl = || t_planks(rgb(196, 152, 96), 510);
     // породы деревьев: (бревно, имена, кора, древесина, листва, вкрапления)
@@ -1807,6 +1813,71 @@ fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
     });
     put(RUG_BLOCK, "Узорный ковёр", [t; 3], Cube, 0.8, Any, Decor, 0);
 
+    // ===================== v0.15: фигурные блоки =====================
+    {
+        use crate::shapes::{self as sh, Form};
+        let names_of = |b: u16| defs[b as usize].as_ref().map(|d| (d.name, d.tex, d.hardness, d.tool)).unwrap();
+        let mut door_tex = Vec::new();
+        for (k, &m) in sh::DOOR_MATS.iter().enumerate() {
+            let (_, tex, _, _) = names_of(m);
+            let t = tex[1] as usize;
+            let (tx, ty) = (t % ATLAS_TILES, t / ATLAS_TILES);
+            let mut src = [[0u8; 4]; TILE * TILE];
+            for y in 0..TILE {
+                for x in 0..TILE {
+                    let i = ((ty * TILE + y) * ATLAS + tx * TILE + x) * 4;
+                    src[y * TILE + x] = [a.px[i], a.px[i + 1], a.px[i + 2], a.px[i + 3]];
+                }
+            }
+            let iron = k == 11;
+            let frame = move |c: [u8; 4]| shade(c, 0.62);
+            // низ двери: рама и филёнки
+            let lower = a.add(move |x, y| {
+                let c = src[(y as usize) * TILE + x as usize];
+                let edge = x <= 1 || x >= 14 || y == 0 || y == 15 || y == 7;
+                let panel = (3..=12).contains(&x) && ((2..=5).contains(&y) || (9..=13).contains(&y));
+                if edge { frame(c) } else if panel { shade(c, 1.08) } else if iron && (x == 3 || x == 12) { shade(c, 0.8) } else { c }
+            });
+            // верх двери: два окошка
+            let upper = a.add(move |x, y| {
+                let c = src[(y as usize) * TILE + x as usize];
+                let edge = x <= 1 || x >= 14 || y == 0 || y == 15;
+                let window = ((3..=6).contains(&x) || (9..=12).contains(&x)) && (3..=10).contains(&y);
+                if edge { frame(c) } else if window { if iron { [40, 40, 46, 255] } else { CLEAR } } else if y == 13 && (11..=12).contains(&x) { rgb(200, 180, 90) } else { c }
+            });
+            // люк: решётка
+            let trap = a.add(move |x, y| {
+                let c = src[(y as usize) * TILE + x as usize];
+                let edge = x <= 1 || x >= 14 || y <= 1 || y >= 14;
+                let hole = (x % 5 == 3 || x % 5 == 4) && (y % 5 == 3 || y % 5 == 4) && !edge;
+                if hole { CLEAR } else if edge { frame(c) } else { c }
+            });
+            door_tex.push([lower, upper, trap]);
+        }
+        let reg_form = |b: u16, f: Form, defs: &mut Vec<Option<BlockDef>>| {
+            let base = sh::base(f);
+            let bd = defs[base as usize].clone().unwrap();
+            let canon = sh::canon(b) == b;
+            let kind = match f {
+                Form::Slab { .. } => "Полублок",
+                Form::Stairs { .. } => "Ступеньки",
+                Form::Door { .. } => "Дверь",
+                Form::Trapdoor { .. } => "Люк",
+                Form::Fence { .. } => "Забор",
+                Form::Gate { .. } => "Калитка",
+                Form::Pane => "Стеклянная панель",
+            };
+            let name = if f == Form::Pane { kind.to_string() } else { format!("{kind}: {}", bd.name.to_lowercase()) };
+            let cat = if !canon { Cat::Hidden } else if matches!(f, Form::Slab { .. } | Form::Stairs { .. }) { Cat::Building } else { Cat::Decor };
+            let hard = if matches!(f, Form::Pane) { 0.3 } else { bd.hardness * 0.8 };
+            defs[b as usize] = Some(BlockDef { name: leak(name), tex: bd.tex, shape: Shape::Form, solid: false, light: 0, hardness: hard, tool: bd.tool, cat });
+        };
+        for b in sh::SLAB0..sh::FORM_END {
+            let f = sh::form(b).unwrap();
+            reg_form(b, f, &mut defs);
+        }
+        door_tex_out = door_tex;
+    }
     // портал проходим насквозь
     let portal = defs[PORTAL as usize].as_mut().unwrap();
     portal.solid = false;
@@ -1870,7 +1941,7 @@ fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
     for t in skins {
         items.extend_from_slice(&t);
     }
-    (Registry { defs, opaque, solid, solid_leaf }, a.px, items)
+    (Registry { defs, opaque, solid, solid_leaf, door_tex: door_tex_out }, a.px, items)
 }
 
 /// Генератор плитки для предметов (используется из items.rs).

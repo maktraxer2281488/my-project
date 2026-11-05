@@ -20,6 +20,7 @@ mod player;
 mod render;
 mod save;
 mod settings;
+mod shapes;
 mod skins;
 mod structures;
 mod ui;
@@ -1360,13 +1361,55 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
             } else if !rmb {
                 g.player.eat_t = 0.0;
             }
+            // двери, люки, калитки открываются по ПКМ (с Shift — ставим блок рядом)
+            if !used && rmb_p && !is_key_down(KeyCode::LeftShift) {
+                if let Some((h, _, b)) = target_block {
+                    if let Some(nb2) = shapes::toggled(b) {
+                        edits.push((h, nb2));
+                        if let Some(shapes::Form::Door { upper, .. }) = shapes::form(b) {
+                            let other = if upper { h - IVec3::Y } else { h + IVec3::Y };
+                            if let Some(ob) = shapes::toggled(world.get(other.x, other.y, other.z)) {
+                                edits.push((other, ob));
+                            }
+                        }
+                        g.swing_p = 0.0;
+                        used = true;
+                    }
+                }
+            }
             if !used && (rmb || rmb_p) && (rmb_p || g.use_cd <= 0.0) {
-                if let (Some((_, prev, _)), Item::Block(nb)) = (target_block, held) {
+                if let (Some((h, prev, _)), Item::Block(nb)) = (target_block, held) {
                     let cur = world.get(prev.x, prev.y, prev.z);
                     let replace = cur == AIR || def(cur).shape == blocks::Shape::Liquid || def(cur).shape == blocks::Shape::Cross;
-                    let blocked = is_solid(nb) && (g.player.body.overlaps_block(prev) || g.mobs.list.iter().any(|m| m.body.overlaps_block(prev)));
-                    if replace && !blocked {
-                        edits.push((prev, nb));
+                    // где именно попали по грани: для полублоков и ступенек сверху/снизу
+                    let hit_t = block_hit.map_or(0.0, |(_, _, t)| t);
+                    let hit_y = eye.y + dir.y * hit_t - prev.y as f32;
+                    let mut nb = shapes::placed(nb, g.player.yaw, hit_y, prev.y < h.y);
+                    let mut at = prev;
+                    let mut ok = replace;
+                    // полублок на такой же полублок — целый блок
+                    if let (Some(shapes::Form::Slab { m, top }), Some(shapes::Form::Slab { m: m2, .. })) = (shapes::form(world.get(h.x, h.y, h.z)), shapes::form(nb)) {
+                        if m == m2 && ((!top && prev.y > h.y) || (top && prev.y < h.y)) {
+                            nb = shapes::SLAB_MATS[m as usize];
+                            at = h;
+                            ok = true;
+                        }
+                    }
+                    let door = matches!(shapes::form(nb), Some(shapes::Form::Door { .. }));
+                    let up = at + IVec3::Y;
+                    if door && world.get(up.x, up.y, up.z) != AIR {
+                        ok = false;
+                    }
+                    let body_hit = |c: IVec3| g.player.body.overlaps_block(c) || g.mobs.list.iter().any(|m| m.body.overlaps_block(c));
+                    let blocked = (is_solid(nb) || shapes::form(nb).is_some()) && (body_hit(at) || (door && body_hit(up)));
+                    if ok && !blocked {
+                        edits.push((at, nb));
+                        if door {
+                            if let Some(shapes::Form::Door { m, dir, open, .. }) = shapes::form(nb) {
+                                edits.push((up, shapes::id(shapes::Form::Door { m, dir, open, upper: true })));
+                            }
+                        }
+                        let prev = at;
                         g.swing_p = 0.0;
                         if nb == CHEST {
                             g.opened.insert([prev.x, prev.y, prev.z]);
@@ -1415,7 +1458,18 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                 }
             }
         }
+        let old_form = app.game.as_ref().and_then(|g| shapes::form(g.world().get(p.x, p.y, p.z)));
         edit_block(app, dim, p, b, true);
+        // сломали половину двери — вторая тоже исчезает
+        if b == AIR {
+            if let Some(shapes::Form::Door { upper, .. }) = old_form {
+                let other = if upper { p - IVec3::Y } else { p + IVec3::Y };
+                let ob = app.game.as_ref().map_or(AIR, |g| g.world().get(other.x, other.y, other.z));
+                if matches!(shapes::form(ob), Some(shapes::Form::Door { .. })) {
+                    edit_block(app, dim, other, AIR, true);
+                }
+            }
+        }
         if b == AIR {
             let mut y = p.y + 1;
             loop {
@@ -3223,6 +3277,38 @@ async fn main() {
                             }
                         }
                         _ => {}
+                    }
+                }
+                // витрина фигурных блоков перед игроком (для проверки)
+                if std::env::var("RK_FORMS").is_ok() && shot_frames == 25 {
+                    if let Some(g) = app.game.as_ref() {
+                        use shapes::Form;
+                        let p = g.player.body.pos.floor().as_ivec3();
+                        let dim = g.dim;
+                        let gy = g.world().surface_y(p.x + 5, p.z);
+                        let mut put: Vec<(IVec3, u16)> = Vec::new();
+                        let base = ivec3(p.x + 5, gy, p.z - 6);
+                        for k in 0..4u8 {
+                            put.push((base + ivec3(0, 0, k as i32), shapes::id(Form::Slab { m: k, top: k % 2 == 1 })));
+                            put.push((base + ivec3(1, 0, k as i32), shapes::id(Form::Stairs { m: k + 8, dir: k, top: false })));
+                        }
+                        put.push((base + ivec3(0, 0, 5), shapes::id(Form::Door { m: 0, dir: 1, open: false, upper: false })));
+                        put.push((base + ivec3(0, 1, 5), shapes::id(Form::Door { m: 0, dir: 1, open: false, upper: true })));
+                        put.push((base + ivec3(0, 0, 6), shapes::id(Form::Door { m: 6, dir: 1, open: true, upper: false })));
+                        put.push((base + ivec3(0, 1, 6), shapes::id(Form::Door { m: 6, dir: 1, open: true, upper: true })));
+                        put.push((base + ivec3(1, 0, 7), shapes::id(Form::Trapdoor { m: 3, dir: 0, open: false, top: false })));
+                        for k in 0..4 {
+                            put.push((base + ivec3(0, 0, 8 + k), shapes::id(Form::Fence { m: 0 })));
+                        }
+                        put.push((base + ivec3(0, 0, 12), shapes::id(Form::Gate { m: 0, axis: 1, open: false })));
+                        put.push((base + ivec3(0, 0, 13), shapes::id(Form::Fence { m: 0 })));
+                        for k in 0..3 {
+                            put.push((base + ivec3(0, 0, 15 + k), shapes::PANE));
+                            put.push((base + ivec3(0, 1, 15 + k), shapes::PANE));
+                        }
+                        for (q, b) in put {
+                            edit_block(&mut app, dim, q, b, false);
+                        }
                     }
                 }
                 if std::env::var("RK_SAVE").is_ok() && shot_frames == 3 {
