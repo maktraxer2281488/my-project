@@ -44,7 +44,7 @@ use net::{Msg, Net, PState, Remote, Remotes};
 use player::{MAX_HEALTH, MAX_HUNGER, Player, break_time};
 use render::{Frame, Loader, Renderer};
 use settings::Settings;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use ui::{ACCENT, Ui};
 use workers::Pool;
 use world::{CS, Dim, World, chunk_of};
@@ -98,6 +98,7 @@ enum Screen {
     Map,
     Trade,
     Enchant,
+    Chest,
     Achievements,
     Look,
     Textures,
@@ -177,6 +178,8 @@ struct Game {
     label_t: f32,
     toast: Option<(String, f32)>,
     opened: HashSet<[i32; 3]>,
+    /// Содержимое сундуков: (измерение, координаты) → 27 ячеек.
+    chests: HashMap<(u8, [i32; 3]), [Stack; inventory::CHEST_SLOTS]>,
     spawned: HashSet<[i32; 3]>,
     autosave_t: f32,
     net: Option<Net>,
@@ -245,6 +248,7 @@ impl Game {
             label_t: 2.0,
             toast: Some(("Добро пожаловать в Расткрафт!".into(), 4.0)),
             opened: HashSet::new(),
+            chests: HashMap::new(),
             spawned: HashSet::new(),
             autosave_t: AUTOSAVE,
             net: None,
@@ -396,6 +400,8 @@ struct App {
     pack_active: String,
     /// Найденные текстур-паки (для экрана «Текстуры и небо»).
     pack_list: Vec<String>,
+    /// Открытый сундук (1 или 2 части — двойной).
+    chest_open: Vec<(u8, [i32; 3])>,
     /// Фоны меню (дизайн kornijavvhe).
     title_bg: Texture2D,
     mp_bg: Texture2D,
@@ -606,6 +612,20 @@ fn save_game(app: &mut App) -> bool {
     kv.set("weather", g.weather);
     let set3 = |s: &HashSet<[i32; 3]>| s.iter().map(|v| format!("{},{},{}", v[0], v[1], v[2])).collect::<Vec<_>>().join(",");
     kv.set("opened", set3(&g.opened));
+    // сундуки: «изм,x,y,z,код,кол,зач,…»; пустые не храним
+    let chests: Vec<String> = g
+        .chests
+        .iter()
+        .filter(|(_, sl)| sl.iter().any(|s| !s.is_empty()))
+        .map(|((d, p), sl)| {
+            let mut v = vec![d.to_string(), p[0].to_string(), p[1].to_string(), p[2].to_string()];
+            for st in sl {
+                v.push(format!("{},{},{}", st.item.code(), st.count, st.ench));
+            }
+            v.join(",")
+        })
+        .collect();
+    kv.set("chests", chests.join(";"));
     kv.set("spawned", set3(&g.spawned));
     if std::fs::write(dir.join("level.txt"), kv.to_text()).is_err() {
         return false;
@@ -700,6 +720,22 @@ fn load_game(app: &mut App, name: &str) -> bool {
     }
     let to_set = |v: Vec<i64>| v.chunks_exact(3).map(|c| [c[0] as i32, c[1] as i32, c[2] as i32]).collect::<HashSet<_>>();
     g.opened = to_set(kv.ints("opened"));
+    g.chests.clear();
+    for rec in kv.get("chests").unwrap_or("").split(';').filter(|r| !r.is_empty()) {
+        let v: Vec<i64> = rec.split(',').filter_map(|x| x.parse().ok()).collect();
+        if v.len() != 4 + inventory::CHEST_SLOTS * 3 {
+            continue;
+        }
+        let mut sl = [Stack::EMPTY; inventory::CHEST_SLOTS];
+        for (i, st) in sl.iter_mut().enumerate() {
+            let b = 4 + i * 3;
+            let item = Item::from_code(v[b] as u32);
+            if item != Item::Empty && v[b + 1] > 0 {
+                *st = Stack { item, count: v[b + 1] as u16, ench: v[b + 2] as u8 };
+            }
+        }
+        g.chests.insert((v[0] as u8, [v[1] as i32, v[2] as i32, v[3] as i32]), sl);
+    }
     g.spawned = to_set(kv.ints("spawned"));
     g.worlds[0].stored = save::load_chunks(&dir, "ow");
     g.worlds[1].stored = save::load_chunks(&dir, "hv");
@@ -1233,6 +1269,7 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
     let mut to_dim: Option<Dim> = None;
     let mut died = false;
     let mut open_inv = false;
+    let mut open_chest: Option<Vec<(u8, [i32; 3])>> = None;
     let mut open_book = false;
     let mut open_trade: Option<(usize, u32)> = None;
     let mut open_enchant = false;
@@ -1709,6 +1746,14 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                         }
                         if g.break_progress >= 1.0 {
                             edits.push((hit, AIR));
+                            if b == CHEST {
+                                if let Some(sl) = g.chests.remove(&(dim_code(dim), [hit.x, hit.y, hit.z])) {
+                                    for st in sl.iter().filter(|s| !s.is_empty()) {
+                                        let rr = xr(&mut g.rng);
+                                        g.ents.spawn_drop(st.item, st.count, hit.as_vec3() + Vec3::splat(0.5), rr);
+                                    }
+                                }
+                            }
                             let r = xr(&mut g.rng);
                             for (it, n) in entities::block_drops(b, held, r) {
                                 let rr = xr(&mut g.rng);
@@ -1758,21 +1803,39 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
             if rmb_p && !used {
                 if let Some((h, _, b)) = target_block {
                     if b == CHEST && !g.player.body.overlaps_block(h) {
-                        let key = [h.x, h.y, h.z];
-                        if g.opened.insert(key) {
-                            if h.y < 28 {
-                                g.ach_later.push(ach::DUNGEON);
+                        // двойной сундук: соседний сундук по горизонтали
+                        let mut parts = vec![h];
+                        for d in [IVec3::X, -IVec3::X, IVec3::Z, -IVec3::Z] {
+                            let n = h + d;
+                            if g.world().get(n.x, n.y, n.z) == CHEST {
+                                parts.push(n);
+                                break;
                             }
-                            let tier = if dim == Dim::Heaven { 3 } else if h.y < 45 { 1 } else { 2 };
-                            let seed = (h.x as u32).wrapping_mul(73_856_093) ^ (h.y as u32).wrapping_mul(19_349_663) ^ (h.z as u32).wrapping_mul(83_492_791);
-                            for (it, n) in entities::chest_loot(tier, seed) {
-                                let r = xr(&mut g.rng);
-                                g.ents.spawn_drop(it, n, h.as_vec3() + vec3(0.5, 1.2, 0.5), r);
-                            }
-                            g.toast = Some(("Сундук открыт!".into(), 2.0));
-                        } else {
-                            g.toast = Some(("Сундук пуст".into(), 1.5));
                         }
+                        parts.sort_by_key(|p| (p.x, p.z));
+                        let dc = dim_code(dim);
+                        for p in &parts {
+                            let key = [p.x, p.y, p.z];
+                            let slots = g.chests.entry((dc, key)).or_insert([Stack::EMPTY; inventory::CHEST_SLOTS]);
+                            // найденный сундук: добыча кладётся внутрь (один раз)
+                            if g.opened.insert(key) {
+                                if p.y < 28 {
+                                    g.ach_later.push(ach::DUNGEON);
+                                }
+                                let tier = if dim == Dim::Heaven { 3 } else if p.y < 45 { 1 } else { 2 };
+                                let seed = (p.x as u32).wrapping_mul(73_856_093) ^ (p.y as u32).wrapping_mul(19_349_663) ^ (p.z as u32).wrapping_mul(83_492_791);
+                                for (k, (it, n)) in entities::chest_loot(tier, seed).into_iter().enumerate() {
+                                    // по разным ячейкам, как будто разложено вручную
+                                    let at = (blocks::hash(k as i32, seed as i32, 7) * inventory::CHEST_SLOTS as f32) as usize % inventory::CHEST_SLOTS;
+                                    if slots[at].is_empty() {
+                                        slots[at] = Stack::new(it, n);
+                                    } else {
+                                        inventory::insert(slots, Stack::new(it, n));
+                                    }
+                                }
+                            }
+                        }
+                        open_chest = Some(parts.iter().map(|p| (dc, [p.x, p.y, p.z])).collect::<Vec<_>>());
                         used = true;
                     } else if matches!(b, WORKBENCH | FURNACE | CAULDRON | ANVIL) && !g.player.body.overlaps_block(h) {
                         open_inv = true;
@@ -2247,6 +2310,12 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
     if open_inv {
         app.screen = Screen::Inventory;
         app.just_opened = true;
+    }
+    if let Some(c) = open_chest {
+        app.chest_open = c;
+        app.screen = Screen::Chest;
+        app.just_opened = true;
+        app.sfx.push((music::Sfx::Click, 0.6));
     }
     if open_book {
         open_recipe_book(app);
@@ -3020,6 +3089,108 @@ fn dead_screen(app: &mut App) -> Option<Screen> {
     if app.ui.button(bx, h * 0.42 + bh + 12.0 * s, bw, bh, "Главное меню") {
         leave_world(app);
         return Some(Screen::Title);
+    }
+    None
+}
+
+/// Окно сундука: сверху сундук (27 или 54 ячейки), снизу рюкзак.
+/// ЛКМ — взять/положить, ПКМ — половину/по одному, Shift+щелчок — перенести стопку.
+fn chest_screen(app: &mut App) -> Option<Screen> {
+    let (w, h) = (screen_width(), screen_height());
+    let s = app.ui.s;
+    draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
+    let parts = app.chest_open.clone();
+    let rows = parts.len() * 3;
+    let slot = (44.0 * s).min((h * 0.9 - 150.0 * s) / (rows as f32 + 4.5)).max(24.0);
+    let gap = 5.0 * s;
+    let grid_w = 9.0 * (slot + gap) - gap;
+    let pw = grid_w + 40.0 * s;
+    let ph = 40.0 * s + rows as f32 * (slot + gap) + 36.0 * s + 4.0 * (slot + gap) + 24.0 * s;
+    let (px, py) = ((w - pw) / 2.0, (h - ph) / 2.0);
+    app.ui.panel(px, py, pw, ph);
+    let gx = px + 20.0 * s;
+    app.ui.text(if parts.len() > 1 { "Большой сундук" } else { "Сундук" }, gx, py + 28.0 * s, 18.0, WHITE);
+    app.ui.text("Shift+щелчок — перенести", gx + grid_w - app.ui.measure("Shift+щелчок — перенести", 12.0), py + 28.0 * s, 12.0, GRAY);
+    let mut cursor = app.cursor;
+    let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
+    let g = app.game.as_mut().unwrap();
+    // сундук пропал (сломали по сети и т.п.) — закрываем
+    if parts.iter().any(|k| !g.chests.contains_key(k)) {
+        return Some(Screen::Playing);
+    }
+    let count_text = |ui: &Ui, st: &Stack, x: f32, y: f32| {
+        if st.count > 1 {
+            let t = st.count.to_string();
+            ui.text(&t, x + slot - ui.measure(&t, 12.0) - 3.0 * s, y + slot - 4.0 * s, 12.0, WHITE);
+        }
+    };
+    // ячейки сундука
+    let cy = py + 40.0 * s;
+    for (pi, key) in parts.iter().enumerate() {
+        for i in 0..inventory::CHEST_SLOTS {
+            let row = pi * 3 + i / 9;
+            let (x, y) = (gx + (i % 9) as f32 * (slot + gap), cy + row as f32 * (slot + gap));
+            let st = g.chests[key][i];
+            let (_, click, rclick) = app.ui.slot(x, y, slot, st.item, false);
+            if st.ench != 0 {
+                draw_rectangle(x, y, slot, slot, Color::new(0.65, 0.35, 1.0, 0.2));
+            }
+            count_text(&app.ui, &st, x, y);
+            if click && shift {
+                // в рюкзак
+                let left = inventory::insert(&mut g.player.inv.slots, st);
+                g.chests.get_mut(key).unwrap()[i] = left;
+            } else if click || rclick {
+                inventory::click_stack(&mut g.chests.get_mut(key).unwrap()[i], &mut cursor, rclick);
+            }
+        }
+    }
+    // рюкзак
+    let iy = cy + rows as f32 * (slot + gap) + 30.0 * s;
+    app.ui.text("Рюкзак", gx, iy - 8.0 * s, 15.0, ACCENT);
+    for i in 0..inventory::SLOTS {
+        let (col, row) = if i < 9 { (i, 3) } else { ((i - 9) % 9, (i - 9) / 9) };
+        let x = gx + col as f32 * (slot + gap);
+        let y = iy + row as f32 * (slot + gap) + if row == 3 { 8.0 * s } else { 0.0 };
+        let st = g.player.inv.slots[i];
+        let (_, click, rclick) = app.ui.slot(x, y, slot, st.item, i == g.player.selected);
+        if st.ench != 0 {
+            draw_rectangle(x, y, slot, slot, Color::new(0.65, 0.35, 1.0, 0.2));
+        }
+        count_text(&app.ui, &st, x, y);
+        if click && shift {
+            // в сундук: сначала в первую часть, остаток — во вторую
+            let mut left = st;
+            for key in &parts {
+                left = inventory::insert(g.chests.get_mut(key).unwrap(), left);
+            }
+            g.player.inv.slots[i] = left;
+        } else if click || rclick {
+            g.player.inv.click(i, &mut cursor, rclick);
+        }
+    }
+    if !cursor.is_empty() {
+        let m = app.ui.mouse;
+        app.ui.item_icon(cursor.item, m.x - slot * 0.4, m.y - slot * 0.4, slot * 0.8);
+        if cursor.count > 1 {
+            app.ui.text(&cursor.count.to_string(), m.x + slot * 0.2, m.y + slot * 0.4, 12.0, WHITE);
+        }
+    }
+    let close = !app.just_opened && (is_key_pressed(KeyCode::E) || is_key_pressed(KeyCode::Escape));
+    // далеко отошёл — закрывается сам
+    let far = parts.iter().all(|(_, p)| (vec3(p[0] as f32 + 0.5, p[1] as f32 + 0.5, p[2] as f32 + 0.5) - g.player.eye()).length() > 7.0);
+    if (close || far) && !cursor.is_empty() {
+        let left = inventory::insert(&mut g.player.inv.slots, cursor);
+        if !left.is_empty() {
+            let pos = g.player.eye() + g.player.forward() * 0.8;
+            g.ents.spawn_drop(left.item, left.count, pos, 0.3);
+        }
+        cursor = Stack::EMPTY;
+    }
+    app.cursor = cursor;
+    if close || far {
+        app.sfx.push((music::Sfx::Click, 0.4));
+        return Some(Screen::Playing);
     }
     None
 }
@@ -3951,6 +4122,7 @@ async fn amain() {
         style_active: 1,
         pack_active: String::new(),
         pack_list: Vec::new(),
+        chest_open: Vec::new(),
         title_bg: Texture2D::from_file_with_format(include_bytes!("../assets/ui/title.jpg"), None),
         mp_bg: Texture2D::from_file_with_format(include_bytes!("../assets/ui/multiplayer.jpg"), None),
         sfx: Vec::new(),
@@ -4264,7 +4436,7 @@ async fn amain() {
                     }
                 }
             }
-            if matches!(app.screen, Screen::Playing | Screen::Inventory | Screen::Chat | Screen::RecipeBook | Screen::Map | Screen::Trade | Screen::Enchant) {
+            if matches!(app.screen, Screen::Playing | Screen::Inventory | Screen::Chat | Screen::RecipeBook | Screen::Map | Screen::Trade | Screen::Enchant | Screen::Chest) {
                 let t0 = std::time::Instant::now();
                 update_game(&mut app, dt, md);
                 prof.0 += t0.elapsed().as_secs_f64();
@@ -4304,6 +4476,7 @@ async fn amain() {
             Screen::Map => map_screen(&mut app),
             Screen::Trade => trade::screen(&mut app),
             Screen::Enchant => enchant_screen(&mut app),
+            Screen::Chest => chest_screen(&mut app),
             Screen::Achievements => achievements_screen(&mut app),
             Screen::Look => look_screen(&mut app),
             Screen::Textures => textures_screen(&mut app),
@@ -4336,7 +4509,7 @@ async fn amain() {
         };
         // на телефоне нет Esc и E: кнопка «закрыть» на наложенных экранах
         let mut next = next;
-        if app.settings.touch && next.is_none() && matches!(app.screen, Screen::Inventory | Screen::RecipeBook | Screen::Map | Screen::Trade | Screen::Enchant | Screen::Chat) {
+        if app.settings.touch && next.is_none() && matches!(app.screen, Screen::Inventory | Screen::RecipeBook | Screen::Map | Screen::Trade | Screen::Enchant | Screen::Chat | Screen::Chest) {
             let s = app.ui.s;
             let b = 52.0 * s;
             if app.ui.button(screen_width() - b - 10.0 * s, 10.0 * s, b, b, "✕") && !app.just_opened {
@@ -4428,6 +4601,24 @@ async fn amain() {
                             app.screen = Screen::Worlds;
                         }
                         "multiplayer" => app.screen = Screen::Multiplayer,
+                        "chest" => {
+                            if let Some(g) = app.game.as_mut() {
+                                let dc = dim_code(g.dim);
+                                let mut keys = Vec::new();
+                                let pp = g.player.body.pos.floor().as_ivec3();
+                                for k in 0..2 {
+                                    let key = [pp.x + k, pp.y, pp.z];
+                                    let mut sl = [Stack::EMPTY; inventory::CHEST_SLOTS];
+                                    for (i, (it, n)) in entities::chest_loot(2 - k as u32, 77 + k as u32).into_iter().enumerate() {
+                                        sl[(i * 5 + k as usize * 3) % inventory::CHEST_SLOTS] = Stack::new(it, n);
+                                    }
+                                    g.chests.insert((dc, key), sl);
+                                    keys.push((dc, key));
+                                }
+                                app.chest_open = keys;
+                                app.screen = Screen::Chest;
+                            }
+                        }
                         "textures" => {
                             app.settings_back = Screen::Playing;
                             app.pack_list = packs::list();
