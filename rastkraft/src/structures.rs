@@ -144,6 +144,7 @@ pub fn region_site(dim: Dim, seed: u32, rx: i32, rz: i32) -> Option<(i32, i32, i
             let y = worldgen::heaven_island(seed, ox, oz).map_or(70, |(t, _)| t + 1);
             Some((ox, y, oz, Biome::Islands, kind))
         }
+        Dim::Abyss => None,
     }
 }
 

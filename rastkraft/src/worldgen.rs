@@ -2,6 +2,7 @@
 //! растительность. Отдельный генератор — для измерения «Рай».
 
 use crate::blocks::*;
+use crate::shapes;
 use crate::world::{CH, CS, Chunk, Dim};
 
 pub const SEA: i32 = 48;
@@ -187,6 +188,226 @@ pub fn generate(dim: Dim, seed: u32, cx: i32, cz: i32) -> Chunk {
     match dim {
         Dim::Overworld => gen_overworld(seed, cx, cz),
         Dim::Heaven => gen_heaven(seed, cx, cz),
+        Dim::Abyss => gen_abyss(seed, cx, cz),
+    }
+}
+
+/// Бездна: огромные пещеры между дном и потолком, лавовое море, пепел и базальт,
+/// светокамень на сводах, мосты-крепости. У начала координат — площадка с порталом назад.
+fn gen_abyss(seed: u32, cx: i32, cz: i32) -> Chunk {
+    let mut chunk = Chunk::empty();
+    let (x0, z0) = (cx * CS, cz * CS);
+    const FLOOR: i32 = 4;
+    const ROOF: i32 = 100;
+    const LAVA_SEA: i32 = 30;
+    for lz in 0..CS {
+        for lx in 0..CS {
+            let (x, z) = (x0 + lx, z0 + lz);
+            let (fx, fz) = (x as f32, z as f32);
+            let ground = 34 + (fbm2(fx * 0.02, fz * 0.02, seed.wrapping_add(701), 3) * 26.0) as i32;
+            let ceil = 84 + (fbm2(fx * 0.025, fz * 0.025, seed.wrapping_add(702), 3) * 14.0) as i32;
+            for y in 0..CH {
+                let b = if y < FLOOR {
+                    BEDROCK
+                } else if y >= ROOF {
+                    if y < ROOF + 3 { BEDROCK } else { AIR }
+                } else {
+                    let n = noise3(fx * 0.045, y as f32 * 0.07, fz * 0.045, seed.wrapping_add(703));
+                    let solid = y < ground || y > ceil || n > 0.72;
+                    if solid {
+                        let k = hash(x * 7 + y, z, seed.wrapping_add(704));
+                        if k > 0.996 { GOLD_ORE } else if k > 0.993 { CRYSTAL_ORE } else if k > 0.985 && y < 50 { MAGMA } else if (y / 6 + (fx * 0.05).sin() as i32) % 3 == 0 { BASALT } else { ASH_BLOCK }
+                    } else if y <= LAVA_SEA {
+                        LAVA
+                    } else {
+                        AIR
+                    }
+                };
+                if b != AIR {
+                    chunk.set(lx, y, lz, b);
+                }
+            }
+            // светокамень на сводах и грибы на земле
+            for y in (FLOOR + 1..ROOF - 1).rev() {
+                let here = chunk.get(lx, y, lz);
+                let below = chunk.get(lx, y - 1, lz);
+                if here != AIR && below == AIR && hash(x, z * 3 + y, seed.wrapping_add(705)) < 0.03 {
+                    chunk.set(lx, y - 1, lz, GLOWSTONE);
+                }
+                if here == AIR && (below == ASH_BLOCK || below == BASALT) && hash(x * 5 + y, z, seed.wrapping_add(706)) < 0.01 {
+                    chunk.set(lx, y, lz, if hash(x, z, 707) < 0.5 { BLUE_MUSHROOM } else { FIREFLOWER });
+                }
+            }
+        }
+    }
+    let mut g = Gen { c: &mut chunk, x0, z0 };
+    // мосты крепостей: прямые пролёты тёмного кирпича над лавой
+    let region = 80;
+    let (rx0, rz0) = ((x0 - 40).div_euclid(region), (z0 - 40).div_euclid(region));
+    for rz in rz0..=rz0 + 1 {
+        for rx in rx0..=rx0 + 1 {
+            if hash(rx, rz, seed.wrapping_add(708)) > 0.55 {
+                continue;
+            }
+            let (ox, oz) = (rx * region + 20, rz * region + 20);
+            let y = 52 + (hash(rx, rz, seed.wrapping_add(709)) * 8.0) as i32;
+            for t in 0..48 {
+                for w in -1..=1 {
+                    g.set(ox + t, y, oz + w, DARK_BRICKS);
+                    g.set(ox + w + 24, y, oz + t - 24, DARK_BRICKS);
+                }
+                if t % 8 == 0 {
+                    for py in LAVA_SEA - 2..y {
+                        g.set(ox + t, py, oz, DARK_BRICKS);
+                    }
+                }
+                g.set(ox + t, y + 1, oz - 2, shapes::id(shapes::Form::Fence { m: 6 }));
+                g.set(ox + t, y + 1, oz + 2, shapes::id(shapes::Form::Fence { m: 6 }));
+            }
+            g.c.spawns.push((crate::mobdefs::by_name("Огненный бес") as u16, [ox + 10, y + 1, oz]));
+            g.c.spawns.push((crate::mobdefs::by_name("Рыцарь-скелет") as u16, [ox + 30, y + 1, oz]));
+            for k in 0..2 {
+                let (cx2, cz2) = (ox + 6 + k * 30, oz + 1);
+                if g.inside(cx2, y + 1, cz2) {
+                    g.set(cx2, y + 1, cz2, CHEST);
+                }
+            }
+        }
+    }
+    // площадка прибытия с порталом назад
+    for x in -3..=3 {
+        for z in -3..=3 {
+            for y in 60..66 {
+                g.set(x, y, z, AIR);
+            }
+            g.set(x, 59, z, DARK_BRICKS);
+        }
+    }
+    for y in 60..63 {
+        for x in -1..=1 {
+            g.set(x, y, 3, if x == 0 && y < 62 { ABYSS_PORTAL } else { OBSIDIAN });
+        }
+    }
+    g.set(0, 62, 3, OBSIDIAN);
+    chunk
+}
+
+/// Подземелье-лабиринт: 6×6 комнат на глубине 20–26, вход — шахта с лестницей,
+/// в тупиках сундуки и ловушки (провалы в лаву под нажимными плитами), в дальней комнате — босс.
+pub(crate) fn dungeons(g: &mut Gen, seed: u32) {
+    const REG: i32 = 112;
+    const ROOM: i32 = 8;
+    const N: i32 = 6;
+    let (x0, z0) = (g.x0, g.z0);
+    for rz in (z0 - 60).div_euclid(REG)..=(z0 + 76).div_euclid(REG) {
+        for rx in (x0 - 60).div_euclid(REG)..=(x0 + 76).div_euclid(REG) {
+            if hash(rx, rz, seed.wrapping_add(801)) > 0.3 {
+                continue;
+            }
+            let ox = rx * REG + 16;
+            let oz = rz * REG + 16;
+            if ox + N * ROOM < x0 || ox > x0 + CS || oz + N * ROOM < z0 || oz > z0 + CS {
+                continue;
+            }
+            let base = 20;
+            // лабиринт обходом в глубину
+            let mut open = [[0u8; (N * N) as usize]; 1];
+            let mut seen = vec![false; (N * N) as usize];
+            let mut stack = vec![0i32];
+            seen[0] = true;
+            let mut depth = vec![0i32; (N * N) as usize];
+            let mut rng = (rx as u32).wrapping_mul(73_856_093) ^ (rz as u32).wrapping_mul(19_349_663) ^ seed;
+            let mut next = || {
+                rng ^= rng << 13;
+                rng ^= rng >> 17;
+                rng ^= rng << 5;
+                rng
+            };
+            while let Some(&c) = stack.last() {
+                let (cx, cz) = (c % N, c / N);
+                let mut opts = Vec::new();
+                for (d, (dx, dz)) in [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().enumerate() {
+                    let (nx, nz) = (cx + dx, cz + dz);
+                    if (0..N).contains(&nx) && (0..N).contains(&nz) && !seen[(nz * N + nx) as usize] {
+                        opts.push((d, nz * N + nx));
+                    }
+                }
+                if opts.is_empty() {
+                    stack.pop();
+                    continue;
+                }
+                let (d, n) = opts[next() as usize % opts.len()];
+                open[0][c as usize] |= 1 << d;
+                open[0][n as usize] |= 1 << (d ^ 1);
+                seen[n as usize] = true;
+                depth[n as usize] = depth[c as usize] + 1;
+                stack.push(n);
+            }
+            let far = (0..(N * N) as usize).max_by_key(|&i| depth[i]).unwrap_or(0) as i32;
+            for c in 0..N * N {
+                let (cx, cz) = (c % N, c / N);
+                let (bx, bz) = (ox + cx * ROOM, oz + cz * ROOM);
+                let o = open[0][c as usize];
+                let dead_end = o.count_ones() == 1 && c != 0;
+                for x in bx..bx + ROOM {
+                    for z in bz..bz + ROOM {
+                        let (lx, lz) = (x - bx, z - bz);
+                        let wall_x = lx == 0 || lx == ROOM - 1;
+                        let wall_z = lz == 0 || lz == ROOM - 1;
+                        let door = (lx == ROOM - 1 && o & 1 != 0 || lx == 0 && o & 2 != 0) && (3..=4).contains(&lz)
+                            || (lz == ROOM - 1 && o & 4 != 0 || lz == 0 && o & 8 != 0) && (3..=4).contains(&lx);
+                        for y in base - 1..base + 6 {
+                            let edge = y == base - 1 || y == base + 5;
+                            let b = if edge {
+                                if hash(x, z * 3 + y, seed.wrapping_add(802)) > 0.7 { MOSSY_COBBLE } else { STONE_BRICKS }
+                            } else if (wall_x || wall_z) && !(door && y < base + 3) {
+                                if hash(x * 3 + y, z, seed.wrapping_add(803)) > 0.8 { CRACKED_STONE_BRICKS } else if hash(x, z + y, 804) > 0.85 { MOSSY_STONE_BRICKS } else { STONE_BRICKS }
+                            } else {
+                                AIR
+                            };
+                            g.set(x, y, z, b);
+                        }
+                        if !wall_x && !wall_z && hash(x * 7, z * 5, seed.wrapping_add(805)) > 0.96 {
+                            g.set(x, base + 4, z, COBWEB);
+                        }
+                    }
+                }
+                // факелы по углам
+                g.set(bx + 1, base, bz + 1, TORCH);
+                let mid = (bx + ROOM / 2, bz + ROOM / 2);
+                if c == 0 {
+                    // вход: шахта с лестницей до поверхности
+                    for y in base..118 {
+                        if g.get(mid.0, y, mid.1) == AIR && y > base + 6 && g.get(mid.0, y + 1, mid.1) == AIR && g.get(mid.0, y + 2, mid.1) == AIR {
+                            break;
+                        }
+                        g.set(mid.0, y, mid.1, AIR);
+                        g.set(mid.0 + 1, y, mid.1, AIR);
+                        g.set(mid.0 - 1, y, mid.1, LADDER);
+                    }
+                } else if c == far {
+                    // логово босса
+                    let boss = crate::mobdefs::BOSS0 + [0usize, 1, 2][(next() % 3) as usize];
+                    if g.inside(mid.0, base, mid.1) {
+                        g.c.spawns.push((boss as u16, [mid.0, base, mid.1]));
+                    }
+                    g.set(mid.0 + 2, base, mid.1 + 2, CHEST);
+                    g.set(mid.0 - 2, base, mid.1 - 2, CHEST);
+                } else if dead_end {
+                    g.set(mid.0, base, mid.1, CHEST);
+                } else if next() % 3 == 0 {
+                    // ловушка: под плитой — яма с лавой
+                    g.set(mid.0, base - 1, mid.1, AIR);
+                    g.set(mid.0, base - 2, mid.1, LAVA);
+                    g.set(mid.0, base - 3, mid.1, STONE_BRICKS);
+                    g.set(mid.0, base, mid.1, shapes::PLATE0);
+                } else if next() % 2 == 0 && g.inside(mid.0, base, mid.1) {
+                    let pool = ["Костяк", "Рыцарь-скелет", "Рудокоп-призрак", "Тёмный гном"];
+                    let m = crate::mobdefs::by_name(pool[(next() % 4) as usize]);
+                    g.c.spawns.push((m as u16, [mid.0, base, mid.1]));
+                }
+            }
+        }
     }
 }
 
@@ -448,6 +669,7 @@ fn gen_overworld(seed: u32, cx: i32, cz: i32) -> Chunk {
         }
     }
     crate::structures::place(&mut g, Dim::Overworld, seed);
+    dungeons(&mut g, seed);
     chunk
 }
 
@@ -918,6 +1140,22 @@ mod probe {
             for rx in -3..3 {
                 if let Some((_, (ox, oy, oz))) = shaft_segments(seed, rx, rz) {
                     println!("shaft {ox} {oy} {oz} surface {}", column(seed, ox, oz).height);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod dungeon_find {
+    #[test]
+    #[ignore]
+    fn find() {
+        let seed = crate::hash_seed("2024");
+        for rz in -3..3 {
+            for rx in -3..3 {
+                if super::hash(rx, rz, seed.wrapping_add(801)) <= 0.3 {
+                    println!("DUNGEON at x={} z={} y=20", rx * 112 + 16, rz * 112 + 16);
                 }
             }
         }

@@ -14,6 +14,7 @@ pub const CHUNK_VOL: usize = (CS * CS * CH) as usize;
 pub enum Dim {
     Overworld,
     Heaven,
+    Abyss,
 }
 
 impl Dim {
@@ -21,6 +22,7 @@ impl Dim {
         match self {
             Dim::Overworld => "Верхний мир",
             Dim::Heaven => "Рай",
+            Dim::Abyss => "Бездна",
         }
     }
 }

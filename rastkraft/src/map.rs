@@ -57,6 +57,11 @@ fn render(seed: u32, dim: Dim, center: Vec2, scale: f32) -> Vec<u8> {
                                     shade(base, height_k * relief)
                                 }
                             }
+                            Dim::Abyss => {
+                                // Бездна: лава и пепел (по шуму высоты дна)
+                                let gnd = 34.0 + worldgen::fbm2(wx as f32 * 0.02, wz as f32 * 0.02, seed.wrapping_add(701), 3) * 26.0;
+                                if gnd <= 31.0 { [230, 90, 30, 255] } else { shade([90.0, 70.0, 70.0], 0.7 + (gnd - 30.0) / 60.0) }
+                            }
                             Dim::Heaven => match worldgen::heaven_island(seed, wx, wz) {
                                 Some((top, _)) => {
                                     let relief = prev_h.map_or(1.0, |p| 1.0 + ((top - p) as f32 * 0.05).clamp(-0.2, 0.2));
@@ -223,12 +228,13 @@ impl MapView {
         }
 
         // подписи
-        ui.text_center(if dim == Dim::Heaven { "Карта Рая" } else { "Карта мира" }, w / 2.0, 40.0 * s, 24.0, WHITE);
+        ui.text_center(match dim { Dim::Heaven => "Карта Рая", Dim::Abyss => "Карта Бездны", _ => "Карта мира" }, w / 2.0, 40.0 * s, 24.0, WHITE);
         let wpos = to_world(mouse, self.center);
         let info = if inside {
             let place = match dim {
                 Dim::Overworld => worldgen::column(seed, wpos.x.floor() as i32, wpos.y.floor() as i32).biome.name(),
                 Dim::Heaven => "Рай",
+                Dim::Abyss => "Бездна",
             };
             format!("X {:.0}  Z {:.0} · {}", wpos.x, wpos.y, place)
         } else {

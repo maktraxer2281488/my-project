@@ -342,7 +342,8 @@ pub const POTATO_S0: u16 = CARROT_S0 + 3;
 pub const POTATO_CROP: u16 = POTATO_S0 + 3;
 pub const BED: u16 = POTATO_CROP + 1;
 pub const ENCHANT_TABLE: u16 = BED + 1;
-pub const BLOCK_COUNT: usize = (ENCHANT_TABLE + 1) as usize;
+pub const ABYSS_PORTAL: u16 = ENCHANT_TABLE + 1;
+pub const BLOCK_COUNT: usize = (ABYSS_PORTAL + 1) as usize;
 
 /// Посев: (культура 0 пшеница/1 морковь/2 картофель, стадия 0..3; 3 — спелый).
 pub fn crop(b: u16) -> Option<(u8, u8)> {
@@ -2093,6 +2094,11 @@ fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
         });
         let eb = a.add(move |x, y| shade(rgb(30, 22, 44), 0.85 + blotch(x, y, 1408) * 0.3));
         put(ENCHANT_TABLE, "Стол улучшений", [et, es, eb], Cube, 5.0, Pickaxe, Decor, 7);
+        let t = a.add(move |x, y| {
+            let swirl = ((x as f32 - 7.5).atan2(y as f32 - 7.5) * 3.0 + ((x - 8) * (x - 8) + (y - 8) * (y - 8)) as f32 * 0.25).sin();
+            mix(rgb(120, 10, 30), rgb(255, 90, 40), (swirl * 0.5 + 0.5) * 0.8 + hash(x, y, 1409) * 0.2)
+        });
+        put(ABYSS_PORTAL, "Портал Бездны", [t; 3], Cutout, -1.0, Any, Decor, 12);
     }
     // портал проходим насквозь
     let portal = defs[PORTAL as usize].as_mut().unwrap();

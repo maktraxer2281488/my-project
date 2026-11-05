@@ -459,6 +459,7 @@ fn build() -> Vec<Recipe> {
         r((t(it::BUCKET), 1), &[(t(it::IRON_INGOT), 3)], Workbench);
         r((b(BED), 1), &[(b(WOOL0 + 5), 3), (b(OAK_PLANKS), 3)], Workbench);
         r((b(ENCHANT_TABLE), 1), &[(t(it::BOOK), 1), (t(it::RUBY), 2), (b(OBSIDIAN), 4)], Anvil);
+        r((b(ABYSS_PORTAL), 1), &[(b(OBSIDIAN), 4), (b(MAGMA), 2), (t(it::CRYSTAL), 1)], Anvil);
         r((t(it::ARROW), 4), &[(t(it::STICK), 1), (t(it::FLINT), 1), (t(it::FEATHER), 1)], Hand);
         r((t(it::WHEAT_SEEDS), 2), &[(t(it::WHEAT), 1)], Hand);
     }

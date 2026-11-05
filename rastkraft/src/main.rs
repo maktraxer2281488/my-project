@@ -93,7 +93,10 @@ enum Field {
 }
 
 struct Game {
-    worlds: [World; 2],
+    worlds: [World; 3],
+    /// Где в верхнем мире стоит портал в Бездну.
+    abyss_home: Option<Vec3>,
+    last_dim: Dim,
     /// Механизмы и жидкости.
     mech: mech::Mech,
     /// Посаженные игроком посевы: (место, секунд до следующей стадии).
@@ -158,7 +161,9 @@ impl Game {
         let mut player = Player::new(spawn);
         player.starter_kit(creative);
         Game {
-            worlds: [World::new(Dim::Overworld, seed), World::new(Dim::Heaven, seed.wrapping_add(17))],
+            worlds: [World::new(Dim::Overworld, seed), World::new(Dim::Heaven, seed.wrapping_add(17)), World::new(Dim::Abyss, seed.wrapping_add(33))],
+            abyss_home: None,
+            last_dim: Dim::Overworld,
             mech: mech::Mech::default(),
             crops: Vec::new(),
             weather: 0,
@@ -313,7 +318,19 @@ fn set_grab(app: &mut App, grab: bool) {
 }
 
 fn dim_code(d: Dim) -> u8 {
-    if d == Dim::Heaven { 1 } else { 0 }
+    match d {
+        Dim::Overworld => 0,
+        Dim::Heaven => 1,
+        Dim::Abyss => 2,
+    }
+}
+
+fn dim_from(c: u8) -> Dim {
+    match c {
+        1 => Dim::Heaven,
+        2 => Dim::Abyss,
+        _ => Dim::Overworld,
+    }
 }
 
 /// Изменение блока: мир, перестройка геометрии и (по сети) другим игрокам.
@@ -356,7 +373,11 @@ fn switch_dimension(app: &mut App, to: Dim) {
     let ctx = unsafe { get_internal_gl() }.quad_context;
     app.loader.clear(ctx);
     let g = app.game.as_mut().unwrap();
+    g.last_dim = g.dim;
     g.dim = to;
+    if std::env::var("RK_NETLOG").is_ok() {
+        eprintln!("NETLOG switch_dimension to {:?}", to);
+    }
     g.mobs.list.clear();
     g.ents = Entities::default();
     g.portal_cd = 4.0;
@@ -371,9 +392,14 @@ fn switch_dimension(app: &mut App, to: Dim) {
             g.toast = Some(("Вы попали в Рай".into(), 4.0));
         }
         Dim::Overworld => {
-            let p = g.portal_home.map(|p| p.as_vec3() + vec3(1.5, 0.1, 2.5)).unwrap_or(g.spawn);
+            let from_abyss = g.abyss_home.is_some() && g.last_dim == Dim::Abyss;
+            let p = if from_abyss { g.abyss_home.unwrap() + vec3(0.0, 0.1, 1.6) } else { g.portal_home.map(|p| p.as_vec3() + vec3(1.5, 0.1, 2.5)).unwrap_or(g.spawn) };
             g.player.body.pos = p;
             g.toast = Some(("Верхний мир".into(), 3.0));
+        }
+        Dim::Abyss => {
+            g.player.body.pos = vec3(0.5, 60.1, 0.5);
+            g.toast = Some(("Вы спустились в Бездну. Портал назад — рядом".into(), 4.0));
         }
     }
     g.player.body.vel = Vec3::ZERO;
@@ -441,6 +467,9 @@ fn save_game(app: &mut App) -> bool {
     kv.set("creative", g.creative as u8);
     kv.set("time", g.time);
     kv.set("dim", dim_code(g.dim));
+    if let Some(h) = g.abyss_home {
+        kv.set("abyss_home", format!("{},{},{}", h.x, h.y, h.z));
+    }
     kv.set("pos", v3(p.body.pos));
     kv.set("look", format!("{},{}", p.yaw, p.pitch));
     kv.set("health", p.health);
@@ -467,7 +496,7 @@ fn save_game(app: &mut App) -> bool {
     if std::fs::write(dir.join("level.txt"), kv.to_text()).is_err() {
         return false;
     }
-    for (i, tag) in ["ow", "hv"].iter().enumerate() {
+    for (i, tag) in ["ow", "hv", "ab"].iter().enumerate() {
         let w = &g.worlds[i];
         let list: Vec<((i32, i32), &world::Chunk)> = w.chunks.iter().filter(|(k, _)| w.versions.contains_key(k)).map(|(k, c)| (*k, c.as_ref())).collect();
         if save::save_chunks(&dir, tag, &list).is_err() {
@@ -486,7 +515,8 @@ fn load_game(app: &mut App, name: &str) -> bool {
     let mut g = Game::new(kv.u("seed", 1), kv.get("creative") == Some("1"), name);
     g.name = kv.get("name").unwrap_or(name).to_string();
     g.time = kv.f("time", 0.1);
-    g.dim = if kv.u("dim", 0) == 1 { Dim::Heaven } else { Dim::Overworld };
+    g.dim = dim_from(kv.u("dim", 0) as u8);
+    g.abyss_home = { let v = kv.floats("abyss_home"); (v.len() == 3).then(|| vec3(v[0], v[1], v[2])) };
     let v3 = |v: Vec<f32>| (v.len() == 3).then(|| vec3(v[0], v[1], v[2]));
     if let Some(p) = v3(kv.floats("pos")) {
         g.player.body.pos = p;
@@ -508,7 +538,7 @@ fn load_game(app: &mut App, name: &str) -> bool {
     let pp = kv.ints("portal");
     g.portal_home = (pp.len() == 3).then(|| ivec3(pp[0] as i32, pp[1] as i32, pp[2] as i32));
     let pend = kv.ints("pending");
-    g.pending_portals = pend.chunks_exact(3).map(|c| (if c[0] == 1 { Dim::Heaven } else { Dim::Overworld }, c[1] as i32, c[2] as i32)).collect();
+    g.pending_portals = pend.chunks_exact(3).map(|c| (dim_from(c[0] as u8), c[1] as i32, c[2] as i32)).collect();
     let inv = kv.ints("inv");
     g.player.inv = inventory::Inventory::new();
     for (i, c) in inv.chunks_exact(2).enumerate().take(inventory::SLOTS) {
@@ -547,6 +577,7 @@ fn load_game(app: &mut App, name: &str) -> bool {
     g.spawned = to_set(kv.ints("spawned"));
     g.worlds[0].stored = save::load_chunks(&dir, "ow");
     g.worlds[1].stored = save::load_chunks(&dir, "hv");
+    g.worlds[2].stored = save::load_chunks(&dir, "ab");
     g.spawn_pending = false;
     g.toast = Some((format!("Мир «{}» загружен", g.name), 3.0));
     app.game = Some(g);
@@ -655,7 +686,7 @@ fn process_net(app: &mut App) {
                 if n.host {
                     n.broadcast(&Msg::Edit { dim, x, y, z, b }, Some(from));
                 }
-                edits.push((if dim == 1 { Dim::Heaven } else { Dim::Overworld }, ivec3(x, y, z), b));
+                edits.push((dim_from(dim), ivec3(x, y, z), b));
             }
             Some(Msg::Hit { target, from: attacker, dmg, knock }) => {
                 if target == n.my_id && attacker == net::FROM_MOB {
@@ -926,6 +957,9 @@ fn ground_spot(w: &World, x: i32, z: i32) -> Option<Vec3> {
 fn sky_colors(g: &Game) -> (Color, Color) {
     if g.dim == Dim::Heaven {
         return (Color::new(0.98, 0.78, 0.58, 1.0), Color::new(1.0, 0.94, 0.84, 1.0));
+    }
+    if g.dim == Dim::Abyss {
+        return (Color::new(0.12, 0.02, 0.02, 1.0), Color::new(0.32, 0.07, 0.04, 1.0));
     }
     let d = g.daylight();
     let lerp = |a: Color, b: Color, t: f32| Color::new(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, 1.0);
@@ -1279,7 +1313,15 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                 g.player.body.pos.y = 120.0;
             }
         }
-        if g.portal_cd <= 0.0 && g.player.body.touches(&g.worlds[dim as usize], -0.05, |b| b == PORTAL) {
+        if g.portal_cd <= 0.0 && g.player.body.touches(&g.worlds[dim as usize], -0.05, |b| b == ABYSS_PORTAL) {
+            if dim == Dim::Overworld {
+                g.abyss_home = Some(g.player.body.pos);
+                to_dim = Some(Dim::Abyss);
+            } else if dim == Dim::Abyss {
+                to_dim = Some(Dim::Overworld);
+            }
+        }
+        if g.portal_cd <= 0.0 && to_dim.is_none() && g.player.body.touches(&g.worlds[dim as usize], -0.05, |b| b == PORTAL) {
             to_dim = Some(if dim == Dim::Overworld { Dim::Heaven } else { Dim::Overworld });
         }
 
@@ -3173,7 +3215,7 @@ fn render_world(app: &mut App) {
                 !g.world().sky_exposed(e.x.floor() as i32, e.y.floor() as i32 + 1, e.z.floor() as i32) && e.y < 70.0 || g.player.body.pos.y < 40.0
             },
         };
-        let clouds = if app.settings.clouds { Some((g.dim, app.time)) } else { None };
+        let clouds = if app.settings.clouds && g.dim != Dim::Abyss { Some((g.dim, app.time)) } else { None };
         if std::env::var("RK_NOWORLD").is_err() {
             app.renderer.draw(gl.quad_context, &app.loader, &frame, clouds, pass);
         }
@@ -3677,6 +3719,8 @@ async fn main() {
                     app.screen = Screen::Playing;
                     if std::env::var("RK_DIM").is_ok_and(|d| d == "heaven") && g.dim == Dim::Overworld {
                         switch_dimension(&mut app, Dim::Heaven);
+                    } else if std::env::var("RK_DIM").is_ok_and(|d| d == "abyss") && g.dim == Dim::Overworld {
+                        switch_dimension(&mut app, Dim::Abyss);
                     }
                 }
             }
@@ -4308,6 +4352,9 @@ fn music_for(g: &Game) -> &'static [music::Track] {
     }
     if g.dim == Dim::Heaven {
         return &[T::Heaven, T::Clouds];
+    }
+    if g.dim == Dim::Abyss {
+        return &[T::Caves, T::Night];
     }
     let (x, y, z) = (p.x.floor() as i32, (p.y + 1.6).floor() as i32, p.z.floor() as i32);
     if y < 56 && !g.world().sky_exposed(x, y, z) {
