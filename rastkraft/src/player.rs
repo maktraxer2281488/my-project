@@ -169,6 +169,12 @@ pub const MAX_HUNGER: f32 = 20.0;
 
 pub struct Player {
     pub body: Body,
+    /// Опыт (всего очков).
+    pub xp: u32,
+    /// Зачарования брони по слотам.
+    pub armor_ench: [u8; 4],
+    /// Держит щит (в этом кадре).
+    pub blocking: bool,
     pub yaw: f32,
     pub pitch: f32,
     pub flying: bool,
@@ -196,6 +202,9 @@ pub struct Player {
 impl Player {
     pub fn new(pos: Vec3) -> Self {
         Player {
+            xp: 0,
+            armor_ench: [0; 4],
+            blocking: false,
             body: Body::new(pos, 0.3, 1.8),
             yaw: 0.6,
             pitch: -0.1,
@@ -319,8 +328,15 @@ impl Player {
         if self.invuln > 0.0 || amount <= 0.0 {
             return false;
         }
-        let k = if ignore_armor { 1.0 } else { 1.0 - (self.armor_points().min(20) as f32) * 0.04 };
-        self.health -= amount * k;
+        let mut k = if ignore_armor { 1.0 } else { 1.0 - (self.armor_points().min(20) as f32) * 0.04 - crate::ench::protection(&self.armor_ench) };
+        // щит: удар спереди почти не проходит
+        if self.blocking && knock.with_y(0.0).length() > 0.01 {
+            let f = self.forward().with_y(0.0).normalize_or_zero();
+            if f.dot(knock.with_y(0.0).normalize_or_zero()) < -0.2 {
+                k *= 0.2;
+            }
+        }
+        self.health -= amount * k.max(0.05);
         self.hurt_t = 0.35;
         self.invuln = 0.5;
         self.regen_t = 0.0;
@@ -333,6 +349,34 @@ impl Player {
         let s = 0.0026 * sens;
         self.yaw += dx * s;
         self.pitch = (self.pitch - dy * s).clamp(-1.55, 1.55);
+    }
+
+    /// Уровень и доля до следующего по опыту.
+    pub fn level(&self) -> (u32, f32) {
+        let (mut lvl, mut left) = (0u32, self.xp);
+        loop {
+            let need = 10 + 4 * lvl;
+            if left < need {
+                return (lvl, left as f32 / need as f32);
+            }
+            left -= need;
+            lvl += 1;
+        }
+    }
+
+    /// Потратить уровни (например, на зачарование).
+    pub fn spend_levels(&mut self, n: u32) -> bool {
+        let (lvl, frac) = self.level();
+        if lvl < n {
+            return false;
+        }
+        let target = lvl - n;
+        let mut xp = 0;
+        for l in 0..target {
+            xp += 10 + 4 * l;
+        }
+        self.xp = xp + (frac * (10 + 4 * target) as f32) as u32;
+        true
     }
 
     pub fn damage_bonus(&self) -> f32 {

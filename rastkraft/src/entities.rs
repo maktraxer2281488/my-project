@@ -33,8 +33,17 @@ pub struct Particle {
     pub gravity: f32,
 }
 
+/// Шарик опыта.
+pub struct Orb {
+    pub pos: Vec3,
+    pub vel: Vec3,
+    pub value: u32,
+    pub age: f32,
+}
+
 #[derive(Default)]
 pub struct Entities {
+    pub orbs: Vec<Orb>,
     pub drops: Vec<ItemDrop>,
     pub projectiles: Vec<Projectile>,
     pub particles: Vec<Particle>,
@@ -150,6 +159,51 @@ impl Entities {
     }
 
     /// Снаряды; возвращает урон, нанесённый игроку (и направление).
+    /// Рассыпать опыт шариками.
+    pub fn spawn_xp(&mut self, at: Vec3, total: u32) {
+        let mut left = total;
+        let mut k = 0;
+        while left > 0 && k < 24 {
+            let v = if left > 40 { 20 } else if left > 8 { 5 } else { 1 }.min(left);
+            left -= v;
+            let a = k as f32 * 2.4;
+            let extra = if k == 23 { std::mem::take(&mut left) } else { 0 };
+            self.orbs.push(Orb { pos: at + vec3(0.0, 0.4, 0.0), vel: vec3(a.cos() * 1.5, 3.0 + (k % 3) as f32, a.sin() * 1.5), value: v + extra, age: 0.0 });
+            k += 1;
+        }
+    }
+
+    /// Шарики летят к игроку; возвращает собранный опыт.
+    pub fn update_orbs(&mut self, world: &World, player: Vec3, dt: f32) -> u32 {
+        let mut got = 0;
+        let target = player + vec3(0.0, 0.8, 0.0);
+        for o in self.orbs.iter_mut() {
+            o.age += dt;
+            let to = target - o.pos;
+            let d = to.length();
+            if d < 7.0 && o.age > 0.5 {
+                o.vel += to.normalize_or_zero() * (14.0 / d.max(0.8)) * dt * 6.0;
+                o.vel *= 0.92;
+            } else {
+                o.vel.y -= 12.0 * dt;
+                o.vel.x *= 0.96;
+                o.vel.z *= 0.96;
+            }
+            let next = o.pos + o.vel * dt;
+            if blocks::is_solid(world.get(next.x.floor() as i32, next.y.floor() as i32, next.z.floor() as i32)) {
+                o.vel = vec3(o.vel.x * 0.5, 0.0, o.vel.z * 0.5);
+            } else {
+                o.pos = next;
+            }
+            if d < 1.1 && o.age > 0.5 {
+                got += o.value;
+                o.age = 999.0;
+            }
+        }
+        self.orbs.retain(|o| o.age < 120.0);
+        got
+    }
+
     pub fn update_projectiles(&mut self, world: &World, player_pos: Vec3, dt: f32) -> Vec<(f32, Vec3)> {
         let mut hits = Vec::new();
         for p in self.projectiles.iter_mut() {
@@ -172,6 +226,12 @@ impl Entities {
     }
 
     pub fn draw(&self, atlas: &Texture2D, t: f32, cam_right: Vec3) {
+        for o in &self.orbs {
+            let pulse = 0.85 + (t * 6.0 + o.pos.x).sin() * 0.15;
+            let sz = 0.12 + (o.value as f32).sqrt() * 0.03;
+            let m = Mat4::from_translation(o.pos + vec3(0.0, (t * 3.0 + o.pos.z).sin() * 0.05, 0.0)) * Mat4::from_rotation_y(t * 2.0) * Mat4::from_scale(Vec3::splat(sz));
+            model::cube(m, Color::new(0.55 * pulse, 1.0 * pulse, 0.3 * pulse, 1.0));
+        }
         for d in &self.drops {
             let bob = (t * 2.5 + d.body.pos.x).sin() * 0.06 + 0.12;
             let p = d.body.pos + vec3(0.0, bob, 0.0);

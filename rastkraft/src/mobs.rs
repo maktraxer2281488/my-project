@@ -22,6 +22,8 @@ pub struct MobEvents {
     pub gives: Vec<(u8, Item, u16)>,
     /// Сообщения в чат (пробуждение и гибель боссов).
     pub say: Vec<String>,
+    /// Опыт с погибших существ: (место, очков).
+    pub xp: Vec<(Vec3, u32)>,
 }
 
 pub const MAX_FRIENDLY: usize = 50;
@@ -737,6 +739,7 @@ impl Mobs {
         let mut gives: Vec<(u8, Item, u16)> = Vec::new();
         let mut smoke_at: Vec<Vec3> = Vec::new();
         let mut boss_dead: Vec<&'static str> = Vec::new();
+        let mut xp_at: Vec<(Vec3, u32)> = Vec::new();
         let ppos = player.body.pos;
         self.list.retain(|m| {
             if m.dying >= 1.0 {
@@ -772,6 +775,7 @@ impl Mobs {
                     boss_dead.push(d.name);
                 }
                 smoke_at.push(p);
+                xp_at.push((p, if d.flags & BOSS != 0 { 150 } else if d.friendly { 2 } else { 5 + (r * 4.0) as u32 }));
                 for (it, n) in out {
                     match m.killer {
                         Some(k) => gives.push((k, it, n)),
@@ -786,6 +790,7 @@ impl Mobs {
             }
             (m.owner.is_some() || dd < if m.is_boss() { 260.0 } else { 120.0 }) && m.body.pos.y > -30.0
         });
+        ev.xp = xp_at;
         for name in boss_dead {
             ev.say.push(format!("Босс {name} повержен!"));
         }

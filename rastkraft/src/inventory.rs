@@ -6,13 +6,15 @@ use crate::items::Item;
 pub struct Stack {
     pub item: Item,
     pub count: u16,
+    /// Зачарование: вид × 4 + уровень (0 — нет).
+    pub ench: u8,
 }
 
 impl Stack {
-    pub const EMPTY: Stack = Stack { item: Item::Empty, count: 0 };
+    pub const EMPTY: Stack = Stack { item: Item::Empty, count: 0, ench: 0 };
 
     pub fn new(item: Item, count: u16) -> Self {
-        if item == Item::Empty || count == 0 { Stack::EMPTY } else { Stack { item, count } }
+        if item == Item::Empty || count == 0 { Stack::EMPTY } else { Stack { item, count, ench: 0 } }
     }
 
     pub fn is_empty(&self) -> bool {

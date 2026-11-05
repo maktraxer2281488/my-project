@@ -106,18 +106,21 @@ pub enum ToolKind {
     Halberd,
     Rapier,
     Hoe,
+    Bow,
+    Crossbow,
+    Shield,
 }
 
-pub const TOOL_KINDS: [ToolKind; 14] = [
+pub const TOOL_KINDS: [ToolKind; 17] = [
     ToolKind::Sword, ToolKind::Pickaxe, ToolKind::Axe, ToolKind::Shovel, ToolKind::Dagger, ToolKind::Spear, ToolKind::Mace,
     ToolKind::Katana, ToolKind::Battleaxe, ToolKind::Warhammer, ToolKind::Scythe, ToolKind::Halberd, ToolKind::Rapier,
-    ToolKind::Hoe,
+    ToolKind::Hoe, ToolKind::Bow, ToolKind::Crossbow, ToolKind::Shield,
 ];
 
 impl ToolKind {
     /// Оружие (а не инструмент для добычи).
     pub fn is_weapon(self) -> bool {
-        !matches!(self, ToolKind::Pickaxe | ToolKind::Axe | ToolKind::Shovel | ToolKind::Hoe)
+        !matches!(self, ToolKind::Pickaxe | ToolKind::Axe | ToolKind::Shovel | ToolKind::Hoe | ToolKind::Shield)
     }
     /// Широкий взмах задевает существ рядом с целью.
     pub fn sweeps(self) -> bool {
@@ -332,6 +335,7 @@ pub const WATER_BUCKET: u16 = BUCKET + 1;
 pub const LAVA_BUCKET: u16 = BUCKET + 2;
 pub const COIN: u16 = BUCKET + 3;
 pub const WHEAT_SEEDS: u16 = BUCKET + 4;
+pub const ARROW: u16 = BUCKET + 5;
 
 /// Трофей существа.
 pub fn mob_drop(def: usize) -> u16 {
@@ -544,6 +548,7 @@ fn build_things() -> Vec<ThingDef> {
     t("Ведро лавы", m, Bucket, (190, 194, 204), (250, 120, 30));
     t("Монета", m, Orb, (250, 210, 70), (180, 130, 30));
     t("Семена пшеницы", m, Berries, (200, 180, 100), (150, 130, 70));
+    t("Стрела", m, Stick, (200, 200, 210), (150, 110, 66));
     v
 }
 
@@ -596,6 +601,9 @@ impl Item {
                     ToolKind::Halberd => format!("{} алебарда", a[1]),
                     ToolKind::Rapier => format!("{} рапира", a[1]),
                     ToolKind::Hoe => format!("{} мотыга", a[1]),
+                    ToolKind::Bow => format!("{} лук", a[0]),
+                    ToolKind::Crossbow => format!("{} арбалет", a[0]),
+                    ToolKind::Shield => format!("{} щит", a[0]),
                 }
             }
             Item::Armor(s, m) => {
@@ -644,6 +652,8 @@ impl Item {
                     ToolKind::Halberd => 1.45,
                     ToolKind::Rapier => 0.85,
                     ToolKind::Hoe => 0.5,
+                    ToolKind::Bow | ToolKind::Crossbow => 0.3,
+                    ToolKind::Shield => 0.4,
                 }
             }
             _ => 1.0,
@@ -1110,6 +1120,40 @@ fn weapon_px(k: ToolKind, x: i32, y: i32) -> u8 {
                 1
             } else if handle(-15.0, 9.0) {
                 if (a - 1.0).abs() < 1.0 { 5 } else { 3 }
+            } else {
+                0
+            }
+        }
+        ToolKind::Bow => {
+            // дуга вдоль диагонали и тетива
+            let arc = (b + 3.5 - 0.035 * a * a).abs() < 1.0 && a.abs() < 11.0;
+            if arc {
+                if a.abs() > 8.0 { 2 } else { 3 }
+            } else if b.abs() < 0.6 && a.abs() < 10.0 {
+                4
+            } else if (b + 3.5).abs() < 1.2 && a.abs() < 1.5 {
+                5
+            } else {
+                0
+            }
+        }
+        ToolKind::Crossbow => {
+            if a >= 3.0 && a <= 5.0 && b.abs() <= 7.0 {
+                if b.abs() > 5.0 { 2 } else { 1 }
+            } else if handle(-15.0, 5.0) {
+                if (a + 6.0).abs() < 1.0 { 5 } else { 3 }
+            } else if (a - 4.0).abs() < 4.0 && b.abs() <= 0.5 + (4.0 - (a - 4.0).abs()) * 0.0 && a < 4.0 {
+                4
+            } else {
+                0
+            }
+        }
+        ToolKind::Shield => {
+            let (cx, cy) = (x as f32 - 7.5, y as f32 - 7.0);
+            let inside = cx.abs() <= 6.0 && cy >= -6.0 && (cy <= 2.0 || cx.abs() <= 6.0 - (cy - 2.0) * 1.2);
+            if inside {
+                let edge = cx.abs() >= 5.0 || cy <= -5.0 || (cy > 2.0 && cx.abs() >= 5.0 - (cy - 2.0) * 1.2);
+                if edge { 1 } else if cx.abs() < 1.0 || (cy + 1.0).abs() < 1.0 { 5 } else { 3 }
             } else {
                 0
             }

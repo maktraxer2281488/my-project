@@ -341,7 +341,8 @@ pub const CARROT_S0: u16 = WHEAT_S0 + 3;
 pub const POTATO_S0: u16 = CARROT_S0 + 3;
 pub const POTATO_CROP: u16 = POTATO_S0 + 3;
 pub const BED: u16 = POTATO_CROP + 1;
-pub const BLOCK_COUNT: usize = (BED + 1) as usize;
+pub const ENCHANT_TABLE: u16 = BED + 1;
+pub const BLOCK_COUNT: usize = (ENCHANT_TABLE + 1) as usize;
 
 /// Посев: (культура 0 пшеница/1 морковь/2 картофель, стадия 0..3; 3 — спелый).
 pub fn crop(b: u16) -> Option<(u8, u8)> {
@@ -2080,6 +2081,18 @@ fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
         });
         let bottom = a.add(t_planks(rgb(150, 104, 60), 1404));
         put(BED, "Кровать", [top, side, bottom], Form, 0.4, Axe, Decor, 0);
+        // стол улучшений: красная скатерть с книгой, обсидиановые бока
+        let et = a.add(move |x, y| {
+            let book = (4..=11).contains(&x) && (5..=10).contains(&y);
+            let page = book && x != 7 && x != 8 && (6..=9).contains(&y);
+            let edge = x <= 1 || y <= 1 || x >= 14 || y >= 14;
+            if page { rgb(240, 234, 220) } else if book { rgb(120, 40, 40) } else if edge { rgb(230, 190, 70) } else { shade(rgb(160, 30, 44), 0.9 + hash(x, y, 1405) * 0.15) }
+        });
+        let es = a.add(move |x, y| {
+            if y < 4 { shade(rgb(160, 30, 44), 0.9) } else if y == 4 { rgb(230, 190, 70) } else if hash(x, y, 1406) > 0.93 { rgb(150, 110, 240) } else { shade(rgb(30, 22, 44), 0.85 + blotch(x, y, 1407) * 0.3) }
+        });
+        let eb = a.add(move |x, y| shade(rgb(30, 22, 44), 0.85 + blotch(x, y, 1408) * 0.3));
+        put(ENCHANT_TABLE, "Стол улучшений", [et, es, eb], Cube, 5.0, Pickaxe, Decor, 7);
     }
     // портал проходим насквозь
     let portal = defs[PORTAL as usize].as_mut().unwrap();

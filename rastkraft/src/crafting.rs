@@ -193,6 +193,9 @@ fn build() -> Vec<Recipe> {
             ToolKind::Halberd => (4, 3),
             ToolKind::Rapier => (2, 1),
             ToolKind::Hoe => (2, 2),
+            ToolKind::Bow => (1, 3),
+            ToolKind::Crossbow => (3, 3),
+            ToolKind::Shield => (5, 1),
         };
         for m in TOOL_MATS {
             let st = if matches!(m, Mat::Wood | Mat::Stone) { Workbench } else { Anvil };
@@ -455,6 +458,8 @@ fn build() -> Vec<Recipe> {
         r((b(PUSHER0), 1), &[(b(OAK_PLANKS), 3), (b(COBBLE), 4), (t(it::IRON_INGOT), 1), (b(sh::WIRE0), 1)], Workbench);
         r((t(it::BUCKET), 1), &[(t(it::IRON_INGOT), 3)], Workbench);
         r((b(BED), 1), &[(b(WOOL0 + 5), 3), (b(OAK_PLANKS), 3)], Workbench);
+        r((b(ENCHANT_TABLE), 1), &[(t(it::BOOK), 1), (t(it::RUBY), 2), (b(OBSIDIAN), 4)], Anvil);
+        r((t(it::ARROW), 4), &[(t(it::STICK), 1), (t(it::FLINT), 1), (t(it::FEATHER), 1)], Hand);
         r((t(it::WHEAT_SEEDS), 2), &[(t(it::WHEAT), 1)], Hand);
     }
     // ===== v0.11: призыв боссов =====

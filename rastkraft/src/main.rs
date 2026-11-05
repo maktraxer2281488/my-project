@@ -3,6 +3,7 @@
 
 mod blocks;
 mod crafting;
+mod ench;
 mod entities;
 mod icons;
 mod inventory;
@@ -79,6 +80,7 @@ enum Screen {
     RecipeBook,
     Map,
     Trade,
+    Enchant,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -105,6 +107,9 @@ struct Game {
     /// Сон в кровати: затемнение до утра.
     sleep_t: f32,
     pending_edits: Vec<(IVec3, u16)>,
+    /// Натяжение лука / зарядка арбалета (0..1) и заряжен ли арбалет.
+    draw_t: f32,
+    cross_loaded: bool,
     dim: Dim,
     seed: u32,
     name: String,
@@ -163,6 +168,8 @@ impl Game {
             thunder_t: 10.0,
             sleep_t: 0.0,
             pending_edits: Vec::new(),
+            draw_t: 0.0,
+            cross_loaded: false,
             dim: Dim::Overworld,
             seed,
             name: name.to_string(),
@@ -447,6 +454,9 @@ fn save_game(app: &mut App) -> bool {
     kv.set("armor", p.armor.iter().map(|a| a.code().to_string()).collect::<Vec<_>>().join(","));
     kv.set("selected", p.selected);
     kv.set("book", 1);
+    kv.set("xp", p.xp);
+    kv.set("inv_ench", p.inv.slots.iter().map(|s| s.ench.to_string()).collect::<Vec<_>>().join(","));
+    kv.set("armor_ench", p.armor_ench.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(","));
     kv.set("crops", g.crops.iter().map(|(p, t)| format!("{},{},{},{:.0}", p.x, p.y, p.z, t)).collect::<Vec<_>>().join(","));
     let pets: Vec<String> = g.mobs.list.iter().filter(|m| m.owner == Some(mobs::OWNER_LOCAL) && m.alive()).map(|m| format!("{},{:.1},{:.1},{:.1},{}", m.def, m.body.pos.x, m.body.pos.y, m.body.pos.z, m.sitting as u8)).collect();
     kv.set("pets", pets.join(";"));
@@ -508,6 +518,13 @@ fn load_game(app: &mut App, name: &str) -> bool {
         g.player.armor[i] = Item::from_code(*c as u32);
     }
     g.player.selected = (kv.u("selected", 0) as usize).min(8);
+    g.player.xp = kv.u("xp", 0) as u32;
+    for (i, e) in kv.ints("inv_ench").iter().enumerate().take(inventory::SLOTS) {
+        g.player.inv.slots[i].ench = *e as u8;
+    }
+    for (i, e) in kv.ints("armor_ench").iter().enumerate().take(4) {
+        g.player.armor_ench[i] = *e as u8;
+    }
     g.crops = kv.ints("crops").chunks_exact(4).map(|c| (ivec3(c[0] as i32, c[1] as i32, c[2] as i32), c[3] as f32)).collect();
     if let Some(p) = kv.get("pets") {
         for e in p.split(';') {
@@ -1041,6 +1058,7 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
     let mut open_inv = false;
     let mut open_book = false;
     let mut open_trade: Option<(usize, u32)> = None;
+    let mut open_enchant = false;
     let mut sfx: Vec<(music::Sfx, f32)> = Vec::new();
     {
         let g = app.game.as_mut().unwrap();
@@ -1135,6 +1153,9 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                     Vec::new()
                 };
                 let ev = g.mobs.update(world, &mut g.player, &mut g.ents, dt, daylight, difficulty, creative, &others);
+                for (p, v) in &ev.xp {
+                    g.ents.spawn_xp(*p, *v);
+                }
                 for text in &ev.say {
                     if text.contains("пробу") {
                         sfx.push((music::Sfx::Boss, 1.0));
@@ -1172,6 +1193,38 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
             for (dmg, dir) in g.ents.update_projectiles(world, g.player.body.pos, dt) {
                 if !creative {
                     g.player.hurt(dmg, dir * 4.0 + vec3(0.0, 3.0, 0.0), false);
+                }
+            }
+            // стрелы игрока попадают в существ
+            let client_mobs = g.net.as_ref().is_some_and(|n| !n.host);
+            for pr in g.ents.projectiles.iter_mut().filter(|p| p.from_player && p.age < 6.0) {
+                for m in g.mobs.list.iter_mut() {
+                    if !m.alive() {
+                        continue;
+                    }
+                    let c = m.body.pos + vec3(0.0, m.body.h * 0.5, 0.0);
+                    let half = vec3(m.body.hw + 0.15, m.body.h * 0.5 + 0.15, m.body.hw + 0.15);
+                    if (pr.pos - c).abs().cmple(half).all() {
+                        if client_mobs {
+                            if let Some(n) = &g.net {
+                                n.broadcast(&Msg::MobHit { uid: m.uid, dmg: pr.damage }, None);
+                            }
+                            m.hurt_t = 0.3;
+                        } else {
+                            m.damage(pr.damage, pr.pos - pr.vel.normalize_or_zero());
+                        }
+                        pr.age = 99.0;
+                        break;
+                    }
+                }
+            }
+            let gained = g.ents.update_orbs(world, g.player.body.pos, dt);
+            if gained > 0 {
+                let before = g.player.level().0;
+                g.player.xp += gained;
+                sfx.push((music::Sfx::Pickup, 0.35));
+                if g.player.level().0 > before {
+                    g.toast = Some((format!("Уровень {}!", g.player.level().0), 2.0));
                 }
             }
         }
@@ -1291,6 +1344,7 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
             }
             let lmb = is_mouse_button_down(MouseButton::Left);
             let lmb_p = is_mouse_button_pressed(MouseButton::Left);
+            let held_ench = g.player.inv.slots[g.player.selected].ench;
             let rmb = is_mouse_button_down(MouseButton::Right);
             let rmb_p = is_mouse_button_pressed(MouseButton::Right);
             if lmb_p && (g.swing_p >= 0.5) {
@@ -1322,7 +1376,7 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                         g.crit_t = 0.4;
                     }
                     if pvp {
-                        let dmg = held.damage() * g.player.damage_bonus() * atk_mul;
+                        let dmg = held.damage() * g.player.damage_bonus() * atk_mul * ench::melee_mult(held_ench);
                         let knock = ((dir.with_y(0.0).normalize_or_zero() * 6.0 + vec3(0.0, 4.0, 0.0)) * (0.3 + 0.7 * charge)).to_array();
                         if let Some(n) = &g.net {
                             let m = Msg::Hit { target: rid, from: n.my_id, dmg, knock };
@@ -1339,7 +1393,11 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                 g.break_target = None;
                 if lmb_p {
                     let from = g.player.body.pos;
-                    let dmg = held.damage() * g.player.damage_bonus() * atk_mul;
+                    let dmg = held.damage() * g.player.damage_bonus() * atk_mul * ench::melee_mult(held_ench);
+                    // вампиризм лечит, огненный клинок — искры
+                    if ench::kind(held_ench) == ench::VAMP {
+                        g.player.health = (g.player.health + 0.5 * ench::level(held_ench) as f32).min(MAX_HEALTH);
+                    }
                     let host_dim = g.remotes.get(&0).map(|r| r.st.dim);
                     let client_mode = g.net.as_ref().is_some_and(|n| !n.host) && host_dim == Some(dim_code(dim));
                     if client_mode {
@@ -1383,7 +1441,7 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                             edits.push((hit, AIR));
                             g.use_cd = 0.22;
                         }
-                    } else if let Some(bt) = break_time(b, held, g.player.has(items::Eff::Haste)) {
+                    } else if let Some(bt) = break_time(b, held, g.player.has(items::Eff::Haste)).map(|t| t / ench::mine_mult(held_ench)) {
                         if g.break_target != Some(hit) {
                             g.break_target = Some(hit);
                             g.break_progress = 0.0;
@@ -1462,10 +1520,13 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                     }
                 }
                 if !used {
-                    if let Item::Armor(..) = held {
+                    if let Item::Armor(slot, _) = held {
                         let old = g.player.equip(held);
                         let sel = g.player.selected;
+                        let new_e = g.player.inv.slots[sel].ench;
+                        let old_e = std::mem::replace(&mut g.player.armor_ench[slot as usize], new_e);
                         g.player.inv.slots[sel] = Stack::new(old, if old == Item::Empty { 0 } else { 1 });
+                        g.player.inv.slots[sel].ench = if old == Item::Empty { 0 } else { old_e };
                         g.toast = Some((format!("Надето: {}", held.name()), 2.0));
                         used = true;
                     }
@@ -1496,6 +1557,71 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                 g.player.eat_t = 0.0;
             }
             // двери, люки, калитки открываются по ПКМ (с Shift — ставим блок рядом)
+            // лук, арбалет, щит
+            g.player.blocking = false;
+            if let Item::Tool(kind @ (items::ToolKind::Bow | items::ToolKind::Crossbow | items::ToolKind::Shield), mat) = held {
+                let arrows = creative || g.player.inv.count(Item::Thing(items::ARROW)) > 0;
+                let eye_p = g.player.eye() + dir * 0.4;
+                let shoot = |ents: &mut Entities, player: &mut Player, rng: &mut u32, power: f32, mult: f32| {
+                    let dmg = (3.0 + mat.tier() * 1.2) * power * mult * ench::shot_mult(held_ench);
+                    ents.projectiles.push(entities::Projectile { pos: eye_p, vel: dir * (12.0 + 26.0 * power), damage: dmg, color: Color::from_rgba(220, 220, 225, 255), age: 0.0, from_player: true });
+                    let thrift = ench::kind(held_ench) == ench::THRIFT && xr(rng) < 0.25 * ench::level(held_ench) as f32;
+                    if !creative && !thrift {
+                        player.inv.remove(Item::Thing(items::ARROW), 1);
+                    }
+                };
+                match kind {
+                    items::ToolKind::Bow => {
+                        if rmb && arrows {
+                            g.draw_t = (g.draw_t + dt).min(1.0);
+                            used = true;
+                        } else if g.draw_t > 0.15 {
+                            let p = g.draw_t;
+                            shoot(&mut g.ents, &mut g.player, &mut g.rng, p, 1.0);
+                            g.draw_t = 0.0;
+                            sfx.push((music::Sfx::Swing, 0.6));
+                            used = true;
+                        } else {
+                            g.draw_t = 0.0;
+                        }
+                    }
+                    items::ToolKind::Crossbow => {
+                        if g.cross_loaded {
+                            if rmb_p {
+                                shoot(&mut g.ents, &mut g.player, &mut g.rng, 1.0, 1.5);
+                                g.cross_loaded = false;
+                                sfx.push((music::Sfx::Hit, 0.6));
+                                used = true;
+                            }
+                        } else if rmb && arrows {
+                            g.draw_t += dt;
+                            if g.draw_t >= 1.1 {
+                                g.cross_loaded = true;
+                                g.draw_t = 0.0;
+                                g.toast = Some(("Арбалет заряжен".into(), 1.0));
+                            }
+                            used = true;
+                        } else {
+                            g.draw_t = 0.0;
+                        }
+                    }
+                    _ => {
+                        if rmb {
+                            g.player.blocking = true;
+                            used = true;
+                        }
+                    }
+                }
+            } else {
+                g.draw_t = 0.0;
+            }
+            // стол улучшений
+            if !used && rmb_p {
+                if let Some((_, _, ENCHANT_TABLE)) = target_block {
+                    open_enchant = true;
+                    used = true;
+                }
+            }
             // существа: приручение, команда «сидеть», разведение, торговля
             if !used && rmb_p {
                 if let Some((mi, mt)) = mob_hit {
@@ -1758,6 +1884,24 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
         if simulate {
             after_edit(app, dim, p, old_b, b);
         }
+        // опыт за руду
+        if b == AIR {
+            let xp = match old_b {
+                COAL_ORE => 1,
+                COPPER_ORE | IRON_ORE => 2,
+                GOLD_ORE => 3,
+                RUBY_ORE | SAPPHIRE_ORE | MALACHITE_ORE => 5,
+                CRYSTAL_ORE => 7,
+                _ => 0,
+            };
+            if xp > 0 {
+                if let Some(g) = app.game.as_mut() {
+                    if !g.creative {
+                        g.ents.spawn_xp(p.as_vec3() + Vec3::splat(0.5), xp);
+                    }
+                }
+            }
+        }
         // сломали половину двери — вторая тоже исчезает
         if b == AIR {
             if let Some(shapes::Form::Door { upper, .. }) = old_form {
@@ -1789,6 +1933,10 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
     if open_book {
         open_recipe_book(app);
     }
+    if open_enchant {
+        app.screen = Screen::Enchant;
+        app.just_opened = true;
+    }
     if let Some(t) = open_trade {
         app.trade = Some(t);
         app.screen = Screen::Trade;
@@ -1806,20 +1954,36 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
     if died {
         let g = app.game.as_mut().unwrap();
         if !g.creative {
-            // всё снаряжение остаётся на месте гибели
+            // снаряжение остаётся на месте гибели; зачарованные вещи остаются у игрока
             let p = g.player.body.pos + vec3(0.0, 0.8, 0.0);
             let slots: Vec<Stack> = g.player.inv.slots.to_vec();
             let armor = g.player.armor;
+            let mut kept = inventory::Inventory::new();
+            let mut kept_n = 0;
             for (k, s) in slots.iter().enumerate() {
-                if !s.is_empty() {
+                if s.is_empty() {
+                    continue;
+                }
+                if s.ench != 0 {
+                    kept.slots[kept_n] = *s;
+                    kept_n += 1;
+                } else {
                     g.ents.spawn_drop(s.item, s.count, p, k as f32 * 0.137);
                 }
             }
             for (k, a) in armor.iter().enumerate() {
-                g.ents.spawn_drop(*a, 1, p, 0.5 + k as f32 * 0.21);
+                if g.player.armor_ench[k] == 0 {
+                    g.ents.spawn_drop(*a, 1, p, 0.5 + k as f32 * 0.21);
+                    g.player.armor[k] = Item::Empty;
+                }
             }
-            g.player.inv = inventory::Inventory::new();
-            g.player.armor = [Item::Empty; 4];
+            // половина опыта рассыпается
+            let xp = g.player.xp / 2;
+            if xp > 0 {
+                g.ents.spawn_xp(p, xp);
+            }
+            g.player.xp = 0;
+            g.player.inv = kept;
         }
         app.screen = Screen::Dead;
     }
@@ -2539,13 +2703,16 @@ fn inventory_screen(app: &mut App) -> Option<Screen> {
             match cursor.item {
                 Item::Armor(sl, _) if sl as usize == i => {
                     let old = g.player.armor[i];
+                    let old_e = std::mem::replace(&mut g.player.armor_ench[i], cursor.ench);
                     g.player.armor[i] = cursor.item;
                     cursor = Stack::new(old, if old == Item::Empty { 0 } else { 1 });
+                    cursor.ench = if old == Item::Empty { 0 } else { old_e };
                 }
                 Item::Empty => {
                     let old = g.player.armor[i];
                     g.player.armor[i] = Item::Empty;
                     cursor = Stack::new(old, 1);
+                    cursor.ench = std::mem::take(&mut g.player.armor_ench[i]);
                 }
                 _ => {}
             }
@@ -2572,7 +2739,15 @@ fn inventory_screen(app: &mut App) -> Option<Screen> {
         let x = gx + col as f32 * (slot + gap);
         let y = inv_y + row as f32 * (slot + gap) + if row == 3 { 8.0 * s } else { 0.0 };
         let st = g.player.inv.slots[i];
-        let (_, click, rclick) = app.ui.slot(x, y, slot, st.item, i == g.player.selected);
+        let (hov, click, rclick) = app.ui.slot(x, y, slot, st.item, i == g.player.selected);
+        if st.ench != 0 {
+            let a = 0.18 + (app.time * 3.0 + i as f32).sin().abs() * 0.15;
+            draw_rectangle(x, y, slot, slot, Color::new(0.65, 0.35, 1.0, a));
+            if hov {
+                let desc = st.item.description().map_or(String::new(), |d| format!(" · {d}"));
+                app.ui.set_tooltip(st.item.name(), Some(format!("{}{desc}", ench::name(st.ench).unwrap_or_default())));
+            }
+        }
         if st.count > 1 {
             app.ui.text(&st.count.to_string(), x + slot - app.ui.measure(&st.count.to_string(), 12.0) - 3.0 * s, y + slot - 4.0 * s, 12.0, WHITE);
         }
@@ -2795,11 +2970,35 @@ fn draw_hud(app: &mut App) {
         }
         let st = g.player.inv.slots[i];
         app.ui.item_icon(st.item, x, y0, slot);
+        if st.ench != 0 {
+            draw_rectangle(x, y0, slot, slot, Color::new(0.65, 0.35, 1.0, 0.18 + (app.time * 3.0).sin().abs() * 0.12));
+        }
         if st.count > 1 {
             let t = st.count.to_string();
             app.ui.text(&t, x + slot - app.ui.measure(&t, 12.0) - 3.0 * s, y0 + slot - 4.0 * s, 12.0, WHITE);
         }
         app.ui.text(&(i + 1).to_string(), x + 3.0 * s, y0 + 12.0 * s, 10.0, Color::new(1.0, 1.0, 1.0, 0.55));
+    }
+    // опыт: полоска над панелью и уровень
+    if !g.creative {
+        let (lvl, frac) = g.player.level();
+        let by = y0 - 15.0 * s;
+        draw_rectangle(x0, by, total, 5.0 * s, Color::new(0.0, 0.0, 0.0, 0.6));
+        draw_rectangle(x0, by, total * frac, 5.0 * s, Color::new(0.5, 1.0, 0.3, 1.0));
+        if lvl > 0 {
+            app.ui.text_center(&lvl.to_string(), w / 2.0, by - 2.0 * s, 15.0, Color::new(0.6, 1.0, 0.4, 1.0));
+        }
+    }
+    // натяжение лука / зарядка арбалета, блок щитом
+    if g.draw_t > 0.0 {
+        draw_rectangle(w / 2.0 - 30.0 * s, h / 2.0 + 24.0 * s, 60.0 * s, 4.0 * s, Color::new(0.0, 0.0, 0.0, 0.5));
+        draw_rectangle(w / 2.0 - 30.0 * s, h / 2.0 + 24.0 * s, 60.0 * s * g.draw_t.min(1.0), 4.0 * s, Color::new(1.0, 0.8, 0.3, 1.0));
+    }
+    if g.cross_loaded && matches!(g.player.held(), Item::Tool(items::ToolKind::Crossbow, _)) {
+        app.ui.text_center("Заряжен", w / 2.0, h / 2.0 + 36.0 * s, 12.0, Color::new(1.0, 0.8, 0.3, 1.0));
+    }
+    if g.player.blocking {
+        app.ui.text_center("Блок щитом", w / 2.0, h / 2.0 + 36.0 * s, 12.0, Color::new(0.7, 0.85, 1.0, 1.0));
     }
     // полоска поедания
     if g.player.eat_t > 0.0 {
@@ -3481,7 +3680,7 @@ async fn main() {
                     }
                 }
             }
-            if matches!(app.screen, Screen::Playing | Screen::Inventory | Screen::Chat | Screen::RecipeBook | Screen::Map | Screen::Trade) {
+            if matches!(app.screen, Screen::Playing | Screen::Inventory | Screen::Chat | Screen::RecipeBook | Screen::Map | Screen::Trade | Screen::Enchant) {
                 let t0 = std::time::Instant::now();
                 update_game(&mut app, dt, md);
                 prof.0 += t0.elapsed().as_secs_f64();
@@ -3518,6 +3717,7 @@ async fn main() {
             Screen::RecipeBook => recipe_book_screen(&mut app),
             Screen::Map => map_screen(&mut app),
             Screen::Trade => trade::screen(&mut app),
+            Screen::Enchant => enchant_screen(&mut app),
             Screen::Loading => {
                 let (w, h) = (screen_width(), screen_height());
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.07, 0.08, 0.1, 1.0));
@@ -3626,6 +3826,13 @@ async fn main() {
                         }
                         "multiplayer" => app.screen = Screen::Multiplayer,
                         "pause" => app.screen = Screen::Paused,
+                        "enchant" => {
+                            if let Some(g) = app.game.as_mut() {
+                                g.player.xp = 600;
+                                g.player.inv.slots[0].ench = ench::pack(ench::SHARP, 2);
+                            }
+                            app.screen = Screen::Enchant;
+                        }
                         "trade" => {
                             app.trade = Some((mobdefs::by_name("Кузнец"), 1));
                             app.screen = Screen::Trade;
@@ -4143,6 +4350,58 @@ fn map_screen(app: &mut App) -> Option<Screen> {
     let (seed, dim, yaw, just) = (g.seed, g.dim, g.player.yaw, app.just_opened);
     let view = app.map.get_or_insert_with(|| map::MapView::new(me));
     if view.draw(&mut app.ui, seed, dim, me, yaw, &markers, just) {
+        return Some(Screen::Playing);
+    }
+    None
+}
+
+/// Стол улучшений: зачарования для предмета в руке за уровни опыта.
+fn enchant_screen(app: &mut App) -> Option<Screen> {
+    let (w, h) = (screen_width(), screen_height());
+    let s = app.ui.s;
+    draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
+    let (pw, ph) = ((600.0 * s).min(w - 20.0), 420.0 * s);
+    let (px, py) = ((w - pw) / 2.0, (h - ph) / 2.0);
+    app.ui.panel(px, py, pw, ph);
+    app.ui.text("Стол улучшений", px + 18.0 * s, py + 34.0 * s, 22.0, Color::new(0.75, 0.6, 1.0, 1.0));
+    let g = app.game.as_mut().unwrap();
+    let (lvl, _) = g.player.level();
+    let lt = format!("Ваш уровень: {lvl}");
+    app.ui.text(&lt, px + pw - app.ui.measure(&lt, 15.0) - 18.0 * s, py + 34.0 * s, 15.0, Color::new(0.6, 1.0, 0.4, 1.0));
+    let sel = g.player.selected;
+    let st = g.player.inv.slots[sel];
+    app.ui.item_icon(st.item, px + 20.0 * s, py + 56.0 * s, 56.0 * s);
+    let cur = ench::name(st.ench).map_or("без зачарования".to_string(), |n| format!("сейчас: {n}"));
+    app.ui.text(&st.item.name(), px + 90.0 * s, py + 80.0 * s, 16.0, WHITE);
+    app.ui.text(&cur, px + 90.0 * s, py + 102.0 * s, 13.0, GRAY);
+    let opts = ench::options(st.item);
+    let mut chosen: Option<(u8, u8)> = None;
+    if opts.is_empty() {
+        app.ui.text("Возьмите в руку оружие, инструмент, броню, лук или щит.", px + 20.0 * s, py + 150.0 * s, 14.0, WHITE);
+    }
+    let mut y = py + 132.0 * s;
+    for k in &opts {
+        app.ui.text(ench::kind_name(*k), px + 20.0 * s, y + 26.0 * s, 15.0, WHITE);
+        for l in 1..=3u8 {
+            let cost = ench::cost(l);
+            let bw = 120.0 * s;
+            let bx = px + pw - (4 - l) as f32 * (bw + 8.0 * s) - 12.0 * s;
+            let label = format!("{} — {} ур.", ["", "I", "II", "III"][l as usize], cost);
+            if app.ui.button_small(bx, y + 6.0 * s, bw, 30.0 * s, &label) && (lvl >= cost || g.creative) {
+                chosen = Some((*k, l));
+            }
+        }
+        y += 44.0 * s;
+    }
+    app.ui.text("Опыт — зелёные шарики с существ и руды. Esc или E — закрыть", px + 18.0 * s, py + ph - 16.0 * s, 12.0, GRAY);
+    if let Some((k, l)) = chosen {
+        if g.creative || g.player.spend_levels(ench::cost(l)) {
+            g.player.inv.slots[sel].ench = ench::pack(k, l);
+            g.toast = Some((format!("Зачаровано: {}", ench::name(ench::pack(k, l)).unwrap_or_default()), 2.0));
+            app.sfx.push((music::Sfx::Crit, 0.7));
+        }
+    }
+    if !app.just_opened && (is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::E)) {
         return Some(Screen::Playing);
     }
     None
