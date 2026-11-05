@@ -22,6 +22,7 @@ uniform float daylight;
 uniform float bright;
 uniform vec3 cam;
 uniform float time;
+uniform float rows;
 
 varying highp vec2 uv;
 varying highp vec2 tile0;
@@ -32,7 +33,7 @@ void main() {
     vec3 lp = in_pos.xyz / 64.0;
     vec3 p = lp + offset;
     float tid = in_uvt.z + in_uvt.w * 256.0;
-    tile0 = vec2(mod(tid, 64.0), floor(tid / 64.0)) / 64.0;
+    tile0 = vec2(mod(tid, 64.0) / 64.0, floor(tid / 64.0) / rows);
     vec3 w = p + cam;
     float a = in_light.a;
     // колыхание травы (250) и листвы (251)
@@ -69,9 +70,10 @@ varying mediump float fogf;
 
 uniform sampler2D tex;
 uniform vec4 fog_color;
+uniform float rows;
 
 void main() {
-    vec2 t = tile0 + clamp(fract(uv), 0.002, 0.998) * (1.0 / 64.0);
+    vec2 t = tile0 + clamp(fract(uv), 0.002, 0.998) * vec2(1.0 / 64.0, 1.0 / rows);
     vec4 c = texture2D(tex, t) * col;
     gl_FragColor = vec4(mix(c.rgb, fog_color.rgb, fogf * fogf), 1.0);
 }"#;
@@ -86,9 +88,10 @@ varying mediump float fogf;
 
 uniform sampler2D tex;
 uniform vec4 fog_color;
+uniform float rows;
 
 void main() {
-    vec4 t = texture2D(tex, tile0 + clamp(fract(uv), 0.002, 0.998) * (1.0 / 64.0));
+    vec4 t = texture2D(tex, tile0 + clamp(fract(uv), 0.002, 0.998) * vec2(1.0 / 64.0, 1.0 / rows));
     if (t.a < 0.5) discard;
     vec4 c = t * col;
     gl_FragColor = vec4(mix(c.rgb, fog_color.rgb, fogf * fogf), c.a);
@@ -104,6 +107,7 @@ pub struct Uniforms {
     pub bright: f32,
     pub cam: [f32; 3],
     pub time: f32,
+    pub rows: f32,
 }
 
 fn meta() -> ShaderMeta {
@@ -119,6 +123,7 @@ fn meta() -> ShaderMeta {
                 UniformDesc::new("bright", UniformType::Float1),
                 UniformDesc::new("cam", UniformType::Float3),
                 UniformDesc::new("time", UniformType::Float1),
+                UniformDesc::new("rows", UniformType::Float1),
             ],
         },
     }
@@ -216,6 +221,7 @@ impl Renderer {
             bright: f.bright,
             cam: f.cam.to_array(),
             time: f.time,
+            rows: blocks::atlas_rows() as f32,
         }
     }
 

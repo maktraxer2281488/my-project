@@ -11,6 +11,9 @@ mod mesher;
 mod mobdefs;
 mod mobs;
 mod model;
+mod audio;
+mod music;
+mod map;
 mod net;
 mod opt;
 mod player;
@@ -71,6 +74,7 @@ enum Screen {
     Dead,
     Chat,
     RecipeBook,
+    Map,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -246,6 +250,13 @@ struct App {
     just_opened: bool,
     finder: Option<net::Finder>,
     chat_input: String,
+    audio: audio::Audio,
+    map: Option<map::MapView>,
+    /// Разрешение текстур, с которым игра запущена.
+    tex_res_active: u32,
+    /// Звуки, накопленные за кадр (проигрываются после обновления мира).
+    sfx: Vec<(music::Sfx, f32)>,
+    export_rx: Option<std::sync::mpsc::Receiver<String>>,
     book_tab: usize,
     book_scroll: f32,
     book_sel: Option<usize>,
@@ -277,6 +288,9 @@ fn edit_block(app: &mut App, dim: Dim, p: IVec3, b: u16, share: bool) {
     let w = &mut g.worlds[dim as usize];
     if !w.set(p.x, p.y, p.z, b) {
         return;
+    }
+    if share && std::env::var("RK_NETLOG").is_ok() {
+        eprintln!("NETLOG local_edit at=({},{},{}) block={b} net={}", p.x, p.y, p.z, g.net.is_some());
     }
     let (cx, cz) = chunk_of(p.x, p.z);
     for dz in -1..=1 {
@@ -573,6 +587,9 @@ fn process_net(app: &mut App) {
                 e.st = st;
             }
             Some(Msg::Edit { dim, x, y, z, b }) => {
+                if std::env::var("RK_NETLOG").is_ok() {
+                    eprintln!("NETLOG edit dim={dim} at=({x},{y},{z}) block={b}");
+                }
                 if n.host {
                     n.broadcast(&Msg::Edit { dim, x, y, z, b }, Some(from));
                 }
@@ -601,6 +618,9 @@ fn process_net(app: &mut App) {
                 }
             }
             Some(Msg::Chat { text }) => {
+                if std::env::var("RK_NETLOG").is_ok() {
+                    eprintln!("NETLOG chat {text}");
+                }
                 if n.host {
                     n.broadcast(&Msg::Chat { text: text.clone() }, Some(from));
                 }
@@ -621,7 +641,8 @@ fn process_net(app: &mut App) {
                 if host_dim == Some(dim_code(g.dim)) {
                     g.mobs.apply_snapshot(&list);
                     if std::env::var("RK_NETLOG").is_ok() {
-                        eprintln!("NETLOG mobs_from_host={} host_dim={:?}", list.len(), host_dim);
+                        let boss = g.mobs.list.iter().find(|m| m.is_boss()).map(|m| (m.d().name, m.health_frac()));
+                        eprintln!("NETLOG mobs_from_host={} host_dim={:?} boss={:?}", list.len(), host_dim, boss);
                     }
                 }
             }
@@ -936,8 +957,11 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
     let mut died = false;
     let mut open_inv = false;
     let mut open_book = false;
+    let mut sfx: Vec<(music::Sfx, f32)> = Vec::new();
     {
         let g = app.game.as_mut().unwrap();
+        let hp_before = g.player.health;
+        let hunger_before = g.player.hunger;
         g.time = (g.time + dt / DAY_SECONDS).fract();
         if playing {
             g.player.look(mouse_delta.x, mouse_delta.y * invert, sens);
@@ -977,6 +1001,9 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                 };
                 let ev = g.mobs.update(world, &mut g.player, &mut g.ents, dt, daylight, difficulty, creative, &others);
                 for text in &ev.say {
+                    if text.contains("пробу") {
+                        sfx.push((music::Sfx::Boss, 1.0));
+                    }
                     g.chat.push((text.clone(), 10.0));
                     if g.chat.len() > 8 {
                         g.chat.remove(0);
@@ -996,6 +1023,9 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                 }
             }
             let picked = g.ents.update(world, g.player.body.pos, dt, g.player.health > 0.0);
+            if !picked.is_empty() {
+                sfx.push((music::Sfx::Pickup, 0.5));
+            }
             for (it, n) in picked {
                 let left = g.player.inv.add(it, n);
                 if left > 0 {
@@ -1140,6 +1170,14 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
             if attacking {
                 g.attack_max = held.cooldown();
                 g.attack_cd = g.attack_max;
+                let hit_something = player_hit.is_some() || mob_hit.is_some();
+                sfx.push(if crit && hit_something {
+                    (music::Sfx::Crit, 0.9)
+                } else if hit_something {
+                    (music::Sfx::Hit, 0.4 + 0.5 * charge)
+                } else {
+                    (music::Sfx::Swing, 0.35)
+                });
             }
 
             if let Some((rid, _)) = player_hit {
@@ -1204,7 +1242,7 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                 }
             } else if let Some((hit, _, _)) = block_hit {
                 let b = world.get(hit.x, hit.y, hit.z);
-                if lmb {
+                if lmb || lmb_p {
                     if creative {
                         if (lmb_p || g.use_cd <= 0.0) && b != BEDROCK {
                             edits.push((hit, AIR));
@@ -1254,6 +1292,7 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                     } else if g.mobs.boss_alive() {
                         g.toast = Some(("Другой босс ещё жив".into(), 2.0));
                     } else if let Some(text) = g.mobs.summon_boss(world, boss, g.player.body.pos, dir) {
+                        sfx.push((music::Sfx::Boss, 1.0));
                         if !creative {
                             let sel = g.player.selected;
                             g.player.inv.slots[sel] = Stack::EMPTY;
@@ -1321,7 +1360,7 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
             } else if !rmb {
                 g.player.eat_t = 0.0;
             }
-            if !used && rmb && (rmb_p || g.use_cd <= 0.0) {
+            if !used && (rmb || rmb_p) && (rmb_p || g.use_cd <= 0.0) {
                 if let (Some((_, prev, _)), Item::Block(nb)) = (target_block, held) {
                     let cur = world.get(prev.x, prev.y, prev.z);
                     let replace = cur == AIR || def(cur).shape == blocks::Shape::Liquid || def(cur).shape == blocks::Shape::Cross;
@@ -1353,9 +1392,19 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
         }
         g.autosave_t -= dt;
         g.swing_t = if g.swing_p < 1.0 { g.swing_p } else { 0.0 };
+        if g.player.health < hp_before - 0.01 {
+            sfx.push((music::Sfx::Hurt, 0.8));
+        }
+        if g.player.hunger > hunger_before + 0.5 {
+            sfx.push((music::Sfx::Eat, 0.7));
+        }
     }
+    app.sfx.append(&mut sfx);
 
     let dim = app.game.as_ref().unwrap().dim;
+    for (_, b) in &edits {
+        app.sfx.push((if *b == AIR { music::Sfx::Break } else { music::Sfx::Place }, 0.6));
+    }
     for (p, b) in edits {
         if b == AIR {
             if let Some(g) = app.game.as_mut() {
@@ -1839,13 +1888,14 @@ fn settings_screen(app: &mut App) -> Option<Screen> {
     }
     app.ui.text_center("Настройки", w / 2.0, h * 0.07, 34.0, WHITE);
     let cw = 330.0 * s;
-    let bh = 42.0 * s;
-    let gap = 10.0 * s;
+    let bh = 38.0 * s;
+    let gap = 8.0 * s;
     let x1 = w / 2.0 - cw - gap / 2.0;
     let x2 = w / 2.0 + gap / 2.0;
     let mut y = h * 0.11;
     let old_smooth = app.settings.smooth_light;
     let old_fast = opt::get().fast_leaves;
+    let active_res = app.tex_res_active;
     let st = &mut app.settings;
     let ui = &mut app.ui;
     let rd = ui.slider(1, x1, y, cw, bh, &format!("Дальность прорисовки: {} чанков", st.render_dist), st.render_dist as f32, 2.0, 32.0);
@@ -1935,7 +1985,41 @@ fn settings_screen(app: &mut App) -> Option<Screen> {
     y += bh + 4.0 * s;
     ui.text(&format!("Оптимизация: {}", opt::HINTS[st.opt_level as usize]), x1 + 6.0 * s, y + 14.0 * s, 13.0, Color::new(0.9, 0.9, 0.85, 1.0));
     y += 22.0 * s + gap;
-    let done = ui.button((w - cw) / 2.0, y, cw, bh, "Готово") || is_key_pressed(KeyCode::Escape);
+    st.music_vol = ui.slider(7, x1, y, cw, bh, &format!("Музыка: {:.0}%", st.music_vol * 100.0), st.music_vol, 0.0, 1.0);
+    st.sound_vol = ui.slider(8, x2, y, cw, bh, &format!("Звуки: {:.0}%", st.sound_vol * 100.0), st.sound_vol, 0.0, 1.0);
+    y += bh + gap;
+    if ui.button(x1, y, cw, bh, &format!("Текстуры: x{0} ({0}×{0} пикс.)", st.tex_res)) {
+        let i = blocks::TEX_RES.iter().position(|&r| r == st.tex_res as usize).unwrap_or(1);
+        st.tex_res = blocks::TEX_RES[(i + 1) % blocks::TEX_RES.len()] as u32;
+    }
+    let note = if st.tex_res != active_res {
+        "применится после перезапуска игры".to_string()
+    } else {
+        let mb = blocks::ATLAS_TILES * st.tex_res as usize * blocks::atlas_rows() * st.tex_res as usize * 4 / 1_000_000;
+        format!("видеопамять под текстуры: ~{mb} МБ")
+    };
+    ui.text(&note, x2 + 6.0 * s, y + bh * 0.62, 13.0, Color::new(0.9, 0.9, 0.85, 1.0));
+    y += bh + gap;
+    let exporting = app.export_rx.is_some();
+    let export = ui.button(x1, y, cw, bh, if exporting { "Сохраняю музыку…" } else { "Сохранить музыку в папку music" });
+    let done = ui.button(x2, y, cw, bh, "Готово") || is_key_pressed(KeyCode::Escape);
+    if export && !exporting {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let msg = match audio::export_music() {
+                Ok(d) => format!("Музыка сохранена: {}", d.display()),
+                Err(e) => format!("Не удалось сохранить музыку: {e}"),
+            };
+            let _ = tx.send(msg);
+        });
+        app.export_rx = Some(rx);
+    }
+    if let Some(rx) = &app.export_rx {
+        if let Ok(msg) = rx.try_recv() {
+            app.status = Some((msg, 6.0));
+            app.export_rx = None;
+        }
+    }
     st.clamp();
     opt::set_level(st.opt_level);
     if st.smooth_light != old_smooth || opt::get().fast_leaves != old_fast {
@@ -2678,7 +2762,25 @@ async fn main() {
     }
     let _ = prep.join();
 
-    let atlas = Texture2D::from_rgba8(ATLAS as u16, ATLAS as u16, atlas_pixels());
+    // текстуры в выбранном разрешении, но не больше, чем умеет видеокарта
+    let mut startup_note: Option<String> = None;
+    let want_res = std::env::var("RK_TEXRES").ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(Settings::load().tex_res) as usize;
+    let max_tex = unsafe {
+        let mut v: i32 = 0;
+        macroquad::miniquad::gl::glGetIntegerv(macroquad::miniquad::gl::GL_MAX_TEXTURE_SIZE, &mut v);
+        if v <= 0 { 4096 } else { v as usize }
+    };
+    let mut res = want_res;
+    while res > 8 && ATLAS_TILES * res > max_tex {
+        res /= 2;
+    }
+    if res != want_res {
+        startup_note = Some(format!("Видеокарта не тянет текстуры {want_res}×{want_res}: включено {res}×{res}"));
+    }
+    let atlas = {
+        let (px, w, h) = display_atlas(res);
+        Texture2D::from_rgba8(w as u16, h as u16, &px)
+    };
     atlas.set_filter(FilterMode::Nearest);
     let renderer = {
         let ctx = unsafe { get_internal_gl() }.quad_context;
@@ -2716,6 +2818,11 @@ async fn main() {
         just_opened: false,
         finder: None,
         chat_input: String::new(),
+        audio: audio::Audio::new(),
+        map: None,
+        tex_res_active: 16,
+        sfx: Vec::new(),
+        export_rx: None,
         book_tab: 0,
         book_scroll: 0.0,
         book_sel: None,
@@ -2727,6 +2834,10 @@ async fn main() {
     };
 
     app.eff_dist = app.settings.render_dist;
+    app.tex_res_active = res as u32;
+    if let Some(n) = startup_note {
+        app.status = Some((n, 6.0));
+    }
     if let Some(l) = std::env::var("RK_OPT").ok().and_then(|v| v.parse::<u8>().ok()) {
         app.settings.opt_level = l.min(3);
     }
@@ -2807,6 +2918,19 @@ async fn main() {
                 if is_key_pressed(KeyCode::T) || is_key_pressed(KeyCode::Enter) {
                     app.screen = Screen::Chat;
                     app.just_opened = true;
+                }
+                // M — карта мира
+                if is_key_pressed(KeyCode::M) && app.screen == Screen::Playing {
+                    if let Some(g) = app.game.as_ref() {
+                        let me = vec2(g.player.body.pos.x, g.player.body.pos.z);
+                        if app.map.is_none() {
+                            app.map = Some(map::MapView::new(me));
+                        } else if let Some(m) = app.map.as_mut() {
+                            m.center = me;
+                        }
+                        app.screen = Screen::Map;
+                        app.just_opened = true;
+                    }
                 }
                 // B — книга рецептов, если она есть в инвентаре (или в творчестве)
                 if is_key_pressed(KeyCode::B) && app.screen == Screen::Playing {
@@ -2945,7 +3069,7 @@ async fn main() {
                     }
                 }
             }
-            if matches!(app.screen, Screen::Playing | Screen::Inventory | Screen::Chat | Screen::RecipeBook) {
+            if matches!(app.screen, Screen::Playing | Screen::Inventory | Screen::Chat | Screen::RecipeBook | Screen::Map) {
                 let t0 = std::time::Instant::now();
                 update_game(&mut app, dt, md);
                 prof.0 += t0.elapsed().as_secs_f64();
@@ -2980,6 +3104,7 @@ async fn main() {
             Screen::Inventory => inventory_screen(&mut app),
             Screen::Chat => chat_screen(&mut app),
             Screen::RecipeBook => recipe_book_screen(&mut app),
+            Screen::Map => map_screen(&mut app),
             Screen::Loading => {
                 let (w, h) = (screen_width(), screen_height());
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.07, 0.08, 0.1, 1.0));
@@ -3088,6 +3213,15 @@ async fn main() {
                         }
                         "multiplayer" => app.screen = Screen::Multiplayer,
                         "pause" => app.screen = Screen::Paused,
+                        "map" => {
+                            if let Some(g) = app.game.as_ref() {
+                                let me = vec2(g.player.body.pos.x, g.player.body.pos.z);
+                                let mut v = map::MapView::new(me);
+                                v.scale_i = std::env::var("RK_MAPSCALE").ok().and_then(|s| s.parse().ok()).unwrap_or(2usize).min(5);
+                                app.map = Some(v);
+                                app.screen = Screen::Map;
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -3099,6 +3233,26 @@ async fn main() {
                     get_screen_data().export_png(path);
                     std::process::exit(0);
                 }
+            }
+        }
+        // музыка по обстановке и звуки кадра
+        let track = match (&app.game, app.screen) {
+            (None, _) | (_, Screen::Title | Screen::Worlds | Screen::NewWorld | Screen::Multiplayer) => Some(music::Track::Menu),
+            (Some(_), Screen::Loading) => None,
+            (Some(g), _) => Some(music_for(g)),
+        };
+        app.audio.want(track);
+        app.audio.update(dt, app.settings.music_vol);
+        if app.ui.clicked {
+            app.sfx.push((music::Sfx::Click, 0.5));
+        }
+        for (s, v) in app.sfx.drain(..).take(6) {
+            app.audio.play(s, v * app.settings.sound_vol);
+        }
+        if let Some((t, _)) = &app.audio.now_playing {
+            if app.game.is_some() && app.screen == Screen::Playing && !app.hide_hud {
+                let w = screen_width();
+                app.ui.text(t, w - app.ui.measure(t, 14.0) - 14.0 * app.ui.s, 52.0 * app.ui.s, 14.0, Color::new(1.0, 0.9, 0.6, 0.85));
             }
         }
         // ограничение FPS: ждём остаток кадра (меньше нагрев и шум ноутбука)
@@ -3450,6 +3604,56 @@ fn recipe_book_screen(app: &mut App) -> Option<Screen> {
         app.book_sel = Some(p);
     }
     if !app.just_opened && (close || is_key_pressed(KeyCode::Escape)) {
+        return Some(Screen::Playing);
+    }
+    None
+}
+
+/// Какая мелодия подходит к месту и времени.
+fn music_for(g: &Game) -> music::Track {
+    let p = g.player.body.pos;
+    if g.mobs.list.iter().any(|m| m.is_boss() && m.alive() && (m.body.pos - p).length() < 48.0) {
+        return music::Track::Boss;
+    }
+    if g.dim == Dim::Heaven {
+        return music::Track::Heaven;
+    }
+    let (x, y, z) = (p.x.floor() as i32, (p.y + 1.6).floor() as i32, p.z.floor() as i32);
+    if y < 56 && !g.world().sky_exposed(x, y, z) {
+        return music::Track::Caves;
+    }
+    if g.daylight() < 0.3 {
+        return music::Track::Night;
+    }
+    match worldgen::column(g.seed, x, z).biome {
+        worldgen::Biome::Desert => music::Track::Desert,
+        worldgen::Biome::Taiga => music::Track::Taiga,
+        _ => music::Track::Meadow,
+    }
+}
+
+fn map_screen(app: &mut App) -> Option<Screen> {
+    let Some(g) = app.game.as_ref() else { return Some(Screen::Title) };
+    let me = vec2(g.player.body.pos.x, g.player.body.pos.z);
+    let dc = dim_code(g.dim);
+    let mut markers: Vec<map::Marker> = Vec::new();
+    if g.dim == Dim::Overworld {
+        markers.push(map::Marker { pos: vec2(g.spawn.x, g.spawn.z), label: "Дом (возрождение)".into(), color: Color::new(0.3, 0.9, 0.4, 1.0), yaw: None });
+        if let Some(p) = g.portal_home {
+            markers.push(map::Marker { pos: vec2(p.x as f32, p.z as f32), label: "Портал".into(), color: Color::new(0.75, 0.45, 1.0, 1.0), yaw: None });
+        }
+    }
+    for r in g.remotes.values() {
+        if r.st.dim == dc {
+            markers.push(map::Marker { pos: vec2(r.st.pos[0], r.st.pos[2]), label: r.st.name.clone(), color: Color::new(0.35, 0.7, 1.0, 1.0), yaw: Some(r.st.yaw) });
+        }
+    }
+    for m in g.mobs.list.iter().filter(|m| m.is_boss() && m.alive()) {
+        markers.push(map::Marker { pos: vec2(m.body.pos.x, m.body.pos.z), label: format!("Босс: {}", m.d().name), color: Color::new(1.0, 0.25, 0.25, 1.0), yaw: None });
+    }
+    let (seed, dim, yaw, just) = (g.seed, g.dim, g.player.yaw, app.just_opened);
+    let view = app.map.get_or_insert_with(|| map::MapView::new(me));
+    if view.draw(&mut app.ui, seed, dim, me, yaw, &markers, just) {
         return Some(Screen::Playing);
     }
     None

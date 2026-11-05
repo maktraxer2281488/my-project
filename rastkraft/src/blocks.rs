@@ -393,11 +393,140 @@ pub fn mob_tiles(mob: usize) -> [u16; 3] {
     [v[b], v[b + 1], v[b + 2]]
 }
 
+/// UV плитки в текстуре, которую видит видеокарта: 64 плитки в ширину,
+/// а по высоте — только занятые строки (см. `atlas_rows`).
 pub fn tile_uv(tile: u16) -> (f32, f32, f32, f32) {
     let (tx, ty) = ((tile as usize % ATLAS_TILES) as f32, (tile as usize / ATLAS_TILES) as f32);
-    let s = 1.0 / ATLAS_TILES as f32;
+    let su = 1.0 / ATLAS_TILES as f32;
+    let sv = 1.0 / atlas_rows() as f32;
     let e = 0.01 / ATLAS as f32;
-    (tx * s + e, ty * s + e, (tx + 1.0) * s - e, (ty + 1.0) * s - e)
+    (tx * su + e, ty * sv + e, (tx + 1.0) * su - e, (ty + 1.0) * sv - e)
+}
+
+/// Сколько строк атласа занято плитками.
+pub fn atlas_rows() -> usize {
+    *ROWS.get_or_init(|| {
+        let px = atlas_pixels();
+        // последняя строка плиток, где есть хоть один непрозрачный пиксель
+        let mut rows = 1;
+        for ty in 0..ATLAS_TILES {
+            let row = &px[ty * TILE * ATLAS * 4..(ty + 1) * TILE * ATLAS * 4];
+            if row.chunks_exact(4).any(|p| p[3] != 0) {
+                rows = ty + 1;
+            }
+        }
+        rows
+    })
+}
+
+static ROWS: OnceLock<usize> = OnceLock::new();
+
+/// Разрешения текстур, доступные в настройках.
+pub const TEX_RES: [usize; 6] = [8, 16, 32, 64, 128, 256];
+
+/// Атлас для видеокарты в выбранном разрешении плитки (8…256 пикселей).
+/// Базовые текстуры рисуются в 16×16; крупнее — сглаженное увеличение с мелкими деталями
+/// и объёмом внутри каждого исходного пикселя, мельче — усреднение.
+/// Возвращает (пиксели, ширина, высота).
+pub fn display_atlas(res: usize) -> (Vec<u8>, usize, usize) {
+    let base = atlas_pixels();
+    let rows = atlas_rows();
+    if res == TILE {
+        return (base[..rows * TILE * ATLAS * 4].to_vec(), ATLAS, rows * TILE);
+    }
+    let w = ATLAS_TILES * res;
+    let h = rows * res;
+    let mut out = vec![0u8; w * h * 4];
+    let src = |x: i64, y: i64, tx: usize, ty: usize| -> [f32; 4] {
+        let x = x.clamp(0, TILE as i64 - 1) as usize;
+        let y = y.clamp(0, TILE as i64 - 1) as usize;
+        let i = ((ty * TILE + y) * ATLAS + tx * TILE + x) * 4;
+        [base[i] as f32, base[i + 1] as f32, base[i + 2] as f32, base[i + 3] as f32]
+    };
+    let k = res as f32 / TILE as f32;
+    // строки текстуры считаются параллельно
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(16);
+    let chunk_rows = h.div_ceil(threads);
+    std::thread::scope(|sc| {
+        for (ci, part) in out.chunks_mut(chunk_rows * w * 4).enumerate() {
+            sc.spawn(move || {
+                let y0 = ci * chunk_rows;
+                for (ly, line) in part.chunks_mut(w * 4).enumerate() {
+                    let oy = y0 + ly;
+                    let (ty, py) = (oy / res, oy % res);
+                    for ox in 0..w {
+                        let (tx, px) = (ox / res, ox % res);
+                        let o = &mut line[ox * 4..ox * 4 + 4];
+                        if k < 1.0 {
+                            // уменьшение: среднее 2×2, прозрачность по большинству
+                            let (sx, sy) = (px as i64 * 2, py as i64 * 2);
+                            let mut acc = [0f32; 4];
+                            let mut solid = 0;
+                            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                                let c = src(sx + dx, sy + dy, tx, ty);
+                                if c[3] > 0.0 {
+                                    solid += 1;
+                                    for j in 0..3 {
+                                        acc[j] += c[j];
+                                    }
+                                }
+                            }
+                            if solid >= 2 {
+                                for j in 0..3 {
+                                    o[j] = (acc[j] / solid as f32) as u8;
+                                }
+                                o[3] = 255;
+                            }
+                            continue;
+                        }
+                        // увеличение: координата внутри исходной плитки
+                        let fx = (px as f32 + 0.5) / k;
+                        let fy = (py as f32 + 0.5) / k;
+                        let (ix, iy) = (fx.floor() as i64, fy.floor() as i64);
+                        let (rx, ry) = (fx - ix as f32, fy - iy as f32);
+                        let c0 = src(ix, iy, tx, ty);
+                        if c0[3] == 0.0 {
+                            continue; // прозрачность остаётся чёткой
+                        }
+                        // мягкий переход к соседу у края исходного пикселя
+                        let soft = (0.5 / k).min(0.35);
+                        let blend = |r: f32| -> (i64, f32) {
+                            if r < soft {
+                                (-1, (soft - r) / soft * 0.5)
+                            } else if r > 1.0 - soft {
+                                (1, (r - (1.0 - soft)) / soft * 0.5)
+                            } else {
+                                (0, 0.0)
+                            }
+                        };
+                        let (dx, wx) = blend(rx);
+                        let (dy, wy) = blend(ry);
+                        let mut c = c0;
+                        for (ddx, ddy, wgt) in [(dx, 0, wx), (0, dy, wy)] {
+                            if wgt > 0.0 {
+                                let n = src(ix + ddx, iy + ddy, tx, ty);
+                                if n[3] > 0.0 {
+                                    for j in 0..3 {
+                                        c[j] += (n[j] - c[j]) * wgt;
+                                    }
+                                }
+                            }
+                        }
+                        // объём: светлее у верхнего-левого края пикселя, темнее у нижнего-правого
+                        let bevel = if k >= 4.0 { ((0.5 - rx) + (0.5 - ry)) * 0.07 } else { 0.0 };
+                        // мелкая зернистость
+                        let g = (hash(ox as i32, oy as i32, 991) - 0.5) * if k >= 2.0 { 0.09 } else { 0.0 };
+                        let m = 1.0 + bevel + g;
+                        for j in 0..3 {
+                            o[j] = (c[j] * m).clamp(0.0, 255.0) as u8;
+                        }
+                        o[3] = 255;
+                    }
+                }
+            });
+        }
+    });
+    (out, w, h)
 }
 
 // ---------- пиксельная кухня ----------

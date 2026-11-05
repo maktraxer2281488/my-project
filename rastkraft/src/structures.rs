@@ -6,7 +6,7 @@ use crate::mobdefs::by_name;
 use crate::world::{CH, Dim};
 use crate::worldgen::{self, Biome, Gen, SEA};
 
-const REGION: i32 = 64;
+pub const REGION: i32 = 64;
 const REACH: i32 = 14;
 
 pub struct SB<'a, 'b> {

@@ -17,11 +17,13 @@ pub struct Ui {
     pub down: bool,
     drag: Option<u32>,
     tooltip: Option<(String, Option<String>)>,
+    /// В этом кадре нажата кнопка (для звука щелчка).
+    pub clicked: bool,
 }
 
 impl Ui {
     pub fn new(font: Font, atlas: Texture2D) -> Self {
-        Ui { font, atlas, s: 1.0, mouse: Vec2::ZERO, pressed: false, rpressed: false, down: false, drag: None, tooltip: None }
+        Ui { font, atlas, s: 1.0, mouse: Vec2::ZERO, pressed: false, rpressed: false, down: false, drag: None, tooltip: None, clicked: false }
     }
 
     pub fn begin(&mut self, gui_scale: f32) {
@@ -34,6 +36,7 @@ impl Ui {
             self.drag = None;
         }
         self.tooltip = None;
+        self.clicked = false;
     }
 
     pub fn text(&self, t: &str, x: f32, y: f32, size: f32, color: Color) {
@@ -89,6 +92,9 @@ impl Ui {
         draw_rectangle_lines(x, y, w, h, 2.0, if hov { ACCENT } else { Color::new(1.0, 1.0, 1.0, 0.1) });
         let col = if enabled { WHITE } else { GRAY };
         self.text_center(label, x + w / 2.0, y + h / 2.0 + size * self.s * 0.36, size, col);
+        if hov && self.pressed {
+            self.clicked = true;
+        }
         hov && self.pressed
     }
 
@@ -134,9 +140,9 @@ impl Ui {
     }
 
     fn tile_rect(tile: u16) -> Rect {
+        // в нормализованных координатах; размер текстуры подставляется при рисовании
         let (u0, v0, u1, v1) = tile_uv(tile);
-        let a = blocks::ATLAS as f32;
-        Rect::new(u0 * a, v0 * a, (u1 - u0) * a, (v1 - v0) * a)
+        Rect::new(u0, v0, u1 - u0, v1 - v0)
     }
 
     pub fn sprite(&self, tile: u16, x: f32, y: f32, size: f32, rot: f32, color: Color) {
@@ -145,7 +151,11 @@ impl Ui {
             x,
             y,
             color,
-            DrawTextureParams { dest_size: Some(vec2(size, size)), source: Some(Self::tile_rect(tile)), rotation: rot, ..Default::default() },
+            DrawTextureParams { dest_size: Some(vec2(size, size)), source: Some({
+                    let r = Self::tile_rect(tile);
+                    let (w, h) = (self.atlas.width(), self.atlas.height());
+                    Rect::new(r.x * w, r.y * h, r.w * w, r.h * h)
+                }), rotation: rot, ..Default::default() },
         );
     }
 
