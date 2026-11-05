@@ -404,6 +404,12 @@ struct App {
     /// Действующая дальность (при авто-настройке может быть меньше выбранной).
     eff_dist: i32,
     auto_t: f32,
+    /// Авто-качество: множитель масштаба рендера (0.6…1).
+    dyn_scale: f32,
+    /// Кадров в секунду «по силам» (без сна ограничителя FPS).
+    busy_fps: f32,
+    /// Сколько ограничитель FPS спал в прошлом кадре (с).
+    slept: f32,
 }
 
 fn set_grab(app: &mut App, grab: bool) {
@@ -2804,7 +2810,7 @@ fn settings_screen(app: &mut App) -> Option<Screen> {
     y += bh + gap;
     let rs = ui.slider(6, x1, y, cw, bh, &format!("Масштаб рендера: {:.0}%", st.render_scale * 100.0), st.render_scale, 0.4, 1.0);
     st.render_scale = (rs * 20.0).round() / 20.0;
-    if ui.button(x2, y, cw, bh, &format!("Авто-дальность (60 FPS): {}", onoff(st.auto_dist))) {
+    if ui.button(x2, y, cw, bh, &format!("Авто-качество (60 FPS): {}", onoff(st.auto_dist))) {
         st.auto_dist = !st.auto_dist;
     }
     y += bh + gap;
@@ -3348,7 +3354,9 @@ fn draw_hud(app: &mut App) {
         let me = vec2(g.player.body.pos.x, g.player.body.pos.z);
         let dc = dim_code(g.dim);
         let mk: Vec<map::Marker> = g.markers.iter().filter(|m| m.0 == dc).map(|(_, p, n)| map::Marker { pos: *p, label: n.clone(), color: Color::new(1.0, 0.85, 0.2, 1.0), yaw: None }).collect();
+        let tp = std::time::Instant::now();
         app.minimap.draw(g.seed, g.dim, me, g.player.yaw, &mk, w - size - 12.0 * s, 12.0 * s, size);
+        prof_add(7, tp);
         app.ui.text_center("С", w - size / 2.0 - 12.0 * s, 26.0 * s, 13.0, Color::new(1.0, 0.4, 0.35, 1.0));
     }
     // всплывающие достижения
@@ -3461,7 +3469,13 @@ fn draw_hud(app: &mut App) {
     } else if app.settings.show_fps {
         // при сенсорном управлении слева вверху кнопки — счётчик ниже них
         let fy = if app.settings.touch { screen_height() * 0.16 + 20.0 * s } else { 24.0 * s };
-        app.ui.text(&format!("{:.0} FPS", app.fps), 12.0 * s, fy, 15.0, Color::new(1.0, 1.0, 0.6, 0.95));
+        // авто-качество что-то понизило — видно рядом со счётчиком
+        let auto = if app.settings.auto_dist && (app.dyn_scale < 0.99 || app.eff_dist < app.settings.render_dist) {
+            format!("  (рендер {:.0}%, дальность {})", app.settings.render_scale * app.dyn_scale * 100.0, app.eff_dist)
+        } else {
+            String::new()
+        };
+        app.ui.text(&format!("{:.0} FPS{auto}", app.fps), 12.0 * s, fy, 15.0, Color::new(1.0, 1.0, 0.6, 0.95));
     }
 }
 
@@ -3489,11 +3503,19 @@ fn depth_target_ok() -> bool {
     })
 }
 
+/// Замер времени частей кадра (для RK_BENCH): сумма наносекунд по разделам.
+static PROF: [std::sync::atomic::AtomicU64; 8] = [const { std::sync::atomic::AtomicU64::new(0) }; 8];
+const PROF_NAMES: [&str; 8] = ["sky", "world", "mobs", "ents", "fx", "hand", "hud", "minimap"];
+
+fn prof_add(i: usize, t0: std::time::Instant) {
+    PROF[i].fetch_add(t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// 3D-сцена: небо, мир, существа, игроки, предметы, рука.
 fn render_world(app: &mut App) {
     // масштаб рендера: 3D рисуется в текстуру меньшего размера и растягивается
     let (sw, sh) = (screen_width(), screen_height());
-    let scale = app.settings.render_scale;
+    let scale = app.settings.render_scale * app.dyn_scale;
     let use_rt = scale < 0.99 && depth_target_ok();
     if use_rt {
         let (w, h) = (((sw * scale) as u32).max(64), ((sh * scale) as u32).max(64));
@@ -3546,7 +3568,9 @@ fn render_world(app: &mut App) {
         Some(t) => set_camera(&Camera2D { render_target: Some(t.clone()), ..Camera2D::from_display_rect(Rect::new(0.0, 0.0, sw, sh)) }),
         None => set_default_camera(),
     }
+    let tp = std::time::Instant::now();
     draw_sky(g, &vp, top, hor);
+    prof_add(0, tp);
     {
         let mut gl = unsafe { get_internal_gl() };
         gl.flush();
@@ -3578,16 +3602,21 @@ fn render_world(app: &mut App) {
         };
         let clouds = if app.settings.clouds && g.dim != Dim::Abyss { Some((g.dim, app.time)) } else { None };
         if std::env::var("RK_NOWORLD").is_err() {
+            let tp = std::time::Instant::now();
             app.renderer.draw(gl.quad_context, &app.loader, &frame, clouds, pass);
+            prof_add(1, tp);
         }
     }
     let cam3 = Camera3D { position: eye, target: eye + dir, up: cam_up, fovy, z_near: 0.05, z_far: 1500.0, render_target: rt.clone(), aspect: Some(sw / sh.max(1.0)), ..Default::default() };
     set_camera(&cam3);
     model::begin(&app.ui.atlas);
     let daylight = g.daylight();
+    let tp = std::time::Instant::now();
     if std::env::var("RK_NOMOBS").is_err() {
         g.mobs.draw(g.world(), daylight, app.time, eye, dir);
     }
+    prof_add(2, tp);
+    let tp = std::time::Instant::now();
     let right = dir.cross(Vec3::Y).normalize_or_zero();
     g.ents.draw(&app.ui.atlas, app.time, right);
     // другие игроки
@@ -3608,6 +3637,8 @@ fn render_world(app: &mut App) {
         model::draw_player(&app.ui.atlas, p.body.pos, p.yaw, p.pitch, p.walk_phase, sp, g.swing_t, p.held(), &p.armor, &look, light, p.hurt_t > 0.0);
     }
     model::flush();
+    prof_add(3, tp);
+    let tp = std::time::Instant::now();
     // осадки вокруг камеры: дождь, снег в тайге, песок в пустыне
     if g.rain_k > 0.05 && g.dim == Dim::Overworld {
         let biome = worldgen::column(g.seed, eye.x as i32, eye.z as i32).biome;
@@ -3655,6 +3686,8 @@ fn render_world(app: &mut App) {
             }
         }
     }
+    prof_add(4, tp);
+    let tp = std::time::Instant::now();
     // рука от первого лица — поверх мира (очищаем глубину)
     if !g.third_person && !app.hide_hud && matches!(app.screen, Screen::Playing | Screen::Paused | Screen::Inventory) {
         let mut gl = unsafe { get_internal_gl() };
@@ -3677,6 +3710,7 @@ fn render_world(app: &mut App) {
         model::draw_first_person(&app.ui.atlas, hand_eye, dir, hr, hu, p.held(), &anim, sleeve, look.skin, light);
         model::flush();
     }
+    prof_add(5, tp);
     set_default_camera();
     if let Some(t) = &rt {
         draw_texture_ex(&t.texture, 0.0, 0.0, WHITE, DrawTextureParams { dest_size: Some(vec2(sw, sh)), flip_y: true, ..Default::default() });
@@ -3882,6 +3916,9 @@ async fn amain() {
         rt: None,
         eff_dist: 4,
         auto_t: 0.0,
+        dyn_scale: 1.0,
+        busy_fps: 60.0,
+        slept: 0.0,
     };
 
     app.eff_dist = app.settings.render_dist;
@@ -3898,7 +3935,7 @@ async fn amain() {
     app.touch_layout = touch::Layout::from_text(&app.settings.touch_layout);
     let mut frame_start = std::time::Instant::now();
     if std::env::var("RK_BENCH").is_ok() || std::env::var("RK_SHOT").is_ok() {
-        app.settings.auto_dist = false;
+        app.settings.auto_dist = std::env::var("RK_AUTO").is_ok();
     }
     // режим для автоматических скриншотов и проверок
     let shot = std::env::var("RK_SHOT").ok();
@@ -4044,21 +4081,47 @@ async fn amain() {
 
         process_net(&mut app);
 
-        // авто-дальность: держим ~60 кадров в секунду
+        // авто-качество: держим 60 кадров. Считаем по времени работы кадра без сна
+        // ограничителя FPS — так видно запас, даже когда кадры ограничены 60.
+        // Сначала понижается масштаб рендера (до 75%), потом дальность, потом масштаб до 60%;
+        // при запасе всё возвращается в обратном порядке.
+        let busy = (raw_dt - app.slept).max(0.001);
+        app.busy_fps += (1.0 / busy - app.busy_fps) * 0.05;
         if app.settings.auto_dist && app.screen == Screen::Playing {
             app.auto_t += dt;
-            if app.fps < 50.0 && app.eff_dist > 3 && app.auto_t > 1.5 {
-                app.eff_dist -= 1;
-                app.auto_t = 0.0;
-            } else if app.fps > 58.0 && app.eff_dist < app.settings.render_dist && app.auto_t > 5.0 {
-                app.eff_dist += 1;
-                app.auto_t = 0.0;
-            } else if app.fps >= 50.0 && app.fps <= 58.0 {
-                app.auto_t = app.auto_t.min(1.0);
+            let rs = app.settings.render_scale;
+            let total = rs * app.dyn_scale;
+            if app.busy_fps < 57.0 {
+                if app.auto_t > 1.0 {
+                    if total > 0.76 {
+                        app.dyn_scale = ((total - 0.1).max(0.75) / rs).min(1.0);
+                    } else if app.eff_dist > 4 {
+                        app.eff_dist -= 1;
+                    } else if total > 0.61 {
+                        app.dyn_scale = ((total - 0.05).max(0.6) / rs).min(1.0);
+                    } else if app.eff_dist > 3 {
+                        app.eff_dist -= 1;
+                    }
+                    app.auto_t = 0.0;
+                }
+            } else if app.busy_fps > 68.0 {
+                if app.auto_t > 4.0 {
+                    if total < 0.74 && app.dyn_scale < 1.0 {
+                        app.dyn_scale = ((total + 0.05) / rs).min(1.0);
+                    } else if app.eff_dist < app.settings.render_dist {
+                        app.eff_dist += 1;
+                    } else if app.dyn_scale < 1.0 {
+                        app.dyn_scale = (app.dyn_scale + 0.1).min(1.0);
+                    }
+                    app.auto_t = 0.0;
+                }
+            } else {
+                app.auto_t = app.auto_t.min(0.5);
             }
             app.eff_dist = app.eff_dist.min(app.settings.render_dist);
         } else if !app.settings.auto_dist {
             app.eff_dist = app.settings.render_dist;
+            app.dyn_scale = 1.0;
         }
 
         if app.game.is_some() {
@@ -4168,7 +4231,9 @@ async fn amain() {
         if app.game.is_some() && app.screen != Screen::Loading {
             render_world(&mut app);
             if !app.hide_hud && matches!(app.screen, Screen::Playing | Screen::Paused | Screen::Inventory | Screen::Chat | Screen::RecipeBook) {
+                let tp = std::time::Instant::now();
                 draw_hud(&mut app);
+                prof_add(6, tp);
             }
             if app.screen == Screen::Playing && (is_key_down(KeyCode::Tab) || touch::out().down(touch::Act::Players)) {
                 draw_player_list(&mut app);
@@ -4261,6 +4326,9 @@ async fn amain() {
                     let (fr, ho) = app.game.as_ref().map_or((0, 0), |g| g.mobs.counts());
                     let fr_n = bench.0 as f64;
                     println!("BENCH frames={} avg_ms={:.2} fps={:.1} chunks={} mobs={} update_ms={:.2} render_cpu_ms={:.2} meshes_tris={:?}", bench.2, avg * 1000.0, 1.0 / avg, app.loader.gpu.len(), fr + ho, prof.0 * 1000.0 / fr_n, prof.1 * 1000.0 / fr_n, app.loader.stats());
+                    let parts: Vec<String> = (0..8).map(|i| format!("{}={:.2}", PROF_NAMES[i], PROF[i].load(std::sync::atomic::Ordering::Relaxed) as f64 / 1e6 / fr_n)).collect();
+                    println!("PROF_MS {}", parts.join(" "));
+                    println!("AUTO dyn_scale={:.2} eff_dist={} busy_fps={:.1}", app.dyn_scale, app.eff_dist, app.busy_fps);
                     std::process::exit(0);
                 }
             }
@@ -4466,6 +4534,9 @@ async fn amain() {
             while frame_start.elapsed() < target {
                 std::thread::yield_now();
             }
+            app.slept = (frame_start.elapsed() - spent).as_secs_f32();
+        } else {
+            app.slept = 0.0;
         }
         next_frame().await;
         frame_start = std::time::Instant::now();

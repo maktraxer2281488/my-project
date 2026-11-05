@@ -32,7 +32,10 @@ pub struct Pool {
 
 impl Pool {
     pub fn new() -> Self {
-        let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2).saturating_sub(1).clamp(1, 6);
+        // на слабых процессорах (2 ядра / 4 потока) оставляем ядро игре и драйверу видеокарты,
+        // иначе генерация мира отнимает время у кадра
+        let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2);
+        let threads = if cores <= 4 { (cores / 2).max(1) } else { cores - 2 }.clamp(1, 6);
         let shared = Arc::new(Shared { queue: Mutex::new(VecDeque::new()), cv: Condvar::new() });
         let (tx, rx) = channel::<Done>();
         for _ in 0..threads {

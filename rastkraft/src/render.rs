@@ -7,7 +7,7 @@ use crate::workers::{Done, Job, Pool};
 use crate::world::{CH, CS, Dim, World};
 use macroquad::miniquad::*;
 use macroquad::prelude::{Mat4, Vec3, Vec4, vec3};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 const VERTEX: &str = r#"#version 100
 attribute vec4 in_pos;
@@ -437,15 +437,18 @@ pub struct Loader {
     /// Жители построек из свежесозданных чанков.
     pub new_spawns: Vec<(u16, [i32; 3])>,
     tick: u32,
+    /// Готовые сетки, ждущие отправки в видеопамять (не больше ~2,5 мс за кадр).
+    ready: VecDeque<(i32, i32, u32, u32, MeshData)>,
 }
 
 impl Loader {
     pub fn new() -> Self {
-        Loader { gpu: HashMap::new(), pending_gen: HashSet::new(), pending_mesh: HashMap::new(), order: Vec::new(), order_r: -1, epoch: 0, new_spawns: Vec::new(), tick: 0 }
+        Loader { gpu: HashMap::new(), pending_gen: HashSet::new(), pending_mesh: HashMap::new(), order: Vec::new(), order_r: -1, epoch: 0, new_spawns: Vec::new(), tick: 0, ready: VecDeque::new() }
     }
 
     /// Выгрузить всё из видеопамяти (смена мира или измерения).
     pub fn clear(&mut self, ctx: &mut dyn RenderingBackend) {
+        self.ready.clear();
         for (_, g) in self.gpu.drain() {
             if let Some(m) = g.opaque {
                 m.delete(ctx);
@@ -587,16 +590,28 @@ impl Loader {
                     if dim != world.dim || pv != version || pe != epoch {
                         continue;
                     }
-                    self.pending_mesh.remove(&(cx, cz));
-                    let (dx, dz) = (cx - center.0, cz - center.1);
-                    if dx * dx + dz * dz > (r + 2) * (r + 2) {
-                        continue;
-                    }
-                    let cur = *world.versions.get(&(cx, cz)).unwrap_or(&0);
-                    if cur == version && pe == self.epoch {
-                        self.upload(ctx, cx, cz, version, mesh);
-                    }
+                    // в видеопамять — позже, по очереди (заявка остаётся, пока не отправим)
+                    self.ready.push_back((cx, cz, version, epoch, mesh));
                 }
+            }
+        }
+        // отправка в видеопамять с ограничением по времени: без рывков при ходьбе
+        let t0 = std::time::Instant::now();
+        while let Some((cx, cz, version, epoch, mesh)) = self.ready.pop_front() {
+            if self.pending_mesh.get(&(cx, cz)) != Some(&(version, epoch)) {
+                continue; // уже заказана более новая сетка
+            }
+            self.pending_mesh.remove(&(cx, cz));
+            let (dx, dz) = (cx - center.0, cz - center.1);
+            if dx * dx + dz * dz > (r + 2) * (r + 2) {
+                continue;
+            }
+            let cur = *world.versions.get(&(cx, cz)).unwrap_or(&0);
+            if cur == version && epoch == self.epoch {
+                self.upload(ctx, cx, cz, version, mesh);
+            }
+            if t0.elapsed().as_secs_f32() > 0.0025 {
+                break;
             }
         }
 
