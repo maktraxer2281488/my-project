@@ -48,7 +48,7 @@ impl Track {
             Track::Village => "Деревенская ярмарка",
             Track::Aurora => "Северное сияние",
             Track::Clouds => "Над облаками",
-            Track::Fury => "Ярость",
+            Track::Fury => "Отвага",
             Track::Workshop => "Мастерская",
         }
     }
@@ -145,19 +145,19 @@ fn song(t: Track) -> Song {
     match t {
         Track::Menu => Song { bpm: 80.0, root: 55, scale: MAJOR, prog: &[0, 4, 5, 3, 0, 4, 3, 4], seed: 11, pad: true, arp: Some(Inst::Pluck), melody: Some(Inst::Bell), bass: true, drums: 0, drone: false, drips: false, density: 0.6 },
         Track::Meadow => Song { bpm: 92.0, root: 60, scale: MAJOR, prog: &[0, 5, 3, 4, 0, 5, 1, 4], seed: 23, pad: true, arp: Some(Inst::Pluck), melody: Some(Inst::Flute), bass: true, drums: 1, drone: false, drips: false, density: 0.7 },
-        Track::Desert => Song { bpm: 84.0, root: 62, scale: HIJAZ, prog: &[0, 1, 0, 6, 0, 1, 3, 0], seed: 37, pad: false, arp: None, melody: Some(Inst::Pluck), bass: true, drums: 2, drone: true, drips: false, density: 0.8 },
-        Track::Taiga => Song { bpm: 70.0, root: 57, scale: MINOR, prog: &[0, 5, 2, 6, 0, 5, 3, 4], seed: 41, pad: true, arp: Some(Inst::Bell), melody: Some(Inst::Flute), bass: false, drums: 0, drone: false, drips: false, density: 0.45 },
-        Track::Night => Song { bpm: 60.0, root: 52, scale: DORIAN, prog: &[0, 3, 5, 4, 0, 3, 6, 4], seed: 53, pad: true, arp: None, melody: Some(Inst::Bell), bass: false, drums: 0, drone: false, drips: false, density: 0.35 },
-        Track::Caves => Song { bpm: 50.0, root: 49, scale: MINOR, prog: &[0, 0, 5, 0, 0, 1, 5, 0], seed: 67, pad: false, arp: None, melody: Some(Inst::Bell), bass: false, drums: 0, drone: true, drips: true, density: 0.2 },
+        Track::Desert => Song { bpm: 92.0, root: 62, scale: MIXO, prog: &[0, 3, 4, 0, 0, 5, 3, 4], seed: 37, pad: true, arp: Some(Inst::Pluck), melody: Some(Inst::Pluck), bass: true, drums: 2, drone: false, drips: false, density: 0.75 },
+        Track::Taiga => Song { bpm: 80.0, root: 62, scale: MAJOR, prog: &[0, 5, 3, 4, 0, 5, 1, 4], seed: 41, pad: true, arp: Some(Inst::Bell), melody: Some(Inst::Flute), bass: false, drums: 0, drone: false, drips: false, density: 0.5 },
+        Track::Night => Song { bpm: 70.0, root: 60, scale: MAJOR, prog: &[0, 3, 4, 0, 0, 5, 3, 4], seed: 53, pad: true, arp: Some(Inst::Bell), melody: Some(Inst::Bell), bass: false, drums: 0, drone: false, drips: false, density: 0.4 },
+        Track::Caves => Song { bpm: 68.0, root: 60, scale: LYDIAN, prog: &[0, 1, 4, 0, 0, 1, 2, 4], seed: 67, pad: true, arp: Some(Inst::Bell), melody: Some(Inst::Bell), bass: false, drums: 0, drone: false, drips: true, density: 0.35 },
         Track::Heaven => Song { bpm: 76.0, root: 65, scale: LYDIAN, prog: &[0, 1, 0, 6, 0, 1, 2, 4], seed: 79, pad: true, arp: Some(Inst::Bell), melody: Some(Inst::Flute), bass: false, drums: 0, drone: false, drips: false, density: 0.55 },
-        Track::Boss => Song { bpm: 140.0, root: 50, scale: MINOR, prog: &[0, 5, 6, 0, 0, 5, 3, 4], seed: 97, pad: false, arp: Some(Inst::Pluck), melody: Some(Inst::Lead), bass: true, drums: 3, drone: false, drips: false, density: 0.85 },
+        Track::Boss => Song { bpm: 126.0, root: 57, scale: MIXO, prog: &[0, 6, 3, 4, 0, 6, 4, 4], seed: 97, pad: true, arp: Some(Inst::Pluck), melody: Some(Inst::Flute), bass: true, drums: 2, drone: false, drips: false, density: 0.8 },
         Track::Ocean => Song { bpm: 72.0, root: 62, scale: MIXO, prog: &[0, 6, 3, 0, 0, 6, 4, 3], seed: 103, pad: true, arp: Some(Inst::Bell), melody: Some(Inst::Flute), bass: true, drums: 0, drone: false, drips: false, density: 0.5 },
         Track::Dawn => Song { bpm: 66.0, root: 64, scale: MAJOR, prog: &[0, 3, 5, 4, 0, 3, 1, 4], seed: 109, pad: true, arp: Some(Inst::Bell), melody: Some(Inst::Bell), bass: false, drums: 0, drone: false, drips: false, density: 0.4 },
-        Track::Dusk => Song { bpm: 74.0, root: 58, scale: DORIAN, prog: &[0, 3, 0, 6, 0, 3, 4, 6], seed: 113, pad: true, arp: Some(Inst::Pluck), melody: Some(Inst::Flute), bass: true, drums: 0, drone: false, drips: false, density: 0.5 },
+        Track::Dusk => Song { bpm: 78.0, root: 60, scale: MAJOR, prog: &[0, 3, 0, 4, 0, 5, 3, 4], seed: 113, pad: true, arp: Some(Inst::Pluck), melody: Some(Inst::Flute), bass: true, drums: 0, drone: false, drips: false, density: 0.5 },
         Track::Village => Song { bpm: 112.0, root: 65, scale: MAJOR, prog: &[0, 3, 4, 0, 5, 3, 4, 0], seed: 127, pad: false, arp: Some(Inst::Pluck), melody: Some(Inst::Flute), bass: true, drums: 1, drone: false, drips: false, density: 0.8 },
-        Track::Aurora => Song { bpm: 64.0, root: 54, scale: MINOR, prog: &[0, 5, 6, 4, 0, 5, 3, 6], seed: 131, pad: true, arp: Some(Inst::Bell), melody: Some(Inst::Bell), bass: false, drums: 0, drone: true, drips: false, density: 0.35 },
+        Track::Aurora => Song { bpm: 72.0, root: 62, scale: LYDIAN, prog: &[0, 1, 4, 0, 0, 5, 3, 4], seed: 131, pad: true, arp: Some(Inst::Bell), melody: Some(Inst::Bell), bass: false, drums: 0, drone: false, drips: false, density: 0.4 },
         Track::Clouds => Song { bpm: 70.0, root: 62, scale: LYDIAN, prog: &[0, 1, 4, 0, 0, 1, 2, 4], seed: 137, pad: true, arp: Some(Inst::Pluck), melody: Some(Inst::Bell), bass: false, drums: 0, drone: false, drips: false, density: 0.45 },
-        Track::Fury => Song { bpm: 160.0, root: 52, scale: HIJAZ, prog: &[0, 1, 0, 6, 0, 1, 5, 6], seed: 149, pad: false, arp: Some(Inst::Pluck), melody: Some(Inst::Lead), bass: true, drums: 3, drone: true, drips: false, density: 0.9 },
+        Track::Fury => Song { bpm: 124.0, root: 59, scale: MAJOR, prog: &[0, 4, 5, 3, 0, 4, 3, 4], seed: 149, pad: false, arp: Some(Inst::Pluck), melody: Some(Inst::Flute), bass: true, drums: 2, drone: false, drips: false, density: 0.8 },
         Track::Workshop => Song { bpm: 100.0, root: 60, scale: MAJOR, prog: &[0, 4, 5, 3, 1, 4, 0, 4], seed: 151, pad: true, arp: Some(Inst::Pluck), melody: Some(Inst::Bell), bass: true, drums: 2, drone: false, drips: false, density: 0.65 },
     }
 }
@@ -225,7 +225,7 @@ fn compose(s: &Song) -> (Vec<Note>, f32) {
                 let pattern: &[f32] = if s.drums >= 3 { &[0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5] } else { &[0.0, 2.0] };
                 for &p in pattern {
                     let oct = if s.drums >= 3 && (p * 2.0) as i32 % 2 == 1 { -1 } else { -2 };
-                    notes.push(Note { t: t0 + p * beat, dur: beat * if s.drums >= 3 { 0.45 } else { 1.8 }, f: deg(chord, oct), inst: Inst::Bass, vel: 0.22, pan: 0.0 });
+                    notes.push(Note { t: t0 + p * beat, dur: beat * if s.drums >= 3 { 0.45 } else { 1.8 }, f: deg(chord, oct), inst: Inst::Bass, vel: 0.15, pan: 0.0 });
                 }
             }
             // арпеджио
@@ -265,7 +265,7 @@ fn compose(s: &Song) -> (Vec<Note>, f32) {
                 }
                 3 => {
                     for i in 0..4 {
-                        notes.push(Note { t: t0 + i as f32 * beat, dur: 0.4, f: 0.0, inst: Inst::Kick, vel: 0.5, pan: 0.0 });
+                        notes.push(Note { t: t0 + i as f32 * beat, dur: 0.4, f: 0.0, inst: Inst::Kick, vel: 0.32, pan: 0.0 });
                         if i % 2 == 1 {
                             notes.push(Note { t: t0 + i as f32 * beat, dur: 0.3, f: 0.0, inst: Inst::Snare, vel: 0.22, pan: 0.0 });
                         }

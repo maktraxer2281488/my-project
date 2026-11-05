@@ -3762,7 +3762,8 @@ fn render_world(app: &mut App) {
         let (w, h) = (((sw * scale) as u32).max(64), ((sh * scale) as u32).max(64));
         if app.rt.as_ref().is_none_or(|(_, rw, rh)| *rw != w || *rh != h) {
             let rt = render_target_ex(w, h, RenderTargetParams { sample_count: 1, depth: true });
-            rt.texture.set_filter(FilterMode::Linear);
+            // чёткое растягивание (без «мыла»)
+            rt.texture.set_filter(FilterMode::Nearest);
             app.rt = Some((rt, w, h));
         }
     } else {
@@ -4364,25 +4365,27 @@ async fn amain() {
                         if opt::set_auto_fast(true) {
                             app.loader.epoch += 1;
                         }
-                    } else if total > 0.76 {
-                        app.dyn_scale = ((total - 0.1).max(0.75) / rs).min(1.0);
                     } else if app.eff_dist > 4 {
+                        // потом дальность; разрешение — в последнюю очередь (иначе картинка «мылится»)
                         app.eff_dist -= 1;
-                    } else if total > 0.61 {
-                        app.dyn_scale = ((total - 0.05).max(0.6) / rs).min(1.0);
+                    } else if total > 0.86 {
+                        app.dyn_scale = (0.85 / rs).min(1.0);
                     } else if app.eff_dist > 3 {
                         app.eff_dist -= 1;
+                    } else if total > 0.76 {
+                        app.dyn_scale = (0.75 / rs).min(1.0);
+                    } else if total > 0.61 {
+                        app.dyn_scale = ((total - 0.05).max(0.6) / rs).min(1.0);
                     }
                     app.auto_t = 0.0;
                 }
             } else if app.busy_fps > 68.0 {
                 if app.auto_t > 4.0 {
-                    if total < 0.74 && app.dyn_scale < 1.0 {
-                        app.dyn_scale = ((total + 0.05) / rs).min(1.0);
+                    if app.dyn_scale < 1.0 {
+                        // при запасе первым возвращается чёткость
+                        app.dyn_scale = ((total + 0.1) / rs).min(1.0);
                     } else if app.eff_dist < app.settings.render_dist {
                         app.eff_dist += 1;
-                    } else if app.dyn_scale < 1.0 {
-                        app.dyn_scale = (app.dyn_scale + 0.1).min(1.0);
                     } else if opt::auto_fast() && app.busy_fps > 80.0 {
                         // большой запас — вернуть красивую листву
                         if opt::set_auto_fast(false) {

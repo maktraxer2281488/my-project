@@ -30,7 +30,8 @@ fn cache_path(t: Track) -> Option<std::path::PathBuf> {
     if crate::touch::is_mobile() {
         return None;
     }
-    Some(crate::save::data_dir().join("music_cache").join(format!("{}.wav", t.file())))
+    // номер версии музыки в имени: после переделки мелодий старые записи не берутся
+    Some(crate::save::data_dir().join("music_cache").join(format!("{}_v2.wav", t.file())))
 }
 
 /// Готовая запись мелодии в WAV: вшитая, сохранённая ранее или сочинённая заново.
