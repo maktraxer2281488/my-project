@@ -334,7 +334,33 @@ pub const PUSHER0: u16 = LEVER_OFF + 7;
 pub const WATER_FLOW1: u16 = PUSHER0 + 10;
 /// Текущая лава, уровни 1..3.
 pub const LAVA_FLOW1: u16 = WATER_FLOW1 + 7;
-pub const BLOCK_COUNT: usize = (LAVA_FLOW1 + 3) as usize;
+// ---- v0.15: ферма и кровать ----
+/// Молодые посевы: 3 стадии пшеницы, моркови, картофеля (спелые — WHEAT_CROP, CARROT_CROP, POTATO_CROP).
+pub const WHEAT_S0: u16 = LAVA_FLOW1 + 3;
+pub const CARROT_S0: u16 = WHEAT_S0 + 3;
+pub const POTATO_S0: u16 = CARROT_S0 + 3;
+pub const POTATO_CROP: u16 = POTATO_S0 + 3;
+pub const BED: u16 = POTATO_CROP + 1;
+pub const BLOCK_COUNT: usize = (BED + 1) as usize;
+
+/// Посев: (культура 0 пшеница/1 морковь/2 картофель, стадия 0..3; 3 — спелый).
+pub fn crop(b: u16) -> Option<(u8, u8)> {
+    match b {
+        WHEAT_CROP => Some((0, 3)),
+        CARROT_CROP => Some((1, 3)),
+        POTATO_CROP => Some((2, 3)),
+        _ if (WHEAT_S0..POTATO_CROP).contains(&b) => Some((((b - WHEAT_S0) / 3) as u8, ((b - WHEAT_S0) % 3) as u8)),
+        _ => None,
+    }
+}
+
+pub fn crop_block(kind: u8, stage: u8) -> u16 {
+    if stage >= 3 {
+        [WHEAT_CROP, CARROT_CROP, POTATO_CROP][kind as usize % 3]
+    } else {
+        WHEAT_S0 + kind as u16 * 3 + stage as u16
+    }
+}
 
 /// Уровень жидкости: (вода?, уровень; 0 — источник).
 pub fn fluid(b: u16) -> Option<(bool, u8)> {
@@ -1997,6 +2023,63 @@ fn build_all() -> (Registry, Vec<u8>, Vec<u16>) {
         for l in 0..3 {
             put(LAVA_FLOW1 + l, "Текущая лава", lt, Liquid, 0.0, Any, Hidden, 13 - l as u8 * 2);
         }
+    }
+
+    // ===================== v0.15: посевы и кровать =====================
+    {
+        let tile_px = |a: &Atlas, t: u16| -> [[u8; 4]; TILE * TILE] {
+            let t = t as usize;
+            let (tx, ty) = (t % ATLAS_TILES, t / ATLAS_TILES);
+            let mut src = [[0u8; 4]; TILE * TILE];
+            for y in 0..TILE {
+                for x in 0..TILE {
+                    let i = ((ty * TILE + y) * ATLAS + tx * TILE + x) * 4;
+                    src[y * TILE + x] = [a.px[i], a.px[i + 1], a.px[i + 2], a.px[i + 3]];
+                }
+            }
+            src
+        };
+        // картофель: ботва с белыми цветками
+        let pot = a.add(move |x, y| {
+            let stem = (x % 4 == 1) && y > 5;
+            let leaf = y > 3 && y < 12 && ((x + y) % 5 == 0 || (x * 3 + y) % 7 == 0);
+            let flower = y <= 4 && y >= 2 && (x % 5 == 2);
+            if flower { rgb(240, 240, 250) } else if stem || leaf { shade(rgb(80, 150, 60), 0.85 + hash(x, y, 1401) * 0.25) } else { CLEAR }
+        });
+        let wheat_t = defs[WHEAT_CROP as usize].as_ref().unwrap().tex[1];
+        let carrot_t = defs[CARROT_CROP as usize].as_ref().unwrap().tex[1];
+        let srcs = [tile_px(&a, wheat_t), tile_px(&a, carrot_t), tile_px(&a, pot)];
+        let mut put = |id: u16, name: &'static str, tex: [u16; 3], shape: Shape, hardness: f32, tool: ToolNeed, cat: Cat, light: u8| {
+            let solid = matches!(shape, Shape::Cube | Shape::Cutout);
+            defs[id as usize] = Some(BlockDef { name, tex, shape, solid, light, hardness, tool, cat });
+        };
+        put(POTATO_CROP, "Картофельная грядка", [pot; 3], Cross, 0.0, Any, Nature, 0);
+        let names = ["Всходы пшеницы", "Всходы моркови", "Всходы картофеля"];
+        for k in 0..3usize {
+            for st in 0..3u16 {
+                let src = srcs[k];
+                let frac = (st as f32 + 1.0) / 4.0;
+                let t = a.add(move |x, y| {
+                    let from_bottom = 15 - y;
+                    let sy = 15.0 - from_bottom as f32 / frac;
+                    if sy < 0.0 {
+                        return CLEAR;
+                    }
+                    let c = src[(sy as usize).min(15) * TILE + x as usize];
+                    if c[3] == 0 { CLEAR } else { mix(c, rgb(90, 170, 60), 0.6 - frac * 0.4) }
+                });
+                put(WHEAT_S0 + k as u16 * 3 + st, names[k], [t; 3], Cross, 0.0, Any, Hidden, 0);
+            }
+        }
+        // кровать: красное одеяло, белая подушка, деревянные бока
+        let top = a.add(move |x, y| {
+            if y < 5 { if x <= 1 || x >= 14 || y == 0 { rgb(200, 196, 190) } else { shade(rgb(244, 240, 236), 0.95 + hash(x, y, 1402) * 0.05) } } else if y == 5 { rgb(150, 30, 30) } else { shade(rgb(196, 40, 44), if (x + y) % 4 == 0 { 0.88 } else { 1.0 }) }
+        });
+        let side = a.add(move |x, y| {
+            if y < 7 { shade(rgb(196, 40, 44), 0.9) } else if y < 9 { rgb(236, 232, 226) } else { shade(rgb(150, 104, 60), 0.85 + hash(x / 3, y, 1403) * 0.2) }
+        });
+        let bottom = a.add(t_planks(rgb(150, 104, 60), 1404));
+        put(BED, "Кровать", [top, side, bottom], Form, 0.4, Axe, Decor, 0);
     }
     // портал проходим насквозь
     let portal = defs[PORTAL as usize].as_mut().unwrap();

@@ -65,6 +65,33 @@ pub struct Mob {
     pub stuck_t: f32,
     /// Доля здоровья из снимка хоста (у клиента).
     pub hp_net: Option<f32>,
+    /// Разведение: >0 — ищет пару, <0 — отдыхает после.
+    pub love: f32,
+    /// Детёныш: сколько секунд ещё расти.
+    pub baby: f32,
+    /// Питомец: чей (255 — местный игрок), сидит ли.
+    pub owner: Option<u8>,
+    pub sitting: bool,
+}
+
+/// Игрок на этом компьютере (для питомцев).
+pub const OWNER_LOCAL: u8 = 255;
+
+/// Кого можно приручить и чем.
+pub fn tame_food(def: usize) -> Option<u16> {
+    match MOBS[def].name {
+        "Волк-одиночка" => Some(items::BONE),
+        "Рысь" | "Облачный кот" => Some(items::RAW_FISH),
+        "Лисёнок" => Some(items::BERRIES),
+        "Райская птица" | "Кудахта" => Some(items::WHEAT_SEEDS),
+        _ => None,
+    }
+}
+
+/// Животное, которое можно разводить (дружелюбные звери и птицы, не жители).
+pub fn breedable(def: usize) -> bool {
+    let d = &MOBS[def];
+    d.friendly && matches!(d.plan, Plan::Quad | Plan::Bird) && d.flags & (FLY | SWIM) == 0
 }
 
 impl Mob {
@@ -110,6 +137,10 @@ impl Mob {
             slam: false,
             stuck_t: 0.0,
             hp_net: None,
+            love: 0.0,
+            baby: 0.0,
+            owner: None,
+            sitting: false,
         }
     }
 
@@ -132,6 +163,9 @@ impl Mob {
     }
 
     pub fn hostile(&self) -> bool {
+        if self.owner.is_some() {
+            return false;
+        }
         let d = self.d();
         (!d.friendly && (d.flags & NEUTRAL == 0 || self.angry)) || (d.friendly && self.angry && d.flags & NEUTRAL != 0)
     }
@@ -462,6 +496,24 @@ impl Mobs {
             let dir_to = flat.normalize_or_zero();
             let boss = d.flags & BOSS != 0;
             let chase = m.hostile() && !tgt_creative && dist < if boss { 48.0 } else { 22.0 } && to.y.abs() < if boss { 24.0 } else { 10.0 };
+            // питомец: идёт за хозяином, сидит по команде
+            let mut pet_target: Option<Vec3> = None;
+            if let Some(o) = m.owner {
+                let opos = if o == OWNER_LOCAL { player.body.pos } else { remotes.iter().find(|r| r.0 == o).map_or(m.body.pos, |r| r.1) };
+                let dd = (opos - m.body.pos).length();
+                if dd > 28.0 && !m.sitting {
+                    m.body.pos = opos + vec3(1.0, 0.5, 1.0);
+                    m.body.vel = Vec3::ZERO;
+                } else if dd > 4.0 && !m.sitting {
+                    pet_target = Some(opos);
+                }
+            }
+            if m.baby > 0.0 {
+                m.baby -= dt;
+            }
+            if m.love != 0.0 {
+                m.love = if m.love > 0.0 { (m.love - dt).max(0.0) } else { (m.love + dt).min(0.0) };
+            }
             let fly = d.flags & FLY != 0;
             let swim = d.flags & SWIM != 0;
             let in_water = world.get(m.body.pos.x.floor() as i32, (m.body.pos.y + 0.3).floor() as i32, m.body.pos.z.floor() as i32) == WATER;
@@ -485,8 +537,14 @@ impl Mobs {
                     }
                 }
                 wish = m.wander;
-                if m.flee_t > 0.0 && !m.hostile() {
+                if m.flee_t > 0.0 && !m.hostile() && m.owner.is_none() {
                     wish = -dir_to;
+                }
+                if let Some(t) = pet_target {
+                    wish = (t - m.body.pos).with_y(0.0).normalize_or_zero();
+                }
+                if m.sitting {
+                    wish = Vec3::ZERO;
                 }
             }
 
@@ -617,6 +675,63 @@ impl Mobs {
             }
         }
 
+        // разведение: две особи одного вида рядом — детёныш
+        let lovers: Vec<usize> = (0..self.list.len()).filter(|&i| self.list[i].love > 0.0 && self.list[i].alive()).collect();
+        let mut born: Vec<(usize, Vec3)> = Vec::new();
+        let mut used = std::collections::HashSet::new();
+        for (k, &i) in lovers.iter().enumerate() {
+            for &j in &lovers[k + 1..] {
+                if used.contains(&i) || used.contains(&j) {
+                    continue;
+                }
+                let (a, b) = (&self.list[i], &self.list[j]);
+                if a.def == b.def && (a.body.pos - b.body.pos).length() < 8.0 {
+                    born.push((a.def, (a.body.pos + b.body.pos) * 0.5));
+                    used.insert(i);
+                    used.insert(j);
+                }
+            }
+        }
+        for i in used {
+            self.list[i].love = -60.0;
+        }
+        let hearts = [Color::from_rgba(250, 80, 110, 255), Color::from_rgba(255, 150, 170, 255)];
+        for (def, p) in born {
+            let mut baby = Mob::new(def, p + vec3(0.0, 0.3, 0.0));
+            baby.baby = 180.0;
+            ents.burst(p + vec3(0.0, 1.0, 0.0), 12, 0.6, &hearts, 0.1, 2.0);
+            self.list.push(baby);
+        }
+        // питомцы защищают хозяина: бьют злых существ рядом
+        let mut pet_hits: Vec<(usize, usize)> = Vec::new();
+        for (i, m) in self.list.iter().enumerate() {
+            if m.owner.is_none() || m.sitting || !m.alive() || m.attack_cd > 0.0 {
+                continue;
+            }
+            let best = self.list.iter().enumerate().filter(|(j, o)| *j != i && o.alive() && o.hostile() && !o.is_boss() && (o.body.pos - m.body.pos).length() < 10.0).min_by(|a, b| (a.1.body.pos - m.body.pos).length().total_cmp(&(b.1.body.pos - m.body.pos).length()));
+            if let Some((j, _)) = best {
+                pet_hits.push((i, j));
+            }
+        }
+        for (i, j) in pet_hits {
+            let tp = self.list[j].body.pos;
+            let me = &mut self.list[i];
+            let to = (tp - me.body.pos).with_y(0.0);
+            if to.length() < 1.8 + me.body.hw {
+                let dmg = me.d().dmg.max(3.0);
+                let from = me.body.pos;
+                me.attack_cd = 1.0;
+                me.attack_anim = 1.0;
+                self.list[j].damage(dmg, from);
+            } else {
+                let dir = to.normalize_or_zero();
+                let sp = me.d().speed * 1.2;
+                me.body.vel.x = dir.x * sp;
+                me.body.vel.z = dir.z * sp;
+                me.yaw = dir.z.atan2(dir.x);
+            }
+        }
+
         // смерть и трофеи
         let mut drops: Vec<(Item, u16, Vec3)> = Vec::new();
         let mut gives: Vec<(u8, Item, u16)> = Vec::new();
@@ -669,7 +784,7 @@ impl Mobs {
             for &(_, rp) in remotes {
                 dd = dd.min((m.body.pos - rp).length());
             }
-            dd < if m.is_boss() { 260.0 } else { 120.0 } && m.body.pos.y > -30.0
+            (m.owner.is_some() || dd < if m.is_boss() { 260.0 } else { 120.0 }) && m.body.pos.y > -30.0
         });
         for name in boss_dead {
             ev.say.push(format!("Босс {name} повержен!"));
@@ -792,6 +907,7 @@ impl Mobs {
                 light,
                 head_yaw: m.head_yaw,
                 head_pitch: m.head_pitch,
+                scale: if m.baby > 0.0 { 0.55 } else { 1.0 },
             };
             if m.body.on_ground || d.flags & FLY != 0 {
                 let alpha = if d.flags & FLY != 0 { 0.35 } else { 0.6 };

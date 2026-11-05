@@ -14,6 +14,7 @@ mod model;
 mod audio;
 mod music;
 mod map;
+mod trade;
 mod mech;
 mod net;
 mod opt;
@@ -77,6 +78,7 @@ enum Screen {
     Chat,
     RecipeBook,
     Map,
+    Trade,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -92,6 +94,17 @@ struct Game {
     worlds: [World; 2],
     /// Механизмы и жидкости.
     mech: mech::Mech,
+    /// Посаженные игроком посевы: (место, секунд до следующей стадии).
+    crops: Vec<(IVec3, f32)>,
+    /// Погода: 0 ясно, 1 дождь/снег/буря, 2 гроза; плавная сила и вспышка молнии.
+    weather: u8,
+    weather_t: f32,
+    rain_k: f32,
+    flash_t: f32,
+    thunder_t: f32,
+    /// Сон в кровати: затемнение до утра.
+    sleep_t: f32,
+    pending_edits: Vec<(IVec3, u16)>,
     dim: Dim,
     seed: u32,
     name: String,
@@ -142,6 +155,14 @@ impl Game {
         Game {
             worlds: [World::new(Dim::Overworld, seed), World::new(Dim::Heaven, seed.wrapping_add(17))],
             mech: mech::Mech::default(),
+            crops: Vec::new(),
+            weather: 0,
+            weather_t: 240.0,
+            rain_k: 0.0,
+            flash_t: 0.0,
+            thunder_t: 10.0,
+            sleep_t: 0.0,
+            pending_edits: Vec::new(),
             dim: Dim::Overworld,
             seed,
             name: name.to_string(),
@@ -202,7 +223,7 @@ impl Game {
         }
         let sunh = (self.time * std::f32::consts::TAU).sin();
         let d = ((sunh + 0.2) / 0.5).clamp(0.0, 1.0);
-        0.1 + 0.9 * d * d * (3.0 - 2.0 * d)
+        (0.1 + 0.9 * d * d * (3.0 - 2.0 * d)) * (1.0 - 0.32 * self.rain_k)
     }
 
     fn sun_dir(&self) -> Vec3 {
@@ -257,6 +278,8 @@ struct App {
     chat_input: String,
     audio: audio::Audio,
     map: Option<map::MapView>,
+    /// Открытая торговля: (вид жителя, его номер).
+    trade: Option<(usize, u32)>,
     /// Разрешение текстур, с которым игра запущена.
     tex_res_active: u32,
     /// Звуки, накопленные за кадр (проигрываются после обновления мира).
@@ -424,6 +447,10 @@ fn save_game(app: &mut App) -> bool {
     kv.set("armor", p.armor.iter().map(|a| a.code().to_string()).collect::<Vec<_>>().join(","));
     kv.set("selected", p.selected);
     kv.set("book", 1);
+    kv.set("crops", g.crops.iter().map(|(p, t)| format!("{},{},{},{:.0}", p.x, p.y, p.z, t)).collect::<Vec<_>>().join(","));
+    let pets: Vec<String> = g.mobs.list.iter().filter(|m| m.owner == Some(mobs::OWNER_LOCAL) && m.alive()).map(|m| format!("{},{:.1},{:.1},{:.1},{}", m.def, m.body.pos.x, m.body.pos.y, m.body.pos.z, m.sitting as u8)).collect();
+    kv.set("pets", pets.join(";"));
+    kv.set("weather", g.weather);
     let set3 = |s: &HashSet<[i32; 3]>| s.iter().map(|v| format!("{},{},{}", v[0], v[1], v[2])).collect::<Vec<_>>().join(",");
     kv.set("opened", set3(&g.opened));
     kv.set("spawned", set3(&g.spawned));
@@ -481,6 +508,19 @@ fn load_game(app: &mut App, name: &str) -> bool {
         g.player.armor[i] = Item::from_code(*c as u32);
     }
     g.player.selected = (kv.u("selected", 0) as usize).min(8);
+    g.crops = kv.ints("crops").chunks_exact(4).map(|c| (ivec3(c[0] as i32, c[1] as i32, c[2] as i32), c[3] as f32)).collect();
+    if let Some(p) = kv.get("pets") {
+        for e in p.split(';') {
+            let v: Vec<f32> = e.split(',').filter_map(|x| x.parse().ok()).collect();
+            if v.len() == 5 && (v[0] as usize) < mobdefs::MOBS.len() {
+                let mut m = mobs::Mob::new(v[0] as usize, vec3(v[1], v[2], v[3]));
+                m.owner = Some(mobs::OWNER_LOCAL);
+                m.sitting = v[4] > 0.5;
+                g.mobs.list.push(m);
+            }
+        }
+    }
+    g.weather = kv.u("weather", 0).min(2) as u8;
     // миры до версии 0.10: выдать книгу рецептов один раз
     if !g.creative && kv.get("book").is_none() && g.player.inv.count(Item::Thing(items::RECIPE_BOOK)) == 0 {
         g.player.inv.add(Item::Thing(items::RECIPE_BOOK), 1);
@@ -640,8 +680,9 @@ fn process_net(app: &mut App) {
                     }
                 }
             }
-            Some(Msg::Mobs { time, list }) if !n.host => {
+            Some(Msg::Mobs { time, weather, list }) if !n.host => {
                 g.time = time;
+                g.weather = weather;
                 let host_dim = g.remotes.get(&0).map(|r| r.st.dim);
                 if host_dim == Some(dim_code(g.dim)) {
                     g.mobs.apply_snapshot(&list);
@@ -684,7 +725,7 @@ fn process_net(app: &mut App) {
             g.mob_t = 0.1;
             for (id, r) in g.remotes.iter() {
                 let list = if r.st.dim == dim_code(g.dim) { g.mobs.snapshot(Vec3::from(r.st.pos), 96.0) } else { Vec::new() };
-                n.send_to(*id, &Msg::Mobs { time: g.time, list });
+                n.send_to(*id, &Msg::Mobs { time: g.time, weather: g.weather, list });
             }
             if let Some(b) = &n.beacon {
                 let world = if g.name.is_empty() { "мир".to_string() } else { g.name.clone() };
@@ -876,6 +917,14 @@ fn sky_colors(g: &Game) -> (Color, Color) {
     let sunh = g.sun_dir().y;
     let dusk = (-(sunh / 0.2).powi(2)).exp();
     hor = lerp(hor, Color::new(0.98, 0.56, 0.32, 1.0), dusk * 0.7);
+    // непогода: серое небо, в пустыне — песчаная мгла
+    let k = g.rain_k;
+    if k > 0.0 {
+        let p = g.player.body.pos;
+        let desert = worldgen::column(g.seed, p.x as i32, p.z as i32).biome == worldgen::Biome::Desert;
+        let gray = if desert { Color::new(0.78 * d + 0.1, 0.66 * d + 0.08, 0.45 * d + 0.06, 1.0) } else { Color::new(0.45 * d + 0.05, 0.47 * d + 0.05, 0.5 * d + 0.06, 1.0) };
+        return (lerp(top, gray, k * 0.85), lerp(hor, gray, k * 0.9));
+    }
     (top, hor)
 }
 
@@ -991,12 +1040,64 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
     let mut died = false;
     let mut open_inv = false;
     let mut open_book = false;
+    let mut open_trade: Option<(usize, u32)> = None;
     let mut sfx: Vec<(music::Sfx, f32)> = Vec::new();
     {
         let g = app.game.as_mut().unwrap();
         let hp_before = g.player.health;
         let hunger_before = g.player.hunger;
         g.time = (g.time + dt / DAY_SECONDS).fract();
+        // погода (решает хозяин мира), посевы, сон
+        if !g.is_client() {
+            g.weather_t -= dt;
+            if g.weather_t <= 0.0 {
+                let r = xr(&mut g.rng);
+                g.weather = if g.dim == Dim::Heaven { 0 } else if r < 0.6 { 0 } else if r < 0.9 { 1 } else { 2 };
+                g.weather_t = 150.0 + xr(&mut g.rng) * 300.0;
+            }
+            if let Ok(w) = std::env::var("RK_WEATHER") {
+                g.weather = w.parse().unwrap_or(0);
+            }
+            // посевы растут по стадиям
+            let mut grown: Vec<(IVec3, u16)> = Vec::new();
+            let w = &g.worlds[g.dim as usize];
+            let rain_bonus = 1.0 + g.rain_k;
+            g.crops.retain_mut(|(p, t)| {
+                let b = w.get(p.x, p.y, p.z);
+                let Some((kind, st)) = crop(b) else { return false };
+                if st >= 3 {
+                    return false;
+                }
+                *t -= dt * rain_bonus;
+                if *t <= 0.0 {
+                    grown.push((*p, crop_block(kind, st + 1)));
+                    *t = 45.0 + (p.x.wrapping_mul(31) ^ p.z) as f32 % 30.0;
+                }
+                true
+            });
+            for (p, b) in grown {
+                g.pending_edits.push((p, b));
+            }
+        }
+        let target_k = if g.weather > 0 && g.dim == Dim::Overworld { 1.0 } else { 0.0 };
+        g.rain_k += (target_k - g.rain_k) * (dt * 0.25).min(1.0);
+        g.flash_t = (g.flash_t - dt).max(0.0);
+        if g.weather == 2 && g.rain_k > 0.6 {
+            g.thunder_t -= dt;
+            if g.thunder_t <= 0.0 {
+                g.thunder_t = 7.0 + xr(&mut g.rng) * 14.0;
+                g.flash_t = 0.35;
+                sfx.push((music::Sfx::Thunder, 0.9));
+            }
+        }
+        if g.sleep_t > 0.0 {
+            g.sleep_t -= dt;
+            if g.sleep_t <= 0.0 {
+                g.time = 0.02;
+                g.weather = 0;
+                g.toast = Some(("Доброе утро!".into(), 3.0));
+            }
+        }
         if playing {
             g.player.look(mouse_delta.x, mouse_delta.y * invert, sens);
         }
@@ -1395,6 +1496,95 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
                 g.player.eat_t = 0.0;
             }
             // двери, люки, калитки открываются по ПКМ (с Shift — ставим блок рядом)
+            // существа: приручение, команда «сидеть», разведение, торговля
+            if !used && rmb_p {
+                if let Some((mi, mt)) = mob_hit {
+                    let m = &g.mobs.list[mi];
+                    let food = if let Item::Thing(t) = held { Some(t) } else { None };
+                    let trader = { let d = m.d(); d.friendly && d.plan == mobdefs::Plan::Biped && trade::offers(m.def, m.uid).is_some() };
+                    if mt <= 4.0 && m.alive() && !g.is_client() {
+                        let me_owner = Some(mobs::OWNER_LOCAL);
+                        if m.owner == me_owner {
+                            let sit = !m.sitting;
+                            g.mobs.list[mi].sitting = sit;
+                            g.toast = Some((if sit { "Питомец сидит".into() } else { "Питомец идёт за вами".into() }, 1.5));
+                            used = true;
+                        } else if m.owner.is_none() && food.is_some() && mobs::tame_food(m.def) == food {
+                            let ok = xr(&mut g.rng) < 0.34;
+                            let pos = m.body.pos + vec3(0.0, m.body.h, 0.0);
+                            if ok {
+                                let mm = &mut g.mobs.list[mi];
+                                mm.owner = me_owner;
+                                mm.angry = false;
+                                let hearts = [Color::from_rgba(250, 80, 110, 255), Color::from_rgba(255, 150, 170, 255)];
+                                g.ents.burst(pos, 14, 0.6, &hearts, 0.1, 2.0);
+                                g.toast = Some((format!("{} теперь ваш питомец!", g.mobs.list[mi].d().name), 2.5));
+                            } else {
+                                g.ents.burst(pos, 6, 0.4, &[Color::from_rgba(90, 90, 90, 255)], 0.08, 1.5);
+                            }
+                            if !creative {
+                                let sel = g.player.selected;
+                                g.player.inv.take_one(sel);
+                            }
+                            used = true;
+                        } else if mobs::breedable(m.def) && m.baby <= 0.0 && m.love == 0.0 && matches!(food, Some(items::WHEAT | items::WHEAT_SEEDS | items::CARROT | items::BERRIES | items::APPLE)) {
+                            let pos = m.body.pos + vec3(0.0, m.body.h, 0.0);
+                            g.mobs.list[mi].love = 15.0;
+                            let hearts = [Color::from_rgba(250, 80, 110, 255)];
+                            g.ents.burst(pos, 8, 0.5, &hearts, 0.1, 1.5);
+                            if !creative {
+                                let sel = g.player.selected;
+                                g.player.inv.take_one(sel);
+                            }
+                            used = true;
+                        }
+                    }
+                    if !used && mt <= 4.0 && trader {
+                        open_trade = Some((g.mobs.list[mi].def, g.mobs.list[mi].uid));
+                        used = true;
+                    }
+                }
+            }
+            // ферма: мотыга вспахивает, семена сажаются на пашню; кровать
+            if !used && rmb_p {
+                if let Some((h, prev, b)) = target_block {
+                    let above_free = world.get(h.x, h.y + 1, h.z) == AIR;
+                    if matches!(held, Item::Tool(items::ToolKind::Hoe, _)) && matches!(b, GRASS | DIRT | SNOW_GRASS | PODZOL | COARSE_DIRT) && above_free {
+                        edits.push((h, FARMLAND));
+                        g.swing_p = 0.0;
+                        used = true;
+                    } else if b == FARMLAND && prev.y > h.y && above_free {
+                        let kind = match held {
+                            Item::Thing(items::WHEAT_SEEDS) => Some(0),
+                            Item::Thing(items::CARROT) => Some(1),
+                            Item::Thing(items::POTATO) => Some(2),
+                            _ => None,
+                        };
+                        if let Some(k) = kind {
+                            edits.push((prev, crop_block(k, 0)));
+                            g.crops.push((prev, 50.0));
+                            if !creative {
+                                let sel = g.player.selected;
+                                g.player.inv.take_one(sel);
+                            }
+                            used = true;
+                        }
+                    } else if b == BED {
+                        g.spawn = h.as_vec3() + vec3(0.5, 0.6, 0.5);
+                        if g.daylight() < 0.35 && g.dim == Dim::Overworld {
+                            if g.is_client() {
+                                g.toast = Some(("Точка возрождения — здесь. Ночь пропускает хозяин мира".into(), 3.0));
+                            } else {
+                                g.sleep_t = 2.5;
+                                g.toast = Some(("Вы засыпаете…".into(), 2.5));
+                            }
+                        } else {
+                            g.toast = Some(("Точка возрождения установлена. Спать можно только ночью".into(), 3.0));
+                        }
+                        used = true;
+                    }
+                }
+            }
             // вёдра: набрать или вылить жидкость
             if !used && rmb_p {
                 if let Item::Thing(t) = held {
@@ -1598,6 +1788,17 @@ fn update_game(app: &mut App, dt: f32, mouse_delta: Vec2) {
     }
     if open_book {
         open_recipe_book(app);
+    }
+    if let Some(t) = open_trade {
+        app.trade = Some(t);
+        app.screen = Screen::Trade;
+        app.just_opened = true;
+    }
+    // отложенные правки (рост посевов)
+    let pend: Vec<(IVec3, u16)> = app.game.as_mut().map(|g| std::mem::take(&mut g.pending_edits)).unwrap_or_default();
+    let pdim = app.game.as_ref().map_or(Dim::Overworld, |g| g.dim);
+    for (p, b) in pend {
+        edit_block(app, pdim, p, b, true);
     }
     if let Some(d) = to_dim {
         switch_dimension(app, d);
@@ -2536,6 +2737,13 @@ fn draw_hud(app: &mut App) {
     let (w, h) = (screen_width(), screen_height());
     let s = app.ui.s;
     let g = app.game.as_ref().unwrap();
+    if g.flash_t > 0.0 {
+        draw_rectangle(0.0, 0.0, w, h, Color::new(1.0, 1.0, 1.0, (g.flash_t / 0.35) * 0.7));
+    }
+    if g.sleep_t > 0.0 {
+        let a = (1.0 - g.sleep_t / 2.5).clamp(0.0, 1.0);
+        draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.03, a * 0.95));
+    }
 
     if !g.third_person {
         let c = Color::new(1.0, 1.0, 1.0, 0.85);
@@ -2744,7 +2952,11 @@ fn render_world(app: &mut App) {
         let (fog_color, fog_range) = if g.player.eye_in_water {
             ([0.1, 0.25, 0.5, 1.0], [1.0, 26.0])
         } else if app.settings.fog {
-            ([hor.r, hor.g, hor.b, 1.0], [r * 0.5, r * 0.98])
+            // в непогоду туман ближе (в песчаную бурю — гораздо ближе)
+            let p = g.player.body.pos;
+            let desert = g.rain_k > 0.0 && worldgen::column(g.seed, p.x as i32, p.z as i32).biome == worldgen::Biome::Desert;
+            let k = 1.0 - g.rain_k * if desert { 0.75 } else { 0.35 };
+            ([hor.r, hor.g, hor.b, 1.0], [r * 0.5 * k, r * 0.98 * k])
         } else {
             ([hor.r, hor.g, hor.b, 1.0], [1e5, 1e5 + 1.0])
         };
@@ -2793,6 +3005,43 @@ fn render_world(app: &mut App) {
         model::draw_player(&app.ui.atlas, p.body.pos, p.yaw, p.pitch, p.walk_phase, sp, g.swing_t, p.held(), &p.armor, &look, light, p.hurt_t > 0.0);
     }
     model::flush();
+    // осадки вокруг камеры: дождь, снег в тайге, песок в пустыне
+    if g.rain_k > 0.05 && g.dim == Dim::Overworld {
+        let biome = worldgen::column(g.seed, eye.x as i32, eye.z as i32).biome;
+        let n = (360.0 * g.rain_k) as i32;
+        let t = app.time;
+        for i in 0..n {
+            let h1 = blocks::hash(i, 1, 77);
+            let h2 = blocks::hash(i, 2, 77);
+            let h3 = blocks::hash(i, 3, 77);
+            let (ox, oz) = ((h1 - 0.5) * 32.0, (h2 - 0.5) * 32.0);
+            let (x, z) = (eye.x.floor() + ox, eye.z.floor() + oz);
+            // под крышей не идёт
+            let top = g.world().surface_y(x.floor() as i32, z.floor() as i32) as f32;
+            match biome {
+                worldgen::Biome::Desert => {
+                    let y = eye.y - 4.0 + h3 * 12.0;
+                    let px = x + ((t * 9.0 + h3 * 40.0) % 32.0) - 16.0;
+                    if y > top {
+                        draw_line_3d(vec3(px, y, z), vec3(px + 0.9, y + 0.05, z), Color::new(0.9, 0.76, 0.5, 0.85));
+                    }
+                }
+                worldgen::Biome::Taiga => {
+                    let y = eye.y + 14.0 - ((t * 2.0 + h3 * 20.0) % 20.0);
+                    let sx = x + (t * 0.8 + h1 * 6.0).sin() * 0.4;
+                    if y > top {
+                        draw_cube(vec3(sx, y, z), Vec3::splat(0.07), None, Color::new(1.0, 1.0, 1.0, 0.9));
+                    }
+                }
+                _ => {
+                    let y = eye.y + 14.0 - ((t * 18.0 + h3 * 20.0) % 20.0);
+                    if y > top {
+                        draw_line_3d(vec3(x, y, z), vec3(x + 0.08, y - 1.1, z), Color::new(0.75, 0.82, 0.95, 0.85));
+                    }
+                }
+            }
+        }
+    }
     if app.screen == Screen::Playing && !app.hide_hud {
         if let Some((hit, _, _)) = g.world().raycast(g.player.eye(), dir, if g.creative { 6.0 } else { 5.0 }) {
             let c = hit.as_vec3() + Vec3::splat(0.5);
@@ -2982,6 +3231,7 @@ async fn main() {
         chat_input: String::new(),
         audio: audio::Audio::new(),
         map: None,
+        trade: None,
         tex_res_active: 16,
         sfx: Vec::new(),
         export_rx: None,
@@ -3231,7 +3481,7 @@ async fn main() {
                     }
                 }
             }
-            if matches!(app.screen, Screen::Playing | Screen::Inventory | Screen::Chat | Screen::RecipeBook | Screen::Map) {
+            if matches!(app.screen, Screen::Playing | Screen::Inventory | Screen::Chat | Screen::RecipeBook | Screen::Map | Screen::Trade) {
                 let t0 = std::time::Instant::now();
                 update_game(&mut app, dt, md);
                 prof.0 += t0.elapsed().as_secs_f64();
@@ -3267,6 +3517,7 @@ async fn main() {
             Screen::Chat => chat_screen(&mut app),
             Screen::RecipeBook => recipe_book_screen(&mut app),
             Screen::Map => map_screen(&mut app),
+            Screen::Trade => trade::screen(&mut app),
             Screen::Loading => {
                 let (w, h) = (screen_width(), screen_height());
                 draw_rectangle(0.0, 0.0, w, h, Color::new(0.07, 0.08, 0.1, 1.0));
@@ -3375,6 +3626,10 @@ async fn main() {
                         }
                         "multiplayer" => app.screen = Screen::Multiplayer,
                         "pause" => app.screen = Screen::Paused,
+                        "trade" => {
+                            app.trade = Some((mobdefs::by_name("Кузнец"), 1));
+                            app.screen = Screen::Trade;
+                        }
                         "map" => {
                             if let Some(g) = app.game.as_ref() {
                                 let me = vec2(g.player.body.pos.x, g.player.body.pos.z);
@@ -3465,6 +3720,12 @@ async fn main() {
         };
         app.audio.want(track);
         app.audio.update(dt, app.settings.music_vol);
+        let rain = app.game.as_ref().map_or(0.0, |g| {
+            let e = g.player.eye();
+            let inside = !g.world().sky_exposed(e.x.floor() as i32, e.y.floor() as i32, e.z.floor() as i32);
+            g.rain_k * if inside { 0.25 } else { 0.7 }
+        });
+        app.audio.set_rain(rain * app.settings.sound_vol);
         if app.ui.clicked {
             app.sfx.push((music::Sfx::Click, 0.5));
         }

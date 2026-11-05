@@ -176,6 +176,8 @@ pub struct Anim {
     pub light: f32,
     pub head_yaw: f32,
     pub head_pitch: f32,
+    /// Множитель размера (детёныши меньше).
+    pub scale: f32,
 }
 
 /// Тело существа № `mob` из таблицы.
@@ -204,7 +206,7 @@ pub fn draw_mob(mob: usize, pos: Vec3, yaw: f32, a: &Anim) {
     if a.dying > 0.0 {
         root *= rx(a.dying.min(1.0) * std::f32::consts::FRAC_PI_2);
     }
-    root *= Mat4::from_scale(Vec3::splat(def.scale));
+    root *= Mat4::from_scale(Vec3::splat(def.scale * a.scale));
     let r = root;
     let hy = a.head_yaw.clamp(-0.9, 0.9);
     let hp = a.head_pitch.clamp(-0.6, 0.6);

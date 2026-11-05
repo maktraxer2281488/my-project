@@ -46,6 +46,8 @@ pub struct Audio {
     fade: f32,
     sent_vol: f32,
     sfx: HashMap<Sfx, Sound>,
+    rain: Option<Sound>,
+    rain_vol: f32,
     /// Название мелодии для всплывающей надписи.
     pub now_playing: Option<(String, f32)>,
 }
@@ -55,15 +57,29 @@ impl Audio {
         // на Linux без устройства звука (сервер, контейнер) звук не включаем
         let device = !cfg!(target_os = "linux") || std::path::Path::new("/dev/snd").exists();
         let enabled = device && std::env::var("RK_NOAUDIO").is_err();
-        let mut a = Audio { enabled, current: None, want: &[], left: 0.0, turn: 0, pending: None, fade: 0.0, sent_vol: -1.0, sfx: HashMap::new(), now_playing: None };
+        let mut a = Audio { enabled, current: None, want: &[], left: 0.0, turn: 0, pending: None, fade: 0.0, sent_vol: -1.0, sfx: HashMap::new(), rain: None, rain_vol: -1.0, now_playing: None };
         if enabled {
             for s in music::SFX {
                 if let Some(snd) = load(&music::wav(&music::render_sfx(s))) {
                     a.sfx.insert(s, snd);
                 }
             }
+            a.rain = load(&music::wav(&music::render_rain()));
+            if let Some(r) = &a.rain {
+                audio::play_sound(r, PlaySoundParams { looped: true, volume: 0.0 });
+            }
         }
         a
+    }
+
+    /// Громкость шума дождя.
+    pub fn set_rain(&mut self, v: f32) {
+        if let Some(r) = &self.rain {
+            if (v - self.rain_vol).abs() > 0.02 {
+                audio::set_sound_volume(r, v.clamp(0.0, 1.0));
+                self.rain_vol = v;
+            }
+        }
     }
 
     pub fn want(&mut self, set: &'static [Track]) {

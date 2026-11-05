@@ -192,6 +192,7 @@ fn build() -> Vec<Recipe> {
             ToolKind::Scythe => (3, 3),
             ToolKind::Halberd => (4, 3),
             ToolKind::Rapier => (2, 1),
+            ToolKind::Hoe => (2, 2),
         };
         for m in TOOL_MATS {
             let st = if matches!(m, Mat::Wood | Mat::Stone) { Workbench } else { Anvil };
@@ -453,6 +454,8 @@ fn build() -> Vec<Recipe> {
         r((b(SIGNAL_BLOCK), 1), &[(t(it::RUBY), 1), (t(it::COPPER_INGOT), 4)], Anvil);
         r((b(PUSHER0), 1), &[(b(OAK_PLANKS), 3), (b(COBBLE), 4), (t(it::IRON_INGOT), 1), (b(sh::WIRE0), 1)], Workbench);
         r((t(it::BUCKET), 1), &[(t(it::IRON_INGOT), 3)], Workbench);
+        r((b(BED), 1), &[(b(WOOL0 + 5), 3), (b(OAK_PLANKS), 3)], Workbench);
+        r((t(it::WHEAT_SEEDS), 2), &[(t(it::WHEAT), 1)], Hand);
     }
     // ===== v0.11: призыв боссов =====
     use crate::mobdefs::by_name;

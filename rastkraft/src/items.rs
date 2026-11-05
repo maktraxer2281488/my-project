@@ -105,17 +105,19 @@ pub enum ToolKind {
     Scythe,
     Halberd,
     Rapier,
+    Hoe,
 }
 
-pub const TOOL_KINDS: [ToolKind; 13] = [
+pub const TOOL_KINDS: [ToolKind; 14] = [
     ToolKind::Sword, ToolKind::Pickaxe, ToolKind::Axe, ToolKind::Shovel, ToolKind::Dagger, ToolKind::Spear, ToolKind::Mace,
     ToolKind::Katana, ToolKind::Battleaxe, ToolKind::Warhammer, ToolKind::Scythe, ToolKind::Halberd, ToolKind::Rapier,
+    ToolKind::Hoe,
 ];
 
 impl ToolKind {
     /// Оружие (а не инструмент для добычи).
     pub fn is_weapon(self) -> bool {
-        !matches!(self, ToolKind::Pickaxe | ToolKind::Axe | ToolKind::Shovel)
+        !matches!(self, ToolKind::Pickaxe | ToolKind::Axe | ToolKind::Shovel | ToolKind::Hoe)
     }
     /// Широкий взмах задевает существ рядом с целью.
     pub fn sweeps(self) -> bool {
@@ -328,6 +330,8 @@ pub const SUMMON_COUNT: u16 = 6;
 pub const BUCKET: u16 = SUMMON0 + SUMMON_COUNT;
 pub const WATER_BUCKET: u16 = BUCKET + 1;
 pub const LAVA_BUCKET: u16 = BUCKET + 2;
+pub const COIN: u16 = BUCKET + 3;
+pub const WHEAT_SEEDS: u16 = BUCKET + 4;
 
 /// Трофей существа.
 pub fn mob_drop(def: usize) -> u16 {
@@ -538,6 +542,8 @@ fn build_things() -> Vec<ThingDef> {
     t("Ведро", m, Bucket, (190, 194, 204), (60, 60, 66));
     t("Ведро воды", m, Bucket, (190, 194, 204), (60, 120, 220));
     t("Ведро лавы", m, Bucket, (190, 194, 204), (250, 120, 30));
+    t("Монета", m, Orb, (250, 210, 70), (180, 130, 30));
+    t("Семена пшеницы", m, Berries, (200, 180, 100), (150, 130, 70));
     v
 }
 
@@ -589,6 +595,7 @@ impl Item {
                     ToolKind::Scythe => format!("{} коса", a[1]),
                     ToolKind::Halberd => format!("{} алебарда", a[1]),
                     ToolKind::Rapier => format!("{} рапира", a[1]),
+                    ToolKind::Hoe => format!("{} мотыга", a[1]),
                 }
             }
             Item::Armor(s, m) => {
@@ -636,6 +643,7 @@ impl Item {
                     ToolKind::Scythe => 1.3,
                     ToolKind::Halberd => 1.45,
                     ToolKind::Rapier => 0.85,
+                    ToolKind::Hoe => 0.5,
                 }
             }
             _ => 1.0,
@@ -1102,6 +1110,15 @@ fn weapon_px(k: ToolKind, x: i32, y: i32) -> u8 {
                 1
             } else if handle(-15.0, 9.0) {
                 if (a - 1.0).abs() < 1.0 { 5 } else { 3 }
+            } else {
+                0
+            }
+        }
+        ToolKind::Hoe => {
+            if a >= 9.0 && a <= 12.0 && b <= 0.0 && b >= -5.0 {
+                if b > -1.0 { 1 } else { 2 }
+            } else if handle(-15.0, 12.0) {
+                3
             } else {
                 0
             }

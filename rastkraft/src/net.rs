@@ -35,7 +35,7 @@ pub enum Msg {
     Chat { text: String },
     Leave { id: u8 },
     /// Снимок существ вокруг игрока + время суток (хост → клиент).
-    Mobs { time: f32, list: Vec<MobSnap> },
+    Mobs { time: f32, weather: u8, list: Vec<MobSnap> },
     /// Клиент ударил существо.
     MobHit { uid: u32, dmg: f32 },
     /// Выдать предметы (трофей убитого клиентом существа).
@@ -183,9 +183,10 @@ pub fn encode(m: &Msg) -> Vec<u8> {
             w.u8(7);
             w.u8(*id);
         }
-        Msg::Mobs { time, list } => {
+        Msg::Mobs { time, weather, list } => {
             w.u8(8);
             w.f32(*time);
+            w.u8(*weather);
             w.u32(list.len() as u32);
             for m in list {
                 w.u32(m.uid);
@@ -249,6 +250,7 @@ pub fn decode(b: &[u8]) -> Option<Msg> {
         7 => Msg::Leave { id: r.u8()? },
         8 => {
             let time = r.f32()?;
+            let weather = r.u8()?;
             let n = r.u32()? as usize;
             let mut list = Vec::with_capacity(n.min(512));
             for _ in 0..n {
@@ -263,7 +265,7 @@ pub fn decode(b: &[u8]) -> Option<Msg> {
                     hp: r.u8()?,
                 });
             }
-            Msg::Mobs { time, list }
+            Msg::Mobs { time, weather, list }
         }
         9 => Msg::MobHit { uid: r.u32()?, dmg: r.f32()? },
         10 => Msg::Give { item: r.u32()?, count: r.u32()? as u16 },
@@ -467,7 +469,7 @@ mod tests {
             Msg::Hit { target: 2, from: 0, dmg: 7.5, knock: [1.0, 0.5, 0.0] },
             Msg::Chat { text: "привет".into() },
             Msg::Leave { id: 2 },
-            Msg::Mobs { time: 0.3, list: vec![MobSnap { uid: 7, def: 12, pos: [1.0, 2.0, 3.0], yaw: 0.4, hurt: true, attack: 128, dying: 0, hp: 200 }] },
+            Msg::Mobs { time: 0.3, weather: 1, list: vec![MobSnap { uid: 7, def: 12, pos: [1.0, 2.0, 3.0], yaw: 0.4, hurt: true, attack: 128, dying: 0, hp: 200 }] },
             Msg::MobHit { uid: 9, dmg: 3.5 },
             Msg::Give { item: 0x0400_0010, count: 3 },
         ];

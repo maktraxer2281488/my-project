@@ -47,9 +47,14 @@ pub enum Form {
     Plate { on: bool },
     /// Сигнальный провод.
     Wire { on: bool },
+    /// Кровать (полвысоты).
+    Bed,
 }
 
 pub fn form(b: u16) -> Option<Form> {
+    if b == BED {
+        return Some(Form::Bed);
+    }
     if !(SLAB0..FORM_END).contains(&b) {
         return None;
     }
@@ -91,6 +96,7 @@ pub fn id(f: Form) -> u16 {
         Form::Pane => PANE,
         Form::Plate { on } => PLATE0 + on as u16,
         Form::Wire { on } => WIRE0 + on as u16,
+        Form::Bed => BED,
     }
 }
 
@@ -117,6 +123,7 @@ pub fn base(f: Form) -> u16 {
         Form::Pane => GLASS,
         Form::Plate { .. } => STONE,
         Form::Wire { on } => WIRE0 + on as u16,
+        Form::Bed => BED,
     }
 }
 
@@ -243,6 +250,7 @@ pub fn boxes(f: Form, conn: [bool; 4], collide: bool, out: &mut Vec<Bx>) {
                 out.push((vec3(P, 0.0, P), vec3(15.0 * P, if on { 0.5 * P } else { P }, 15.0 * P)));
             }
         }
+        Form::Bed => out.push((Vec3::ZERO, vec3(1.0, 9.0 * P, 1.0))),
         Form::Wire { .. } => {
             if !collide {
                 out.push((Vec3::ZERO, vec3(1.0, 0.5 * P, 1.0)));

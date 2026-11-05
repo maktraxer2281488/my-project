@@ -413,13 +413,15 @@ pub enum Sfx {
     Boss,
     Click,
     Crit,
+    Thunder,
 }
 
-pub const SFX: [Sfx; 10] = [Sfx::Hit, Sfx::Break, Sfx::Place, Sfx::Hurt, Sfx::Pickup, Sfx::Eat, Sfx::Swing, Sfx::Boss, Sfx::Click, Sfx::Crit];
+pub const SFX: [Sfx; 11] = [Sfx::Hit, Sfx::Break, Sfx::Place, Sfx::Hurt, Sfx::Pickup, Sfx::Eat, Sfx::Swing, Sfx::Boss, Sfx::Click, Sfx::Crit, Sfx::Thunder];
 
 pub fn render_sfx(s: Sfx) -> Vec<f32> {
     let dur = match s {
         Sfx::Boss => 1.6,
+        Sfx::Thunder => 3.0,
         Sfx::Eat => 0.35,
         Sfx::Pickup | Sfx::Click => 0.12,
         _ => 0.25,
@@ -454,6 +456,12 @@ pub fn render_sfx(s: Sfx) -> Vec<f32> {
             }
             Sfx::Click => (TAU * 1200.0 * t).sin() * 0.4 * (-t * 60.0).exp(),
             Sfx::Crit => ((TAU * 1500.0 * t).sin() * 0.4 + (TAU * 2250.0 * t).sin() * 0.3) * (-t * 14.0).exp(),
+            Sfx::Thunder => {
+                // раскат: низкий отфильтрованный шум с несколькими ударами
+                lp += (n - lp) * 0.02;
+                let rumble = (1.0 + 0.6 * (t * 7.0).sin() * (t * 2.3).cos()) * (-t * 1.1).exp();
+                (lp * 6.0 * rumble).tanh() * (t / 0.03).min(1.0)
+            }
         };
         out.push(v);
         out.push(v);
@@ -517,4 +525,24 @@ mod dump {
             std::fs::write(format!("{dir}/{}.wav", t.file()), super::wav(&b)).unwrap();
         }
     }
+}
+
+/// Шум дождя для бесшовного повтора (4 секунды).
+pub fn render_rain() -> Vec<f32> {
+    let len = (4.0 * RATE as f32) as usize;
+    let mut out = Vec::with_capacity(len * 2);
+    let (mut a, mut b) = (0.0f32, 0.0f32);
+    for i in 0..len {
+        let n1 = noise(i as u32 ^ 0xA5A5);
+        let n2 = noise(i as u32 ^ 0x5A5A);
+        a += (n1 - a) * 0.35;
+        b += (n2 - b) * 0.35;
+        // редкие капли
+        let drop = if noise(i as u32 / 600 ^ 77) > 0.96 { noise(i as u32) * 0.4 } else { 0.0 };
+        // плавное начало/конец, чтобы повтор был незаметен
+        let edge = ((i as f32 / 2000.0).min(1.0)).min(((len - i) as f32 / 2000.0).min(1.0));
+        out.push((a * 0.5 + drop) * edge);
+        out.push((b * 0.5 + drop) * edge);
+    }
+    out
 }
