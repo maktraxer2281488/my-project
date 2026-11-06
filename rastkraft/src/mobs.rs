@@ -294,7 +294,8 @@ impl Mobs {
 
     fn try_spawn(&mut self, world: &World, anchor: Vec3, daylight: f32, difficulty: u8) {
         let (fr, ho) = self.counts();
-        let hostile_cap = [0, 25, MAX_HOSTILE, MAX_HOSTILE][difficulty.min(3) as usize];
+        // злых — вдвое меньше, чем раньше
+        let hostile_cap = [0, 25, MAX_HOSTILE, MAX_HOSTILE][difficulty.min(3) as usize] / 2;
         let ang = self.rand() * std::f32::consts::TAU;
         let dist = 20.0 + self.rand() * 36.0;
         let p = anchor;
@@ -316,7 +317,7 @@ impl Mobs {
             let pos = vec3(x as f32 + 0.5, y as f32, z as f32 + 0.5);
             let biome = if world.dim == Dim::Heaven { Biome::Islands } else { worldgen::column(world.seed, x, z).biome.family() };
             let night = daylight < 0.3;
-            let want_hostile = ho < hostile_cap && (fr >= MAX_FRIENDLY || self.rand() < 0.5);
+            let want_hostile = ho < hostile_cap && (fr >= MAX_FRIENDLY || self.rand() < 0.5) && self.rand() < 0.5;
             let want_friendly = fr < MAX_FRIENDLY;
             let pick = if water {
                 if want_hostile && self.rand() < 0.5 {

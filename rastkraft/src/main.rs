@@ -4630,6 +4630,7 @@ async fn amain() {
                     println!("BENCH frames={} avg_ms={:.2} fps={:.1} chunks={} mobs={} update_ms={:.2} render_cpu_ms={:.2} meshes_tris={:?}", bench.2, avg * 1000.0, 1.0 / avg, app.loader.gpu.len(), fr + ho, prof.0 * 1000.0 / fr_n, prof.1 * 1000.0 / fr_n, app.loader.stats());
                     let parts: Vec<String> = (0..8).map(|i| format!("{}={:.2}", PROF_NAMES[i], PROF[i].load(std::sync::atomic::Ordering::Relaxed) as f64 / 1e6 / fr_n)).collect();
                     println!("PROF_MS {}", parts.join(" "));
+                    println!("MOBS friendly={fr} hostile={ho}");
                     println!("AUTO dyn_scale={:.2} eff_dist={} busy_fps={:.1}", app.dyn_scale, app.eff_dist, app.busy_fps);
                     std::process::exit(0);
                 }
