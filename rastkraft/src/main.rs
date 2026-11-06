@@ -92,6 +92,8 @@ enum Screen {
     Playing,
     Paused,
     Settings,
+    /// Остальные настройки (то, чего нет на картинке дизайна).
+    SettingsMore,
     Inventory,
     Dead,
     Chat,
@@ -406,6 +408,11 @@ struct App {
     /// Фоны меню (дизайн kornijavvhe).
     title_bg: Texture2D,
     mp_bg: Texture2D,
+    settings_bg: Texture2D,
+    pause_bg: Texture2D,
+    worlds_bg: Texture2D,
+    /// Мир, удаление которого ждёт подтверждения.
+    confirm_delete: Option<String>,
     /// Звуки, накопленные за кадр (проигрываются после обновления мира).
     sfx: Vec<(music::Sfx, f32)>,
     export_rx: Option<std::sync::mpsc::Receiver<String>>,
@@ -2494,40 +2501,54 @@ fn draw_title(app: &mut App) -> Option<Screen> {
     next
 }
 
+/// Выбор мира по дизайну kornijavvhe: список миров посередине, кнопки внизу.
 fn worlds_screen(app: &mut App) -> Option<Screen> {
-    let (w, h) = (screen_width(), screen_height());
     let s = app.ui.s;
-    draw_rectangle(0.0, 0.0, w, h, Color::new(0.08, 0.09, 0.12, 1.0));
-    app.ui.text_center("Выбор мира", w / 2.0, h * 0.1, 34.0, WHITE);
-    let bw = 560.0 * s;
-    let bx = (w - bw) / 2.0;
-    let rh = 56.0 * s;
-    let mut y = h * 0.16;
+    let c = ui::Cover::draw(&app.worlds_bg);
+    let (lx, ly, lw, lh) = c.rect(200.0, 235.0, 1080.0, 680.0);
     let mut next = None;
     let mut to_load: Option<String> = None;
     let mut to_delete: Option<String> = None;
     if app.worlds_list.is_empty() {
-        app.ui.text_center("Сохранённых миров пока нет", w / 2.0, y + 40.0 * s, 18.0, GRAY);
+        draw_rectangle(lx + lw * 0.15, ly + lh * 0.38, lw * 0.7, lh * 0.2, Color::new(0.0, 0.0, 0.0, 0.35));
+        app.ui.photo_text("Сохранённых миров пока нет — создайте новый!", lx + lw * 0.15, ly + lh * 0.38, lw * 0.7, lh * 0.2);
     }
+    let rows = 6usize;
+    let gap = lh * 0.02;
+    let rh = (lh - gap * (rows as f32 - 1.0)) / rows as f32;
     let names: Vec<(String, bool, u32)> = app.worlds_list.iter().map(|wi| (wi.name.clone(), wi.creative, wi.seed)).collect();
-    for (name, creative, seed) in names.iter().take(7) {
-        draw_rectangle(bx, y, bw, rh, Color::new(0.13, 0.14, 0.18, 0.95));
-        app.ui.text(name, bx + 14.0 * s, y + 24.0 * s, 18.0, WHITE);
+    for (i, (name, creative, seed)) in names.iter().take(rows).enumerate() {
+        let y = ly + i as f32 * (rh + gap);
+        draw_rectangle(lx, y, lw, rh, Color::new(0.06, 0.08, 0.04, 0.6));
+        draw_rectangle_lines(lx, y, lw, rh, 2.0, Color::new(1.0, 1.0, 1.0, 0.35));
+        let tw = lw * 0.56;
+        app.ui.photo_text(name, lx + 8.0 * s, y, tw, rh * 0.72);
         let mode = if *creative { "Творчество" } else { "Выживание" };
-        app.ui.text(&format!("{mode} · зерно {seed}"), bx + 14.0 * s, y + 46.0 * s, 13.0, GRAY);
-        if app.ui.button(bx + bw - 250.0 * s, y + 8.0 * s, 130.0 * s, rh - 16.0 * s, "Играть") {
+        app.ui.text_center(&format!("{mode} · зерно {seed}"), lx + 8.0 * s + tw / 2.0, y + rh * 0.86, (rh / s * 0.2).clamp(10.0, 14.0), Color::new(0.92, 0.95, 0.85, 1.0));
+        let bw = lw * 0.18;
+        let (px, dx) = (lx + lw - bw * 2.0 - 16.0 * s, lx + lw - bw - 8.0 * s);
+        let (by, bh) = (y + rh * 0.15, rh * 0.7);
+        draw_rectangle(px, by, bw, bh, Color::new(0.25, 0.6, 0.22, 0.85));
+        if app.ui.photo_button(px, by, bw, bh, "Играть") {
             to_load = Some(name.clone());
         }
-        if app.ui.button(bx + bw - 112.0 * s, y + 8.0 * s, 104.0 * s, rh - 16.0 * s, "Удалить") {
-            to_delete = Some(name.clone());
+        let sure = app.confirm_delete.as_deref() == Some(name.as_str());
+        draw_rectangle(dx, by, bw, bh, if sure { Color::new(0.85, 0.15, 0.1, 0.95) } else { Color::new(0.6, 0.2, 0.18, 0.8) });
+        if app.ui.photo_button(dx, by, bw, bh, if sure { "Точно?" } else { "Удалить" }) {
+            if sure {
+                to_delete = Some(name.clone());
+                app.confirm_delete = None;
+            } else {
+                app.confirm_delete = Some(name.clone());
+            }
         }
-        y += rh + 8.0 * s;
     }
-    let by = h * 0.82;
-    if app.ui.button(bx, by, bw / 2.0 - 6.0 * s, 46.0 * s, "Назад") || is_key_pressed(KeyCode::Escape) {
+    let (x, y, w, h) = c.rect(156.0, 698.0, 618.0, 775.0);
+    if app.ui.hot_area(x, y, w, h) || is_key_pressed(KeyCode::Escape) {
         next = Some(Screen::Title);
     }
-    if app.ui.button(bx + bw / 2.0 + 6.0 * s, by, bw / 2.0 - 6.0 * s, 46.0 * s, "Создать новый мир") {
+    let (x, y, w, h) = c.rect(659.0, 697.0, 1143.0, 773.0);
+    if app.ui.hot_area(x, y, w, h) {
         app.name_input = format!("Мир {}", app.worlds_list.len() + 1);
         app.focus = Field::Name;
         next = Some(Screen::NewWorld);
@@ -2827,6 +2848,135 @@ fn draw_player_list(app: &mut App) {
     }
 }
 
+/// Настройки по дизайну kornijavvhe: ползунки и переключатели прямо на кнопках-картинках.
+fn settings_photo_screen(app: &mut App) -> Option<Screen> {
+    let c = ui::Cover::draw(&app.settings_bg);
+    let old_smooth = app.settings.smooth_light;
+    let old_fast = opt::get().fast_leaves;
+    let onoff = |b: bool| if b { "вкл" } else { "выкл" };
+    let r = |x0: f32, y0: f32, x1: f32, y1: f32| c.rect(x0, y0, x1, y1);
+    let st = &mut app.settings;
+    let ui = &mut app.ui;
+    // левая колонка
+    let (x, y, w, h) = r(279.0, 121.0, 591.0, 172.0);
+    st.render_dist = ui.photo_slider(101, x, y, w, h, &format!("Дальность прорисовки: {} чанков", st.render_dist), st.render_dist as f32, 2.0, 32.0).round() as i32;
+    let (x, y, w, h) = r(280.0, 189.0, 597.0, 240.0);
+    st.sensitivity = ui.photo_slider(102, x, y, w, h, &format!("Чувствительность мыши: {:.0}%", st.sensitivity * 100.0), st.sensitivity, 0.1, 4.0);
+    let (x, y, w, h) = r(287.0, 254.0, 611.0, 307.0);
+    let gs = ui.photo_slider(103, x, y, w, h, &format!("Размер интерфейса: {:.0}%", st.gui_scale * 100.0), st.gui_scale, 0.75, 2.0);
+    st.gui_scale = (gs * 20.0).round() / 20.0;
+    let (x, y, w, h) = r(293.0, 327.0, 605.0, 380.0);
+    if ui.photo_button(x, y, w, h, &format!("Туман: {}", onoff(st.fog))) {
+        st.fog = !st.fog;
+    }
+    let (x, y, w, h) = r(282.0, 399.0, 611.0, 452.0);
+    if ui.photo_button(x, y, w, h, &format!("Счётчик FPS (F7): {}", onoff(st.show_fps))) {
+        st.show_fps = !st.show_fps;
+    }
+    let (x, y, w, h) = r(301.0, 470.0, 613.0, 528.0);
+    if ui.photo_button(x, y, w, h, &format!("PvP (урон по игрокам): {}", onoff(st.pvp))) {
+        st.pvp = !st.pvp;
+    }
+    let (x, y, w, h) = r(293.0, 546.0, 612.0, 598.0);
+    if ui.photo_button(x, y, w, h, &format!("Оптимизация: {}", opt::NAMES[st.opt_level as usize].to_lowercase())) {
+        st.opt_level = (st.opt_level + 1) % 4;
+    }
+    let (x, y, w, h) = r(279.0, 622.0, 611.0, 673.0);
+    st.music_vol = ui.photo_slider(104, x, y, w, h, &format!("Музыка: {:.0}%", st.music_vol * 100.0), st.music_vol, 0.0, 1.0);
+    let (x, y, w, h) = r(286.0, 692.0, 619.0, 747.0);
+    if ui.photo_button(x, y, w, h, &format!("Сенсорное управление: {}", onoff(st.touch))) {
+        st.touch = !st.touch;
+    }
+    let (x, y, w, h) = r(280.0, 760.0, 611.0, 815.0);
+    let rs = ui.photo_slider(105, x, y, w, h, &format!("Масштаб рендера: {:.0}%", st.render_scale * 100.0), st.render_scale, 0.4, 1.0);
+    st.render_scale = (rs * 20.0).round() / 20.0;
+    // правая колонка
+    let (x, y, w, h) = r(611.0, 121.0, 940.0, 175.0);
+    st.fov = ui.photo_slider(106, x, y, w, h, &format!("Поле зрения: {:.0}°", st.fov), st.fov, 50.0, 110.0).round();
+    let (x, y, w, h) = r(612.0, 189.0, 934.0, 243.0);
+    st.brightness = ui.photo_slider(107, x, y, w, h, &format!("Яркость: {:.0}%", st.brightness * 100.0), st.brightness, 0.0, 1.0);
+    let (x, y, w, h) = r(611.0, 256.0, 925.0, 306.0);
+    if ui.photo_button(x, y, w, h, &format!("Сложность: {}", settings::DIFFICULTY[st.difficulty as usize].to_lowercase())) {
+        st.difficulty = (st.difficulty + 1) % 4;
+    }
+    let (x, y, w, h) = r(626.0, 330.0, 945.0, 384.0);
+    if ui.photo_button(x, y, w, h, &format!("Авто-качество (60 FPS): {}", onoff(st.auto_dist))) {
+        st.auto_dist = !st.auto_dist;
+    }
+    let (x, y, w, h) = r(628.0, 400.0, 943.0, 452.0);
+    let lim = if st.fps_limit == 0 { "нет".to_string() } else { st.fps_limit.to_string() };
+    if ui.photo_button(x, y, w, h, &format!("Лимит FPS: {lim}")) {
+        let i = settings::FPS_LIMITS.iter().position(|&f| f == st.fps_limit).unwrap_or(0);
+        st.fps_limit = settings::FPS_LIMITS[(i + 1) % settings::FPS_LIMITS.len()];
+    }
+    let (x, y, w, h) = r(621.0, 468.0, 927.0, 522.0);
+    st.sound_vol = ui.photo_slider(108, x, y, w, h, &format!("Звуки: {:.0}%", st.sound_vol * 100.0), st.sound_vol, 0.0, 1.0);
+    let (x, y, w, h) = r(621.0, 536.0, 953.0, 589.0);
+    let open_look = ui.hot_area(x, y, w, h);
+    let (x, y, w, h) = r(621.0, 604.0, 955.0, 657.0);
+    let open_controls = ui.hot_area(x, y, w, h);
+    let (x, y, w, h) = r(636.0, 675.0, 960.0, 737.0);
+    let preset = if st.render_dist <= 5 && !st.smooth_light {
+        "низкое"
+    } else if st.render_dist >= 12 && st.smooth_light && st.clouds {
+        "высокое"
+    } else {
+        "среднее"
+    };
+    if ui.photo_button(x, y, w, h, &format!("Качество графики: {preset}")) {
+        match preset {
+            "низкое" => {
+                st.render_dist = 8;
+                st.smooth_light = true;
+                st.clouds = true;
+                st.render_scale = 1.0;
+            }
+            "среднее" => {
+                st.render_dist = 12;
+                st.smooth_light = true;
+                st.clouds = true;
+                st.fog = true;
+            }
+            _ => {
+                st.render_dist = 5;
+                st.smooth_light = false;
+                st.clouds = false;
+                st.fog = true;
+                st.render_scale = 0.7;
+            }
+        }
+    }
+    let (x, y, w, h) = r(633.0, 752.0, 971.0, 805.0);
+    let done = ui.hot_area(x, y, w, h) || is_key_pressed(KeyCode::Escape);
+    // всё, чего нет на картинке: облака, текстуры и небо, VSync, мини-карта…
+    let (x, y, w, h) = r(990.0, 30.0, 1250.0, 84.0);
+    draw_rectangle(x, y, w, h, Color::new(0.05, 0.08, 0.04, 0.55));
+    draw_rectangle_lines(x, y, w, h, 2.0, Color::new(1.0, 1.0, 1.0, 0.6));
+    let more = ui.photo_button(x, y, w, h, "Ещё настройки…");
+    st.clamp();
+    opt::set_level(st.opt_level);
+    if st.smooth_light != old_smooth || opt::get().fast_leaves != old_fast {
+        app.loader.epoch += 1;
+    }
+    if open_look {
+        app.settings.save();
+        return Some(Screen::Look);
+    }
+    if open_controls {
+        app.settings.save();
+        return Some(Screen::Controls);
+    }
+    if more {
+        app.settings.save();
+        return Some(Screen::SettingsMore);
+    }
+    if done {
+        app.settings.save();
+        return Some(app.settings_back);
+    }
+    None
+}
+
 fn settings_screen(app: &mut App) -> Option<Screen> {
     let (w, h) = (screen_width(), screen_height());
     let s = app.ui.s;
@@ -2835,7 +2985,7 @@ fn settings_screen(app: &mut App) -> Option<Screen> {
     } else {
         draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.55));
     }
-    app.ui.text_center("Настройки", w / 2.0, h * 0.07, 34.0, WHITE);
+    app.ui.text_center("Ещё настройки", w / 2.0, h * 0.07, 34.0, WHITE);
     let cw = 330.0 * s;
     let bh = 34.0 * s;
     let gap = 6.0 * s;
@@ -2954,7 +3104,7 @@ fn settings_screen(app: &mut App) -> Option<Screen> {
     y += bh + gap;
     let exporting = app.export_rx.is_some();
     let export = ui.button(x1, y, cw, bh, if exporting { "Сохраняю музыку…" } else { "Сохранить музыку в папку music" });
-    let done = ui.button(x2, y, cw, bh, "Готово") || is_key_pressed(KeyCode::Escape);
+    let done = ui.button(x2, y, cw, bh, "Назад") || is_key_pressed(KeyCode::Escape);
     if export && !exporting {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
@@ -2991,7 +3141,7 @@ fn settings_screen(app: &mut App) -> Option<Screen> {
     }
     if done {
         app.settings.save();
-        return Some(app.settings_back);
+        return Some(Screen::Settings);
     }
     None
 }
@@ -3003,46 +3153,39 @@ fn leave_world(app: &mut App) {
     app.game = None;
 }
 
+/// Пауза по дизайну kornijavvhe.
 fn pause_screen(app: &mut App) -> Option<Screen> {
-    let (w, h) = (screen_width(), screen_height());
-    let s = app.ui.s;
-    draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.5));
-    app.ui.text_center("Пауза", w / 2.0, h * 0.2, 36.0, WHITE);
-    let bw = 400.0 * s;
-    let bh = 44.0 * s;
-    let bx = (w - bw) / 2.0;
-    let mut y = h * 0.27;
+    let c = ui::Cover::draw(&app.pause_bg);
     let mut next = None;
-    if app.ui.button(bx, y, bw, bh, "Продолжить") {
-        next = Some(Screen::Playing);
-    }
-    y += bh + 8.0 * s;
     let is_client = app.game.as_ref().is_some_and(|g| g.is_client());
     let creative = app.game.as_ref().is_some_and(|g| g.creative);
+    let (x, y, w, h) = c.rect(422.0, 193.0, 858.0, 263.0);
+    if app.ui.hot_area(x, y, w, h) {
+        next = Some(Screen::Playing);
+    }
+    let (x, y, w, h) = c.rect(425.0, 277.0, 856.0, 345.0);
     let label = if creative { "Режим: Творчество" } else { "Режим: Выживание" };
-    if app.ui.button_ex(bx, y, bw, bh, label, !is_client) {
+    if app.ui.photo_button(x, y, w, h, label) && !is_client {
         if let Some(g) = app.game.as_mut() {
             g.creative = !g.creative;
             g.player.flying = false;
         }
     }
-    y += bh + 8.0 * s;
-    if app.ui.button(bx, y, bw, bh, "Настройки") {
+    let (x, y, w, h) = c.rect(426.0, 357.0, 853.0, 428.0);
+    if app.ui.hot_area(x, y, w, h) {
         app.settings_back = Screen::Paused;
         next = Some(Screen::Settings);
     }
-    y += bh + 8.0 * s;
+    // сеть: «Открыть для сети» / адрес сервера, «Через интернет»
     let net_info = app.game.as_ref().and_then(|g| g.net.as_ref().map(|n| (n.info.clone(), n.peer_count())));
-    match net_info {
+    let (x, y, w, h) = c.rect(362.0, 438.0, 656.0, 486.0);
+    match &net_info {
         Some((info, peers)) => {
-            app.ui.text_center(&format!("{info} · игроков: {}", peers + 1), w / 2.0, y + bh * 0.6, 15.0, ACCENT);
+            let addr = info.rsplit(": ").next().unwrap_or(info);
+            app.ui.photo_text(&format!("Открыто: {addr} · игроков {}", peers + 1), x, y, w, h);
         }
         None => {
-            let half = (bw - 8.0 * s) / 2.0;
-            if app.ui.button(bx + half + 8.0 * s, y, half, bh, "Через интернет…") {
-                next = Some(Screen::Relay);
-            }
-            if app.ui.button(bx, y, half, bh, "Открыть для сети") {
+            if app.ui.photo_button(x, y, w, h, "Открыть для сети") && !is_client {
                 match Net::host(&app.settings.name) {
                     Ok(n) => {
                         let g = app.game.as_mut().unwrap();
@@ -3055,18 +3198,22 @@ fn pause_screen(app: &mut App) -> Option<Screen> {
             }
         }
     }
-    y += bh + 8.0 * s;
-    if !is_client && app.ui.button(bx, y, bw, bh, "Сохранить") {
+    let (x, y, w, h) = c.rect(665.0, 440.0, 957.0, 488.0);
+    if app.ui.hot_area(x, y, w, h) && net_info.is_none() && !is_client {
+        next = Some(Screen::Relay);
+    }
+    let (x, y, w, h) = c.rect(427.0, 496.0, 853.0, 566.0);
+    if app.ui.hot_area(x, y, w, h) && !is_client {
         let ok = save_game(app);
         app.status = Some((if ok { "Мир сохранён".into() } else { "Не удалось сохранить".into() }, 2.0));
     }
-    y += bh + 8.0 * s;
-    if app.ui.button(bx, y, bw, bh, if is_client { "Отключиться" } else { "Сохранить и выйти в меню" }) {
+    let (x, y, w, h) = c.rect(431.0, 573.0, 851.0, 651.0);
+    if app.ui.hot_area(x, y, w, h) {
         leave_world(app);
         next = Some(Screen::Title);
     }
-    y += bh + 8.0 * s;
-    if app.ui.button(bx, y, bw, bh, "Выйти из игры") {
+    let (x, y, w, h) = c.rect(434.0, 660.0, 849.0, 728.0);
+    if app.ui.hot_area(x, y, w, h) {
         save_game(app);
         std::process::exit(0);
     }
@@ -4149,7 +4296,12 @@ async fn amain() {
         screen: Screen::Title,
         settings_back: Screen::Title,
         settings: Settings::load(),
-        ui: Ui::new(font, atlas),
+        ui: {
+            let mut ui = Ui::new(font, atlas);
+            // рукописный шрифт кнопок дизайна (Pangolin, лицензия OFL)
+            ui.hand = load_ttf_font_from_bytes(include_bytes!("../assets/fonts/Pangolin-Regular.ttf")).ok();
+            ui
+        },
         pool: Pool::new(),
         loader: Loader::new(),
         renderer,
@@ -4191,6 +4343,10 @@ async fn amain() {
         chest_open: Vec::new(),
         title_bg: Texture2D::from_file_with_format(include_bytes!("../assets/ui/title.jpg"), None),
         mp_bg: Texture2D::from_file_with_format(include_bytes!("../assets/ui/multiplayer.jpg"), None),
+        settings_bg: Texture2D::from_file_with_format(include_bytes!("../assets/ui/settings.jpg"), None),
+        pause_bg: Texture2D::from_file_with_format(include_bytes!("../assets/ui/pause.jpg"), None),
+        worlds_bg: Texture2D::from_file_with_format(include_bytes!("../assets/ui/worlds.jpg"), None),
+        confirm_delete: None,
         sfx: Vec::new(),
         export_rx: None,
         book_tab: 0,
@@ -4549,7 +4705,8 @@ async fn amain() {
             Screen::Worlds => worlds_screen(&mut app),
             Screen::NewWorld => draw_new_world(&mut app),
             Screen::Multiplayer => multiplayer_screen(&mut app),
-            Screen::Settings => settings_screen(&mut app),
+            Screen::Settings => settings_photo_screen(&mut app),
+            Screen::SettingsMore => settings_screen(&mut app),
             Screen::Paused => pause_screen(&mut app),
             Screen::Dead => dead_screen(&mut app),
             Screen::Inventory => inventory_screen(&mut app),

@@ -9,6 +9,8 @@ pub const PANEL: Color = Color::new(0.06, 0.07, 0.09, 0.82);
 
 pub struct Ui {
     pub font: Font,
+    /// Рукописный шрифт для кнопок на картинках дизайна.
+    pub hand: Option<Font>,
     pub atlas: Texture2D,
     pub s: f32,
     pub mouse: Vec2,
@@ -23,7 +25,7 @@ pub struct Ui {
 
 impl Ui {
     pub fn new(font: Font, atlas: Texture2D) -> Self {
-        Ui { font, atlas, s: 1.0, mouse: Vec2::ZERO, pressed: false, rpressed: false, down: false, drag: None, tooltip: None, clicked: false }
+        Ui { font, hand: None, atlas, s: 1.0, mouse: Vec2::ZERO, pressed: false, rpressed: false, down: false, drag: None, tooltip: None, clicked: false }
     }
 
     pub fn begin(&mut self, gui_scale: f32) {
@@ -90,6 +92,51 @@ impl Ui {
             self.clicked = true;
         }
         hov && self.pressed
+    }
+
+    /// Надпись на кнопке-картинке: рукописный шрифт, по центру, с тенью; размер подгоняется под кнопку.
+    pub fn photo_text(&self, t: &str, x: f32, y: f32, w: f32, h: f32) {
+        let font = self.hand.as_ref().unwrap_or(&self.font);
+        let mut fs = (h * 0.58).max(8.0);
+        while fs > 8.0 && measure_text(t, Some(font), fs as u16, 1.0).width > w * 0.9 {
+            fs -= 1.0;
+        }
+        let d = measure_text(t, Some(font), fs as u16, 1.0);
+        let (tx, ty) = (x + (w - d.width) / 2.0, y + h / 2.0 + d.offset_y / 2.0);
+        // мягкая подложка, чтобы текст читался на любом фото
+        draw_rectangle(x + (w - d.width) / 2.0 - fs * 0.3, y + h * 0.18, d.width + fs * 0.6, h * 0.64, Color::new(0.0, 0.0, 0.0, 0.16));
+        let p = TextParams { font: Some(font), font_size: fs as u16, color: Color::new(0.0, 0.0, 0.0, 0.55), ..Default::default() };
+        let off = (fs / 22.0).max(1.0);
+        draw_text_ex(t, tx + off, ty + off, p.clone());
+        draw_text_ex(t, tx, ty, TextParams { color: WHITE, ..p });
+    }
+
+    /// Кнопка-картинка с надписью.
+    pub fn photo_button(&mut self, x: f32, y: f32, w: f32, h: f32, label: &str) -> bool {
+        let hit = self.hot_area(x, y, w, h);
+        self.photo_text(label, x, y, w, h);
+        hit
+    }
+
+    /// Ползунок прямо на кнопке-картинке: ведут мышью или пальцем — значение меняется.
+    pub fn photo_slider(&mut self, id: u32, x: f32, y: f32, w: f32, h: f32, label: &str, value: f32, min: f32, max: f32) -> f32 {
+        let hov = self.hover(x, y, w, h);
+        if hov && self.pressed {
+            self.drag = Some(id);
+            self.clicked = true;
+        }
+        let mut v = value;
+        if self.drag == Some(id) {
+            v = min + (max - min) * ((self.mouse.x - x) / w).clamp(0.0, 1.0);
+        }
+        let t = ((v - min) / (max - min)).clamp(0.0, 1.0);
+        draw_rectangle(x, y, w * t, h, Color::new(1.0, 1.0, 1.0, 0.16));
+        draw_rectangle(x + w * t - 2.0 * self.s, y, 4.0 * self.s, h, Color::new(1.0, 1.0, 1.0, 0.85));
+        if hov || self.drag == Some(id) {
+            draw_rectangle_lines(x, y, w, h, 3.0 * self.s, Color::new(1.0, 1.0, 1.0, 0.9));
+        }
+        self.photo_text(label, x, y, w, h);
+        v
     }
 
     fn button_full(&mut self, x: f32, y: f32, w: f32, h: f32, label: &str, enabled: bool, size: f32) -> bool {
