@@ -5454,14 +5454,14 @@ fn music_for(g: &Game) -> &'static [music::Track] {
         return &[T::Heaven];
     }
     if g.dim == Dim::Abyss {
-        return &[T::Caves, T::Night];
+        return &[T::Caves];
     }
     let (x, y, z) = (p.x.floor() as i32, (p.y + 1.6).floor() as i32, p.z.floor() as i32);
     if y < 56 && !g.world().sky_exposed(x, y, z) {
         return &[T::Caves];
     }
-    // на поверхности обычного мира — песня rtxx131
-    &[T::Meadow]
+    // на поверхности обычного мира — две песни rtxx131 по очереди
+    &[T::Meadow, T::Village]
 }
 
 fn map_screen(app: &mut App) -> Option<Screen> {

@@ -39,6 +39,8 @@ const SONGS: &[(Track, &[u8])] = &[
     (Track::Menu, include_bytes!("../assets/music/menu_rtxx131.ogg")),
     (Track::Heaven, include_bytes!("../assets/music/heaven_rtxx131.ogg")),
     (Track::Meadow, include_bytes!("../assets/music/world_rtxx131.ogg")),
+    (Track::Village, include_bytes!("../assets/music/world2_rtxx131.ogg")),
+    (Track::Caves, include_bytes!("../assets/music/caves_rtxx131.ogg")),
 ];
 
 /// Готовая запись мелодии в WAV: вшитая, сохранённая ранее или сочинённая заново.
@@ -349,5 +351,9 @@ mod tests {
         assert!((secs - 53.2).abs() < 0.5, "{secs}");
         let secs = wav_secs(&track_wav(Track::Meadow));
         assert!((secs - 58.1).abs() < 0.5, "{secs}");
+        let secs = wav_secs(&track_wav(Track::Village));
+        assert!((secs - 191.8).abs() < 0.5, "{secs}");
+        let secs = wav_secs(&track_wav(Track::Caves));
+        assert!((secs - 213.1).abs() < 0.5, "{secs}");
     }
 }
