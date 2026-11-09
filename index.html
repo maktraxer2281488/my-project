@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Протектор — шиномонтаж и хранение шин</title>
+  <meta name="description" content="Шиномонтаж за 30 минут без очередей: переобувка, балансировка, ремонт проколов, сезонное хранение шин. Онлайн-запись 24/7." />
+  <meta name="theme-color" content="#0d0e11" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='%2316181d' stroke='%23ffb627' stroke-width='8'/%3E%3Ccircle cx='32' cy='32' r='9' fill='%23ffb627'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Unbounded:wght@500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- ============ HEADER ============ -->
+  <header class="header" id="header">
+    <div class="container header__inner">
+      <a href="#top" class="logo" aria-label="Протектор — на главную">
+        <span class="logo__mark" aria-hidden="true">
+          <svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="15" fill="none" stroke="currentColor" stroke-width="6" stroke-dasharray="4 2.3"/><circle cx="20" cy="20" r="5" fill="currentColor"/></svg>
+        </span>
+        <span class="logo__text">Протектор</span>
+      </a>
+
+      <nav class="nav" id="nav" aria-label="Основная навигация">
+        <a href="#services">Услуги</a>
+        <a href="#prices">Цены</a>
+        <a href="#storage">Хранение</a>
+        <a href="#reviews">Отзывы</a>
+        <a href="#contacts">Контакты</a>
+      </nav>
+
+      <div class="header__actions">
+        <a href="tel:+78000000000" class="header__phone">8 800 000-00-00</a>
+        <a href="#booking" class="btn btn--primary btn--sm">Записаться</a>
+        <button class="burger" id="burger" aria-label="Открыть меню" aria-expanded="false" aria-controls="nav">
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- ============ HERO ============ -->
+    <section class="hero">
+      <div class="hero__glow" aria-hidden="true"></div>
+      <div class="hero__grid" aria-hidden="true"></div>
+      <div class="container hero__inner">
+        <div class="hero__content">
+          <span class="pill reveal"><span class="pill__dot"></span>Сегодня свободно 6 окон</span>
+          <h1 class="hero__title reveal">
+            Переобуем авто<br />
+            <span class="accent-text">за&nbsp;30&nbsp;минут</span><br />
+            без очередей
+          </h1>
+          <p class="hero__lead reveal">
+            Современное оборудование Hunter, мастера с опытом от 7 лет и гарантия на каждую работу.
+            Пока мы меняем колёса — отдыхайте в лаунже с кофе.
+          </p>
+          <div class="hero__cta reveal">
+            <a href="#booking" class="btn btn--primary btn--lg">
+              Записаться онлайн
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </a>
+            <a href="#prices" class="btn btn--ghost btn--lg">Рассчитать стоимость</a>
+          </div>
+
+          <ul class="hero__stats reveal">
+            <li><strong data-count="12400">0</strong><span>довольных клиентов</span></li>
+            <li><strong data-count="30" data-suffix=" мин">0</strong><span>среднее время</span></li>
+            <li><strong data-count="4.9" data-decimals="1">0</strong><span>рейтинг на картах</span></li>
+          </ul>
+        </div>
+
+        <div class="hero__visual reveal" aria-hidden="true">
+          <div class="tire-wrap">
+            <svg class="tire" viewBox="0 0 400 400">
+              <defs>
+                <radialGradient id="rubber" cx="50%" cy="45%" r="55%">
+                  <stop offset="0%" stop-color="#2b2e35"/>
+                  <stop offset="70%" stop-color="#17191e"/>
+                  <stop offset="100%" stop-color="#0b0c0f"/>
+                </radialGradient>
+                <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stop-color="#e9ecf1"/>
+                  <stop offset="45%" stop-color="#8b919c"/>
+                  <stop offset="100%" stop-color="#d4d8de"/>
+                </linearGradient>
+                <linearGradient id="rimDark" x1="0" y1="1" x2="1" y2="0">
+                  <stop offset="0%" stop-color="#3a3e46"/>
+                  <stop offset="100%" stop-color="#6f7580"/>
+                </linearGradient>
+              </defs>
+              <!-- tyre -->
+              <circle cx="200" cy="200" r="190" fill="url(#rubber)"/>
+              <g class="tread" fill="#0a0b0d">
+                <!-- tread blocks generated in JS -->
+              </g>
+              <circle cx="200" cy="200" r="150" fill="none" stroke="#0a0b0d" stroke-width="3"/>
+              <circle cx="200" cy="200" r="138" fill="#121418"/>
+              <!-- sidewall text -->
+              <path id="sidewall" d="M200,200 m-128,0 a128,128 0 1,1 256,0 a128,128 0 1,1 -256,0" fill="none"/>
+              <text class="sidewall-text"><textPath href="#sidewall" startOffset="0">PROTEKTOR • 245/45 R18 • ALL SEASON • PROTEKTOR • 245/45 R18 • ALL SEASON •</textPath></text>
+              <!-- rim -->
+              <circle cx="200" cy="200" r="112" fill="url(#rimDark)"/>
+              <circle cx="200" cy="200" r="106" fill="url(#rim)"/>
+              <g class="spokes" fill="#1a1c21">
+                <!-- spokes generated in JS -->
+              </g>
+              <circle cx="200" cy="200" r="40" fill="url(#rim)" stroke="#1a1c21" stroke-width="3"/>
+              <g fill="#2a2d33">
+                <circle cx="200" cy="178" r="5"/><circle cx="221" cy="193" r="5"/><circle cx="213" cy="218" r="5"/><circle cx="187" cy="218" r="5"/><circle cx="179" cy="193" r="5"/>
+              </g>
+              <circle cx="200" cy="200" r="13" fill="#ffb627"/>
+            </svg>
+          </div>
+
+          <div class="float-card float-card--a">
+            <span class="float-card__icon">
+              <svg viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.4 9.6 8 11 4.6-1.4 8-6 8-11V5l-8-3Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="m8.5 12 2.5 2.5 4.5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </span>
+            <div><b>Гарантия 6 мес.</b><small>на все виды работ</small></div>
+          </div>
+          <div class="float-card float-card--b">
+            <span class="float-card__icon float-card__icon--green">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </span>
+            <div><b>Ближайшее окно</b><small id="nextSlot">сегодня в 14:30</small></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="marquee" aria-hidden="true">
+        <div class="marquee__track">
+          <span>Michelin</span><span>✦</span><span>Continental</span><span>✦</span><span>Pirelli</span><span>✦</span><span>Nokian</span><span>✦</span><span>Bridgestone</span><span>✦</span><span>Hankook</span><span>✦</span><span>Yokohama</span><span>✦</span><span>Goodyear</span><span>✦</span>
+          <span>Michelin</span><span>✦</span><span>Continental</span><span>✦</span><span>Pirelli</span><span>✦</span><span>Nokian</span><span>✦</span><span>Bridgestone</span><span>✦</span><span>Hankook</span><span>✦</span><span>Yokohama</span><span>✦</span><span>Goodyear</span><span>✦</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ SERVICES ============ -->
+    <section class="section" id="services">
+      <div class="container">
+        <div class="section__head reveal">
+          <span class="eyebrow">Услуги</span>
+          <h2 class="section__title">Всё для ваших колёс<br />в одном месте</h2>
+          <p class="section__lead">От быстрой сезонной переобувки до сложного ремонта бокового пореза — делаем аккуратно, как для себя.</p>
+        </div>
+
+        <div class="services">
+          <article class="card service reveal">
+            <div class="service__icon">
+              <svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="12" fill="none" stroke="currentColor" stroke-width="2.4"/><circle cx="16" cy="16" r="5" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M16 4v7M16 21v7M4 16h7M21 16h7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+            </div>
+            <h3>Сезонная переобувка</h3>
+            <p>Снятие, монтаж, балансировка и установка четырёх колёс с контролем момента затяжки.</p>
+            <div class="service__foot"><span class="price">от 1 800 ₽</span><span class="time">~30 мин</span></div>
+          </article>
+
+          <article class="card service reveal">
+            <div class="service__icon">
+              <svg viewBox="0 0 32 32"><path d="M4 16h24" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M16 4v24" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-dasharray="2 3"/><circle cx="16" cy="16" r="11" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M9 11l-3 5 3 5M23 11l3 5-3 5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <h3>Балансировка</h3>
+            <p>Высокоточный стенд с лазерной разметкой грузиков. Уберём биение руля на любой скорости.</p>
+            <div class="service__foot"><span class="price">от 250 ₽</span><span class="time">~5 мин / колесо</span></div>
+          </article>
+
+          <article class="card service reveal">
+            <div class="service__icon">
+              <svg viewBox="0 0 32 32"><path d="M20.5 5.5a6 6 0 0 0-7.6 7.6L5 21l6 6 7.9-7.9a6 6 0 0 0 7.6-7.6l-3.6 3.6-3.3-.7-.7-3.3 3.6-3.6Z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/></svg>
+            </div>
+            <h3>Ремонт проколов</h3>
+            <p>Грибки, жгуты, вулканизация боковых порезов. Вернём шину к жизни, если это безопасно.</p>
+            <div class="service__foot"><span class="price">от 400 ₽</span><span class="time">~20 мин</span></div>
+          </article>
+
+          <article class="card service reveal">
+            <div class="service__icon">
+              <svg viewBox="0 0 32 32"><path d="M6 24c3-9 7-14 10-14s7 5 10 14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><circle cx="16" cy="10" r="3" fill="currentColor"/><path d="M4 27h24" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+            </div>
+            <h3>Правка дисков</h3>
+            <p>Восстановление геометрии стальных и литых дисков на гидравлическом станке.</p>
+            <div class="service__foot"><span class="price">от 1 200 ₽</span><span class="time">~60 мин</span></div>
+          </article>
+
+          <article class="card service reveal">
+            <div class="service__icon">
+              <svg viewBox="0 0 32 32"><path d="M16 4c4 5 7 8.6 7 13a7 7 0 0 1-14 0c0-4.4 3-8 7-13Z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/><path d="M13 18a3 3 0 0 0 3 3" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+            </div>
+            <h3>Азот и подкачка</h3>
+            <p>Накачка азотом — стабильное давление и меньший износ. Проверка датчиков TPMS.</p>
+            <div class="service__foot"><span class="price">от 100 ₽</span><span class="time">~10 мин</span></div>
+          </article>
+
+          <article class="card service service--accent reveal">
+            <div class="service__icon">
+              <svg viewBox="0 0 32 32"><path d="M4 12 16 5l12 7v14H4V12Z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/><rect x="10" y="16" width="12" height="10" rx="1" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M10 20h12" stroke="currentColor" stroke-width="2.4"/></svg>
+            </div>
+            <h3>Сезонное хранение</h3>
+            <p>Отапливаемый склад, стеллажи и упаковка. Мойка колёс и диагностика — в подарок.</p>
+            <div class="service__foot"><span class="price">от 2 500 ₽ / сезон</span><a href="#storage" class="link">Подробнее →</a></div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ CALCULATOR ============ -->
+    <section class="section section--alt" id="prices">
+      <div class="container">
+        <div class="section__head reveal">
+          <span class="eyebrow">Калькулятор</span>
+          <h2 class="section__title">Узнайте цену за 10 секунд</h2>
+          <p class="section__lead">Без скрытых доплат: итоговая сумма — та, что вы увидите здесь.</p>
+        </div>
+
+        <div class="calc reveal">
+          <div class="calc__form">
+            <fieldset class="field">
+              <legend>Тип автомобиля</legend>
+              <div class="segmented" role="radiogroup" id="carType">
+                <label><input type="radio" name="car" value="1" checked /><span>Легковой</span></label>
+                <label><input type="radio" name="car" value="1.25" /><span>Кроссовер</span></label>
+                <label><input type="radio" name="car" value="1.5" /><span>Внедорожник</span></label>
+              </div>
+            </fieldset>
+
+            <fieldset class="field">
+              <legend>Радиус дисков <output id="radiusOut" class="radius-out">R16</output></legend>
+              <input type="range" id="radius" min="13" max="22" step="1" value="16" class="range" aria-label="Радиус дисков" />
+              <div class="range__scale" aria-hidden="true"><span>R13</span><span>R16</span><span>R19</span><span>R22</span></div>
+            </fieldset>
+
+            <fieldset class="field">
+              <legend>Что нужно сделать</legend>
+              <div class="checks" id="calcServices">
+                <label class="check"><input type="checkbox" value="mount" checked /><span class="check__box"></span><span class="check__label">Снятие и установка</span><span class="check__price" data-for="mount"></span></label>
+                <label class="check"><input type="checkbox" value="tire" checked /><span class="check__box"></span><span class="check__label">Монтаж шин на диски</span><span class="check__price" data-for="tire"></span></label>
+                <label class="check"><input type="checkbox" value="balance" checked /><span class="check__box"></span><span class="check__label">Балансировка</span><span class="check__price" data-for="balance"></span></label>
+                <label class="check"><input type="checkbox" value="wash" /><span class="check__box"></span><span class="check__label">Мойка колёс</span><span class="check__price" data-for="wash"></span></label>
+                <label class="check"><input type="checkbox" value="nitro" /><span class="check__box"></span><span class="check__label">Накачка азотом</span><span class="check__price" data-for="nitro"></span></label>
+              </div>
+            </fieldset>
+
+            <label class="switch">
+              <input type="checkbox" id="runflat" />
+              <span class="switch__track"><span class="switch__thumb"></span></span>
+              <span>Шины RunFlat / низкий профиль <small>+30%</small></span>
+            </label>
+          </div>
+
+          <aside class="calc__summary">
+            <div class="calc__summary-inner">
+              <span class="calc__label">Итого за 4 колеса</span>
+              <div class="calc__total"><span id="total">0</span>&nbsp;₽</div>
+              <div class="calc__meta">
+                <span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>≈ <b id="duration">40</b> мин</span>
+                <span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4.5 4.5L19 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Гарантия 6 мес.</span>
+              </div>
+              <div class="calc__promo">
+                <b>−10%</b> при онлайн-записи
+                <span>Скидка применится автоматически</span>
+              </div>
+              <a href="#booking" class="btn btn--primary btn--block" id="calcBook">Записаться с этой ценой</a>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ STEPS ============ -->
+    <section class="section">
+      <div class="container">
+        <div class="section__head reveal">
+          <span class="eyebrow">Как это работает</span>
+          <h2 class="section__title">Четыре шага до новой обуви</h2>
+        </div>
+        <ol class="steps">
+          <li class="step reveal"><span class="step__num">01</span><h3>Запись онлайн</h3><p>Выберите удобные дату и время — мы пришлём подтверждение в SMS.</p></li>
+          <li class="step reveal"><span class="step__num">02</span><h3>Приезжайте</h3><p>Заезжайте точно ко времени. Ваш бокс уже свободен и подготовлен.</p></li>
+          <li class="step reveal"><span class="step__num">03</span><h3>Отдыхайте</h3><p>Кофе, Wi-Fi и трансляция из бокса на экране в зоне ожидания.</p></li>
+          <li class="step reveal"><span class="step__num">04</span><h3>Поезжайте</h3><p>Финальная проверка давления и затяжки — и вы снова в пути.</p></li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ============ STORAGE ============ -->
+    <section class="section" id="storage">
+      <div class="container">
+        <div class="storage reveal">
+          <div class="storage__content">
+            <span class="eyebrow eyebrow--dark">Хранение шин</span>
+            <h2>Освободите балкон.<br />Шины будут ждать вас у нас.</h2>
+            <ul class="storage__list">
+              <li>Тёплый склад +15…+25 °C, вдали от солнца</li>
+              <li>Видеонаблюдение и страхование на полную стоимость</li>
+              <li>Мойка, упаковка и маркировка в подарок</li>
+              <li>Привезём комплект на переобувку к назначенному времени</li>
+            </ul>
+            <a href="#booking" class="btn btn--dark btn--lg">Оставить шины на хранение</a>
+          </div>
+          <div class="storage__plans">
+            <div class="plan">
+              <span class="plan__name">Шины</span>
+              <span class="plan__price">2 500 ₽</span>
+              <span class="plan__note">за сезон, до R17</span>
+            </div>
+            <div class="plan plan--featured">
+              <span class="plan__badge">Хит</span>
+              <span class="plan__name">Колёса в сборе</span>
+              <span class="plan__price">3 200 ₽</span>
+              <span class="plan__note">за сезон, до R19</span>
+            </div>
+            <div class="plan">
+              <span class="plan__name">Год (2 сезона)</span>
+              <span class="plan__price">5 400 ₽</span>
+              <span class="plan__note">экономия 15%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ REVIEWS ============ -->
+    <section class="section section--alt" id="reviews">
+      <div class="container">
+        <div class="section__head section__head--row reveal">
+          <div>
+            <span class="eyebrow">Отзывы</span>
+            <h2 class="section__title">Нам доверяют</h2>
+          </div>
+          <div class="rating">
+            <div class="rating__score">4.9</div>
+            <div>
+              <div class="stars" aria-label="5 звёзд">★★★★★</div>
+              <small>1 280 отзывов на картах</small>
+            </div>
+          </div>
+        </div>
+
+        <div class="reviews">
+          <figure class="card review reveal">
+            <div class="stars">★★★★★</div>
+            <blockquote>Записался вечером на утро, приехал — меня сразу загнали в бокс. Через 25 минут уже уезжал. Руль на трассе больше не трясёт.</blockquote>
+            <figcaption><span class="avatar" style="--h:28">А</span><div><b>Алексей</b><small>Kia Sportage</small></div></figcaption>
+          </figure>
+          <figure class="card review reveal">
+            <div class="stars">★★★★★</div>
+            <blockquote>Очень чисто и уютно, пока ждала — выпила кофе и посмотрела на экране, как работают с моей машиной. Цена совпала с калькулятором.</blockquote>
+            <figcaption><span class="avatar" style="--h:340">М</span><div><b>Марина</b><small>VW Polo</small></div></figcaption>
+          </figure>
+          <figure class="card review reveal">
+            <div class="stars">★★★★★</div>
+            <blockquote>Поймал боковой порез — в двух местах сказали только менять. Здесь сделали вулканизацию, езжу уже полгода без проблем.</blockquote>
+            <figcaption><span class="avatar" style="--h:200">Д</span><div><b>Дмитрий</b><small>Toyota Land Cruiser</small></div></figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ BOOKING ============ -->
+    <section class="section" id="booking">
+      <div class="container">
+        <div class="booking reveal">
+          <div class="booking__intro">
+            <span class="eyebrow">Онлайн-запись</span>
+            <h2 class="section__title">Выберите удобное время</h2>
+            <p class="section__lead">Подтвердим запись в течение 5 минут. Перенести или отменить можно по ссылке из SMS.</p>
+            <div class="booking__perks">
+              <div><b>−10%</b><span>на первый визит</span></div>
+              <div><b>0 ₽</b><span>за ожидание</span></div>
+              <div><b>24/7</b><span>приём заявок</span></div>
+            </div>
+          </div>
+
+          <form class="form" id="bookingForm" novalidate>
+            <div class="form__row">
+              <label class="input">
+                <span>Ваше имя</span>
+                <input type="text" name="name" placeholder="Иван" autocomplete="given-name" required />
+              </label>
+              <label class="input">
+                <span>Телефон</span>
+                <input type="tel" name="phone" placeholder="+7 (___) ___-__-__" autocomplete="tel" required />
+              </label>
+            </div>
+            <label class="input">
+              <span>Услуга</span>
+              <select name="service" id="serviceSelect">
+                <option>Сезонная переобувка</option>
+                <option>Балансировка</option>
+                <option>Ремонт прокола</option>
+                <option>Правка дисков</option>
+                <option>Сезонное хранение</option>
+              </select>
+            </label>
+
+            <div class="input">
+              <span>Дата</span>
+              <div class="days" id="days" role="radiogroup" aria-label="Дата визита"></div>
+            </div>
+            <div class="input">
+              <span>Время</span>
+              <div class="slots" id="slots" role="radiogroup" aria-label="Время визита"></div>
+            </div>
+
+            <button type="submit" class="btn btn--primary btn--lg btn--block">Подтвердить запись</button>
+            <p class="form__note">Нажимая кнопку, вы соглашаетесь с политикой обработки персональных данных.</p>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ FAQ ============ -->
+    <section class="section section--alt" id="faq">
+      <div class="container container--narrow">
+        <div class="section__head section__head--center reveal">
+          <span class="eyebrow">Вопросы</span>
+          <h2 class="section__title">Частые вопросы</h2>
+        </div>
+        <div class="faq">
+          <details class="reveal" open>
+            <summary>Можно ли приехать без записи?</summary>
+            <p>Да, но в сезон мы рекомендуем запись: так вы гарантированно не будете ждать. Живая очередь обслуживается в свободные окна.</p>
+          </details>
+          <details class="reveal">
+            <summary>Работаете ли вы с низкопрофильной резиной и RunFlat?</summary>
+            <p>Да. Для этого у нас есть безрычажный шиномонтажный станок — диск и корд шины остаются невредимыми.</p>
+          </details>
+          <details class="reveal">
+            <summary>Какая гарантия на работы?</summary>
+            <p>6 месяцев на все виды работ. Если что-то пойдёт не так — исправим бесплатно и вне очереди.</p>
+          </details>
+          <details class="reveal">
+            <summary>Как оплатить?</summary>
+            <p>Наличными, картой, по QR-коду СБП или по безналичному расчёту для юрлиц и автопарков.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ CONTACTS ============ -->
+    <section class="section" id="contacts">
+      <div class="container">
+        <div class="contacts reveal">
+          <div class="contacts__info">
+            <span class="eyebrow">Контакты</span>
+            <h2 class="section__title">Ждём вас в гости</h2>
+            <ul class="contacts__list">
+              <li>
+                <span class="contacts__icon"><svg viewBox="0 0 24 24"><path d="M12 22s7-6.2 7-12a7 7 0 1 0-14 0c0 5.8 7 12 7 12Z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="10" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/></svg></span>
+                <div><small>Адрес</small><b>ул. Автомобильная, 15</b></div>
+              </li>
+              <li>
+                <span class="contacts__icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
+                <div><small>Режим работы</small><b>Ежедневно 8:00 — 22:00</b></div>
+              </li>
+              <li>
+                <span class="contacts__icon"><svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></span>
+                <div><small>Телефон</small><a href="tel:+78000000000"><b>8 800 000-00-00</b></a></div>
+              </li>
+            </ul>
+          </div>
+          <div class="map" aria-label="Схема проезда">
+            <svg viewBox="0 0 600 400" preserveAspectRatio="xMidYMid slice">
+              <rect width="600" height="400" class="map__bg"/>
+              <g class="map__blocks">
+                <rect x="20" y="20" width="150" height="110" rx="10"/><rect x="200" y="20" width="180" height="110" rx="10"/><rect x="410" y="20" width="170" height="110" rx="10"/>
+                <rect x="20" y="170" width="150" height="90" rx="10"/><rect x="410" y="170" width="170" height="90" rx="10"/>
+                <rect x="20" y="300" width="260" height="80" rx="10"/><rect x="310" y="300" width="270" height="80" rx="10"/>
+              </g>
+              <g class="map__park"><rect x="200" y="170" width="180" height="90" rx="10"/></g>
+              <path d="M0 150 H600 M0 280 H600 M185 0 V400 M395 0 V400" class="map__road"/>
+              <path d="M0 150 H600 M0 280 H600 M185 0 V400 M395 0 V400" class="map__road-line"/>
+              <path d="M40 280 H185 V215 H260" class="map__route"/>
+              <g transform="translate(290 215)">
+                <circle r="34" class="map__pulse"/>
+                <circle r="18" class="map__pin"/>
+                <circle r="6" fill="#0d0e11"/>
+              </g>
+            </svg>
+            <span class="map__tag">Протектор • въезд со двора</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ FOOTER ============ -->
+  <footer class="footer">
+    <div class="container footer__inner">
+      <a href="#top" class="logo">
+        <span class="logo__mark" aria-hidden="true">
+          <svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="15" fill="none" stroke="currentColor" stroke-width="6" stroke-dasharray="4 2.3"/><circle cx="20" cy="20" r="5" fill="currentColor"/></svg>
+        </span>
+        <span class="logo__text">Протектор</span>
+      </a>
+      <p>© <span id="year">2026</span> Протектор. Шиномонтаж и хранение шин.</p>
+      <div class="footer__links">
+        <a href="#services">Услуги</a><a href="#prices">Цены</a><a href="#booking">Запись</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Toast -->
+  <div class="toast" id="toast" role="status" aria-live="polite">
+    <span class="toast__icon"><svg viewBox="0 0 24 24"><path d="m5 12 4.5 4.5L19 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+    <div><b id="toastTitle">Вы записаны!</b><small id="toastText"></small></div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

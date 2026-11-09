@@ -1,0 +1,66 @@
+[package]
+name = "rastkraft"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+macroquad = { version = "0.4", features = ["audio"] }
+# распаковка вшитой музыки (OGG) в версии для телефона
+lewton = "0.9"
+# сохранение шаблона текстур-пака
+png = "0.17"
+# фоны меню в JPEG (включает чтение JPEG в macroquad)
+image = { version = "0.24", default-features = false, features = ["jpeg"] }
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+opt-level = 3
+
+# сборочный скрипт пишет музыку — пусть он тоже будет быстрым
+[profile.release.build-override]
+opt-level = 3
+
+[profile.dev.build-override]
+opt-level = 3
+
+# сборка под Android: cargo quad-apk build --release (см. README)
+[package.metadata.android]
+package_name = "com.maktraxer.rastkraft"
+label = "Расткрафт"
+version_code = 1
+version_name = "0.16"
+android_version = 33
+target_sdk_version = 33
+min_sdk_version = 21
+build_targets = ["aarch64-linux-android", "armv7-linux-androideabi"]
+fullscreen = true
+# иконка приложения
+res = "android/res"
+# песни rtxx131 — одной копией (assets/music → music/*.ogg в APK)
+assets = "android/assets"
+icon = "@mipmap/ic_launcher"
+opengles_version_major = 2
+opengles_version_minor = 0
+
+# сетевая игра (по адресу, через интернет и поиск игр в локальной сети)
+[[package.metadata.android.permission]]
+name = "android.permission.INTERNET"
+
+[[package.metadata.android.permission]]
+name = "android.permission.ACCESS_NETWORK_STATE"
+
+[[package.metadata.android.permission]]
+name = "android.permission.ACCESS_WIFI_STATE"
+
+[[package.metadata.android.permission]]
+name = "android.permission.CHANGE_WIFI_MULTICAST_STATE"
+
+[package.metadata.android.activity_attributes]
+"android:screenOrientation" = "sensorLandscape"
+# без этого Android 12+ отказывается ставить APK («пакет недействителен»)
+"android:exported" = "true"

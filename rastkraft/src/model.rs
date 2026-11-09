@@ -1,0 +1,986 @@
+//! 3D-модели существ, игроков и предметов. Все треугольники за кадр собираются
+//! в один большой буфер и рисуются несколькими крупными вызовами (батчинг).
+
+use crate::blocks::{self, Shape, tile_uv};
+use crate::items::{Item, Mat};
+use crate::mobdefs::{FLY, GLOW, HOP, MOBS, Plan};
+use macroquad::prelude::*;
+use std::cell::RefCell;
+
+const MAX_BATCH: usize = 36_000;
+
+struct Batch {
+    v: Vec<Vertex>,
+    i: Vec<u16>,
+    atlas: Option<Texture2D>,
+    white: Vec2,
+}
+
+thread_local! {
+    static B: RefCell<Batch> = RefCell::new(Batch { v: Vec::with_capacity(MAX_BATCH), i: Vec::with_capacity(MAX_BATCH * 3 / 2), atlas: None, white: Vec2::ZERO });
+}
+
+/// Подготовить батч к кадру (атлас нужен для текстур).
+pub fn begin(atlas: &Texture2D) {
+    B.with(|b| {
+        let mut b = b.borrow_mut();
+        if b.atlas.is_none() {
+            b.atlas = Some(atlas.clone());
+            let (u0, v0, u1, v1) = tile_uv(blocks::white_tile());
+            b.white = vec2((u0 + u1) / 2.0, (v0 + v1) / 2.0);
+        }
+    });
+}
+
+/// Отрисовать всё накопленное.
+pub fn flush() {
+    B.with(|b| {
+        let mut b = b.borrow_mut();
+        if b.i.is_empty() {
+            return;
+        }
+        let mesh = Mesh { vertices: std::mem::take(&mut b.v), indices: std::mem::take(&mut b.i), texture: b.atlas.clone() };
+        draw_mesh(&mesh);
+        b.v = mesh.vertices;
+        b.i = mesh.indices;
+        b.v.clear();
+        b.i.clear();
+    });
+}
+
+fn quad(p: [Vec3; 4], uv: [Vec2; 4], c: Color, two_sided: bool) {
+    let full = B.with(|b| b.borrow().v.len() + 4 > MAX_BATCH);
+    if full {
+        flush();
+    }
+    B.with(|b| {
+        let mut b = b.borrow_mut();
+        let base = b.v.len() as u16;
+        for k in 0..4 {
+            b.v.push(Vertex::new2(p[k], uv[k], c));
+        }
+        b.i.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        if two_sided {
+            b.i.extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
+        }
+    });
+}
+
+fn white_uv() -> Vec2 {
+    B.with(|b| b.borrow().white)
+}
+
+/// (углы, яркость, индекс плитки: 0 — верх, 1 — бок, 2 — низ, 3 — перед)
+const FACES: [([[f32; 3]; 4], f32, usize); 6] = [
+    ([[-0.5, 0.5, 0.5], [0.5, 0.5, 0.5], [0.5, 0.5, -0.5], [-0.5, 0.5, -0.5]], 1.0, 0),
+    ([[-0.5, -0.5, -0.5], [0.5, -0.5, -0.5], [0.5, -0.5, 0.5], [-0.5, -0.5, 0.5]], 0.5, 2),
+    ([[0.5, -0.5, 0.5], [0.5, -0.5, -0.5], [0.5, 0.5, -0.5], [0.5, 0.5, 0.5]], 0.86, 3),
+    ([[-0.5, -0.5, -0.5], [-0.5, -0.5, 0.5], [-0.5, 0.5, 0.5], [-0.5, 0.5, -0.5]], 0.78, 1),
+    ([[-0.5, -0.5, 0.5], [0.5, -0.5, 0.5], [0.5, 0.5, 0.5], [-0.5, 0.5, 0.5]], 0.7, 1),
+    ([[0.5, -0.5, -0.5], [-0.5, -0.5, -0.5], [-0.5, 0.5, -0.5], [0.5, 0.5, -0.5]], 0.7, 1),
+];
+
+fn col(c: (u8, u8, u8)) -> Color {
+    Color::from_rgba(c.0, c.1, c.2, 255)
+}
+
+fn scale_c(c: Color, k: f32) -> Color {
+    Color::new(c.r * k, c.g * k, c.b * k, c.a)
+}
+
+/// Одноцветный куб.
+pub fn cube(m: Mat4, color: Color) {
+    let w = white_uv();
+    for (corners, k, _) in FACES {
+        let p = corners.map(|c| m.transform_point3(Vec3::from(c)));
+        quad(p, [w; 4], scale_c(color, k), false);
+    }
+}
+
+/// Куб с плитками: [верх, бок, низ, перед].
+pub fn tex_box(m: Mat4, tiles: [u16; 4], tint: Color) {
+    for (corners, k, ti) in FACES {
+        let (u0, v0, u1, v1) = tile_uv(tiles[ti]);
+        let uv = [vec2(u0, v1), vec2(u1, v1), vec2(u1, v0), vec2(u0, v0)];
+        let p = corners.map(|c| m.transform_point3(Vec3::from(c)));
+        quad(p, uv, scale_c(tint, k), false);
+    }
+}
+
+/// Куб с текстурами блока (верх, бок, низ).
+pub fn tex_cube(_atlas: &Texture2D, m: Mat4, tex: [u16; 3], tint: Color) {
+    tex_box(m, [tex[0], tex[1], tex[2], tex[1]], tint);
+}
+
+/// Плоский спрайт (квадрат в плоскости XY, виден с обеих сторон).
+pub fn sprite(_atlas: &Texture2D, m: Mat4, tile: u16, tint: Color) {
+    let (u0, v0, u1, v1) = tile_uv(tile);
+    let p = [[-0.5, -0.5, 0.0], [0.5, -0.5, 0.0], [0.5, 0.5, 0.0], [-0.5, 0.5, 0.0]].map(|c| m.transform_point3(Vec3::from(c)));
+    quad(p, [vec2(u0, v1), vec2(u1, v1), vec2(u1, v0), vec2(u0, v0)], tint, true);
+}
+
+/// Мягкая тень на земле.
+pub fn shadow(pos: Vec3, r: f32, alpha: f32) {
+    let (u0, v0, u1, v1) = tile_uv(blocks::shadow_tile());
+    let y = pos.y + 0.03;
+    let p = [vec3(pos.x - r, y, pos.z + r), vec3(pos.x + r, y, pos.z + r), vec3(pos.x + r, y, pos.z - r), vec3(pos.x - r, y, pos.z - r)];
+    quad(p, [vec2(u0, v1), vec2(u1, v1), vec2(u1, v0), vec2(u0, v0)], Color::new(1.0, 1.0, 1.0, alpha), false);
+}
+
+pub fn item_tile(item: Item) -> u16 {
+    match item {
+        Item::Block(b) => blocks::def(b).tex[1],
+        other => blocks::item_tile(other.sprite_index().unwrap_or(0)),
+    }
+}
+
+/// Предмет в руке (в локальных координатах кисти).
+pub fn held_item(atlas: &Texture2D, m: Mat4, item: Item, tint: Color) {
+    match item {
+        Item::Empty => {}
+        Item::Block(b) if blocks::def(b).shape != Shape::Cross => {
+            tex_cube(atlas, m * Mat4::from_scale(Vec3::splat(0.32)), blocks::def(b).tex, tint);
+        }
+        other => {
+            let s = if matches!(other, Item::Tool(..)) { 0.75 } else { 0.5 };
+            let r = Mat4::from_translation(vec3(0.0, 0.18, 0.0)) * Mat4::from_rotation_y(std::f32::consts::FRAC_PI_2) * Mat4::from_rotation_z(-0.8);
+            let _ = atlas;
+            extruded(m * r * Mat4::from_scale(Vec3::splat(s)), item_tile(other), tint);
+        }
+    }
+}
+
+fn rx(a: f32) -> Mat4 {
+    Mat4::from_rotation_x(a)
+}
+fn ry(a: f32) -> Mat4 {
+    Mat4::from_rotation_y(a)
+}
+fn rz(a: f32) -> Mat4 {
+    Mat4::from_rotation_z(a)
+}
+fn t(x: f32, y: f32, z: f32) -> Mat4 {
+    Mat4::from_translation(vec3(x, y, z))
+}
+fn s3(x: f32, y: f32, z: f32) -> Mat4 {
+    Mat4::from_scale(vec3(x, y, z))
+}
+
+pub struct Anim {
+    pub walk: f32,
+    pub speed: f32,
+    pub attack: f32,
+    pub hurt: bool,
+    pub dying: f32,
+    pub t: f32,
+    pub light: f32,
+    pub head_yaw: f32,
+    pub head_pitch: f32,
+    /// Множитель размера (детёныши меньше).
+    pub scale: f32,
+}
+
+/// Тело существа № `mob` из таблицы.
+pub fn draw_mob(mob: usize, pos: Vec3, yaw: f32, a: &Anim) {
+    let def = &MOBS[mob];
+    let [body_t, face_t, limb_t] = blocks::mob_tiles(mob);
+    let glow = def.flags & GLOW != 0;
+    let light = if glow { 1.0 } else { a.light };
+    let tint = {
+        let c = if a.hurt { Color::new(1.0, 0.45, 0.45, 1.0) } else { WHITE };
+        scale_c(c, light)
+    };
+    let body = |m: Mat4| tex_box(m, [body_t, body_t, body_t, body_t], tint);
+    let limb = |m: Mat4| tex_box(m, [limb_t, limb_t, limb_t, limb_t], tint);
+    let head = |m: Mat4| tex_box(m, [body_t, body_t, body_t, face_t], tint);
+    let accent = scale_c(col(def.c3), if glow { 1.0 } else { light });
+    let dark = scale_c(col(def.c2), light * 0.55);
+
+    let sp = a.speed.min(1.2);
+    let sw = a.walk.sin() * 0.6 * sp;
+    let atk = (a.attack * std::f32::consts::PI).sin();
+    let breath = 1.0 + (a.t * 2.2).sin() * 0.018;
+    let fly = def.flags & FLY != 0;
+    let bob = if fly { (a.t * 3.0).sin() * 0.12 } else { (a.walk * 2.0).sin().abs() * 0.04 * sp };
+    let mut root = Mat4::from_translation(pos + vec3(0.0, bob, 0.0)) * ry(-yaw);
+    if a.dying > 0.0 {
+        root *= rx(a.dying.min(1.0) * std::f32::consts::FRAC_PI_2);
+    }
+    root *= Mat4::from_scale(Vec3::splat(def.scale * a.scale));
+    let r = root;
+    let hy = a.head_yaw.clamp(-0.9, 0.9);
+    let hp = a.head_pitch.clamp(-0.6, 0.6);
+    let look = ry(-hy) * rz(hp);
+    // точки крепления отличительных черт: голова (матрица, размер), спина (матрица, длина, ширина), хвост
+    let mut head_f: Option<(Mat4, f32)> = None;
+    let mut back_f: Option<(Mat4, f32, f32)> = None;
+    let mut tail_f: Option<Mat4> = None;
+
+    match def.plan {
+        Plan::Biped | Plan::Golem => {
+            let g = def.plan == Plan::Golem;
+            let (lw, lh) = if g { (0.32, 0.8) } else { (0.22, 0.75) };
+            let bw = if g { 0.8 } else { 0.5 };
+            let bh = if g { 0.9 } else { 0.72 };
+            for (z, s) in [(-0.13f32, sw), (0.13, -sw)] {
+                let leg = r * t(0.0, lh, z * if g { 1.4 } else { 1.0 }) * rz(s);
+                limb(leg * t(0.0, -lh / 2.0, 0.0) * s3(lw, lh, lw));
+                cube(leg * t(0.04, -lh + 0.05, 0.0) * s3(lw + 0.08, 0.1, lw + 0.02), dark);
+            }
+            let torso = r * t(0.0, lh + bh / 2.0, 0.0) * s3(1.0, breath, 1.0);
+            body(torso * s3(0.34, bh, bw));
+            if g {
+                // наплечники и светящееся ядро
+                body(r * t(0.0, lh + bh - 0.05, -bw / 2.0 - 0.05) * s3(0.4, 0.22, 0.3));
+                body(r * t(0.0, lh + bh - 0.05, bw / 2.0 + 0.05) * s3(0.4, 0.22, 0.3));
+                if glow {
+                    cube(r * t(0.18, lh + bh * 0.55, 0.0) * s3(0.04, 0.18, 0.18), accent);
+                }
+            }
+            let sh = lh + bh - 0.08;
+            let arm_len = bh * if g { 1.15 } else { 0.95 };
+            for (z, s, k) in [(-bw / 2.0 - 0.11, -sw - atk * 1.6, 1.0f32), (bw / 2.0 + 0.11, sw - atk * 1.2, -1.0)] {
+                let arm = r * t(0.0, sh, z) * rz(s) * rx(0.06 * k);
+                limb(arm * t(0.0, -arm_len / 2.0, 0.0) * s3(0.2, arm_len, 0.2));
+                let hand = if g { scale_c(col(def.c2), light * 0.8) } else { scale_c(col(def.c3), light).with_alpha(1.0) };
+                let hand = if glow && !g { scale_c(col(def.c2), light) } else { hand };
+                cube(arm * t(0.0, -arm_len - 0.04, 0.0) * s3(0.21, 0.1, 0.21), hand);
+            }
+            let hs = if g { 0.5 } else { 0.46 };
+            let hm = r * t(0.0, lh + bh + hs / 2.0, 0.0) * look;
+            head(hm * Mat4::from_scale(Vec3::splat(hs)));
+            head_f = Some((hm, hs));
+            back_f = Some((r * t(-0.17, lh + bh * 0.62, 0.0), bh, bw));
+            if def.hab == crate::mobdefs::Hab::Village && def.friendly && !matches!(traits(mob), [Trait::WizardHat | Trait::StrawHat | Trait::Turban | Trait::Hood | Trait::MinerHelmet, ..]) {
+                // шляпа жителя
+                let hat = scale_c(col(def.c2), light * 0.9);
+                cube(hm * t(0.0, hs / 2.0 + 0.02, 0.0) * s3(hs + 0.16, 0.04, hs + 0.16), hat);
+                cube(hm * t(0.0, hs / 2.0 + 0.1, 0.0) * s3(hs * 0.7, 0.14, hs * 0.7), hat);
+            }
+            if glow && !g {
+                cube(hm * t(hs / 2.0 + 0.005, hs * 0.08, -0.1) * s3(0.02, 0.06, 0.07), accent);
+                cube(hm * t(hs / 2.0 + 0.005, hs * 0.08, 0.1) * s3(0.02, 0.06, 0.07), accent);
+            }
+        }
+        Plan::Quad => {
+            let (bl, bh, bw) = (1.0, 0.55, 0.6);
+            let leg_h = 0.45;
+            let hop = def.flags & HOP != 0;
+            for (lx, lz, ph) in [(0.36, 0.2, 1.0), (0.36, -0.2, -1.0), (-0.36, 0.2, -1.0), (-0.36, -0.2, 1.0)] {
+                let ang = if hop { -(a.walk * 0.5).sin().abs() * 0.5 * ph } else { sw * ph };
+                let leg = r * t(lx, leg_h, lz) * rz(ang);
+                limb(leg * t(0.0, -leg_h / 2.0, 0.0) * s3(0.16, leg_h, 0.16));
+                cube(leg * t(0.0, -leg_h + 0.04, 0.0) * s3(0.18, 0.08, 0.18), dark);
+            }
+            let torso = r * t(0.0, leg_h + bh / 2.0, 0.0) * s3(1.0, breath, 1.0);
+            body(torso * s3(bl, bh, bw));
+            if matches!(def.drop_icon, crate::icons::Icon::Mane) {
+                // пушистая шерсть
+                body(torso * s3(bl + 0.12, bh + 0.12, bw + 0.12));
+            }
+            // хвост
+            let wag = (a.t * 7.0).sin() * 0.4;
+            limb(r * t(-bl / 2.0, leg_h + bh * 0.8, 0.0) * ry(wag) * rz(0.7) * t(-0.12, 0.0, 0.0) * s3(0.26, 0.09, 0.09));
+            // шея и голова
+            let nod = (a.walk * 2.0).sin() * 0.04 - atk * 0.25;
+            let hm = r * t(bl / 2.0 + 0.12, leg_h + bh + 0.05 + nod, 0.0) * look;
+            head(hm * Mat4::from_scale(Vec3::splat(0.42)));
+            head_f = Some((hm, 0.42));
+            back_f = Some((r * t(0.0, leg_h + bh, 0.0), bl, bw));
+            tail_f = Some(r * t(-bl / 2.0, leg_h + bh * 0.8, 0.0));
+            limb(hm * t(0.24, -0.08, 0.0) * s3(0.14, 0.18, 0.24));
+            let ear = (a.t * 3.0 + pos.x).sin().max(0.0) * 0.3;
+            for z in [-0.14f32, 0.14] {
+                body(hm * t(-0.06, 0.24, z) * rx(z.signum() * (0.3 + ear)) * s3(0.08, 0.16, 0.1));
+            }
+            if matches!(def.drop_icon, crate::icons::Icon::Horn) {
+                let horn = scale_c(Color::from_rgba(230, 220, 190, 255), light);
+                for z in [-0.12f32, 0.12] {
+                    let base = hm * t(-0.02, 0.22, z) * rx(z.signum() * 0.4);
+                    cube(base * t(0.0, 0.18, 0.0) * s3(0.05, 0.36, 0.05), horn);
+                    cube(base * t(0.0, 0.3, 0.0) * rz(0.8) * t(0.0, 0.08, 0.0) * s3(0.04, 0.16, 0.04), horn);
+                }
+            }
+        }
+        Plan::Slime => {
+            let hopv = (a.walk * 0.8).sin().abs();
+            let sq = 1.0 + (1.0 - hopv) * 0.15;
+            let m = r * t(0.0, 0.45 * (2.0 - sq) + hopv * 0.2, 0.0) * s3(0.9 * sq, 0.9 * (2.0 - sq), 0.9 * sq);
+            limb(m * Mat4::from_scale(Vec3::splat(0.42)));
+            head_f = Some((m, 1.0));
+            let mut outer = tint;
+            outer.a = 0.72;
+            tex_box(m, [body_t, body_t, body_t, face_t], outer);
+        }
+        Plan::Bird => {
+            let flap = if fly { (a.t * 14.0).sin() * 0.9 } else { (a.walk).sin() * 0.25 };
+            let y0 = 0.3;
+            if !fly {
+                for (z, s) in [(-0.1f32, sw), (0.1, -sw)] {
+                    let leg = r * t(0.0, y0, z) * rz(s);
+                    cube(leg * t(0.0, -0.15, 0.0) * s3(0.05, 0.3, 0.05), accent);
+                    cube(leg * t(0.05, -0.3, 0.0) * s3(0.14, 0.03, 0.1), accent);
+                }
+            }
+            let torso = r * t(0.0, y0 + 0.2, 0.0) * s3(1.0, breath, 1.0);
+            body(torso * s3(0.6, 0.38, 0.36));
+            for (z, f) in [(-0.18f32, flap), (0.18, -flap)] {
+                let wing = r * t(0.0, y0 + 0.32, z) * rx(f);
+                body(wing * t(0.0, 0.0, z.signum() * 0.25) * s3(0.42, 0.05, 0.5));
+                limb(wing * t(-0.06, 0.0, z.signum() * 0.55) * s3(0.3, 0.04, 0.18));
+            }
+            for k in 0..3 {
+                let fan = (k as f32 - 1.0) * 0.35;
+                limb(r * t(-0.34, y0 + 0.24, 0.0) * ry(fan) * rz(0.25) * t(-0.12, 0.0, 0.0) * s3(0.26, 0.04, 0.09));
+            }
+            let hm = r * t(0.34, y0 + 0.5, 0.0) * look;
+            head(hm * Mat4::from_scale(Vec3::splat(0.3)));
+            head_f = Some((hm, 0.3));
+            back_f = Some((r * t(0.0, y0 + 0.39, 0.0), 0.6, 0.36));
+            tail_f = Some(r * t(-0.34, y0 + 0.24, 0.0));
+            cube(hm * t(0.2, -0.04, 0.0) * s3(0.14, 0.07, 0.09), accent);
+            if def.friendly {
+                body(hm * t(-0.04, 0.18, 0.0) * rz(-0.4) * s3(0.12, 0.08, 0.04));
+            }
+        }
+        Plan::Spider => {
+            let torso = r * t(-0.35, 0.42, 0.0) * s3(1.0, breath, 1.0);
+            body(torso * s3(0.62, 0.48, 0.58));
+            body(r * t(0.12, 0.36, 0.0) * s3(0.36, 0.3, 0.38));
+            head(r * t(0.36, 0.38, 0.0) * look * s3(0.24, 0.24, 0.3));
+            head_f = Some((r * t(0.36, 0.38, 0.0) * look, 0.26));
+            back_f = Some((r * t(-0.35, 0.66, 0.0), 0.62, 0.58));
+            tail_f = Some(r * t(-0.66, 0.45, 0.0));
+            cube(r * t(0.48, 0.27, -0.06) * rz(0.4) * s3(0.03, 0.1, 0.03), accent);
+            cube(r * t(0.48, 0.27, 0.06) * rz(0.4) * s3(0.03, 0.1, 0.03), accent);
+            for i in 0..4 {
+                let x = 0.24 - i as f32 * 0.15;
+                let w = (a.walk + i as f32 * 1.3).sin() * 0.3 * sp;
+                for side in [-1.0f32, 1.0] {
+                    let hip = r * t(x, 0.4, side * 0.16) * ry(side * (w + (i as f32 - 1.5) * 0.25)) * rx(side * -0.6);
+                    limb(hip * t(0.0, 0.0, side * 0.22) * s3(0.06, 0.06, 0.44));
+                    let knee = hip * t(0.0, 0.0, side * 0.42) * rx(side * 1.4);
+                    limb(knee * t(0.0, 0.0, side * 0.2) * s3(0.05, 0.05, 0.42));
+                }
+            }
+        }
+        Plan::Fish => {
+            let segs = 4;
+            for i in 0..segs {
+                let x = 0.45 - i as f32 * 0.32;
+                let wig = (a.t * 6.0 - i as f32 * 0.9).sin() * 0.12 * i as f32 / segs as f32 * 2.0;
+                let sz = 0.42 - i as f32 * 0.07;
+                let m = r * t(x, 0.3, wig) * s3(0.34, sz, sz * 0.8);
+                if i == 0 { head(m) } else { body(m) }
+            }
+            head_f = Some((r * t(0.45, 0.3, 0.0), 0.4));
+            back_f = Some((r * t(0.0, 0.5, 0.0), 1.2, 0.3));
+            let tw = (a.t * 6.0).sin() * 0.5;
+            limb(r * t(-0.85, 0.3, 0.0) * ry(tw) * t(-0.12, 0.0, 0.0) * s3(0.25, 0.36, 0.05));
+            limb(r * t(0.0, 0.55, 0.0) * rz(-0.3) * s3(0.3, 0.16, 0.04));
+            for z in [-0.2f32, 0.2] {
+                limb(r * t(0.3, 0.2, z) * rx(z.signum() * (0.6 + (a.t * 5.0).sin() * 0.3)) * s3(0.16, 0.03, 0.14));
+            }
+        }
+        Plan::Wisp => {
+            let pulse = 1.0 + (a.t * 4.0).sin() * 0.08;
+            head_f = Some((r * t(0.0, 0.6, 0.0), 0.5 * pulse));
+            let core = r * t(0.0, 0.6, 0.0) * ry(a.t) * Mat4::from_scale(Vec3::splat(0.5 * pulse));
+            tex_box(core, [body_t, body_t, body_t, face_t], WHITE);
+            let mut halo = col(def.c2);
+            halo.a = 0.35;
+            cube(r * t(0.0, 0.6, 0.0) * ry(-a.t * 0.7) * Mat4::from_scale(Vec3::splat(0.78 * pulse)), halo);
+            for k in 0..4 {
+                let ang = a.t * 2.0 + k as f32 * 1.571;
+                let p = vec3(ang.cos() * 0.62, 0.6 + (a.t * 3.0 + k as f32).sin() * 0.18, ang.sin() * 0.62);
+                cube(r * Mat4::from_translation(p) * Mat4::from_scale(Vec3::splat(0.09)), accent);
+            }
+        }
+    }
+
+    // ---------- отличительные черты: сразу видно, кто это ----------
+    let c = |rgb: (u8, u8, u8)| scale_c(col(rgb), light);
+    let c1 = c(def.c1);
+    let c2 = c(def.c2);
+    let gold = scale_c(col((250, 200, 60)), light.max(0.7));
+    let bone = c((236, 226, 200));
+    for tr in traits(mob) {
+        match (*tr, head_f, back_f, tail_f) {
+            (Trait::LongEars, Some((h, u)), _, _) => {
+                for z in [-0.2f32, 0.2] {
+                    body(h * t(-0.12 * u, u * 0.85, z * u) * rx(z.signum() * 0.15) * s3(0.12 * u, 0.75 * u, 0.2 * u));
+                    cube(h * t(-0.05 * u, u * 0.85, z * u) * rx(z.signum() * 0.15) * s3(0.04 * u, 0.55 * u, 0.12 * u), c((250, 180, 190)));
+                }
+            }
+            (Trait::PointEars, Some((h, u)), _, _) => {
+                for z in [-0.28f32, 0.28] {
+                    body(h * t(-0.05 * u, u * 0.62, z * u) * rx(z.signum() * 0.25) * s3(0.12 * u, 0.32 * u, 0.2 * u));
+                    cube(h * t(-0.05 * u, u * 0.85, z * u * 1.1) * s3(0.08 * u, 0.1 * u, 0.08 * u), c2);
+                }
+            }
+            (Trait::Antlers, Some((h, u)), _, _) => {
+                let ant = c((196, 160, 110));
+                for z in [-0.25f32, 0.25] {
+                    let b = h * t(-0.1 * u, u * 0.5, z * u) * rx(z.signum() * 0.35);
+                    cube(b * t(0.0, 0.45 * u, 0.0) * s3(0.08 * u, 0.9 * u, 0.08 * u), ant);
+                    for (k, y) in [(0.5f32, 0.35f32), (-0.6, 0.65), (0.6, 0.85)] {
+                        cube(b * t(0.0, y * u, 0.0) * rz(k) * t(0.0, 0.18 * u, 0.0) * s3(0.06 * u, 0.36 * u, 0.06 * u), ant);
+                    }
+                }
+            }
+            (Trait::Horns, Some((h, u)), _, _) => {
+                for z in [-0.3f32, 0.3] {
+                    let b = h * t(0.0, u * 0.5, z * u) * rx(z.signum() * 0.7);
+                    cube(b * t(0.0, 0.18 * u, 0.0) * s3(0.12 * u, 0.36 * u, 0.12 * u), bone);
+                    cube(b * t(0.0, 0.36 * u, 0.0) * rz(-0.9) * t(0.0, 0.1 * u, 0.0) * s3(0.09 * u, 0.22 * u, 0.09 * u), bone);
+                }
+            }
+            (Trait::UnicornHorn, Some((h, u)), _, _) => {
+                for k in 0..4 {
+                    let f = k as f32;
+                    cube(h * t(u * 0.3 + f * 0.04 * u, u * 0.55 + f * 0.16 * u, 0.0) * ry(f * 0.6) * s3((0.12 - f * 0.025) * u, 0.17 * u, (0.12 - f * 0.025) * u), gold);
+                }
+            }
+            (Trait::Crest, Some((h, u)), _, _) => {
+                for k in 0..3 {
+                    cube(h * t((0.2 - k as f32 * 0.2) * u, u * (0.62 + (k % 2) as f32 * 0.06), 0.0) * s3(0.18 * u, 0.28 * u, 0.08 * u), c((230, 40, 40)));
+                }
+                cube(h * t(u * 0.52, -u * 0.32, 0.0) * s3(0.08 * u, 0.22 * u, 0.1 * u), c((230, 40, 40)));
+            }
+            (Trait::EarTufts, Some((h, u)), _, _) => {
+                for z in [-0.32f32, 0.32] {
+                    cube(h * t(0.0, u * 0.62, z * u) * rx(z.signum() * 0.3) * s3(0.12 * u, 0.3 * u, 0.1 * u), c2);
+                }
+                for z in [-0.18f32, 0.18] {
+                    cube(h * t(u * 0.5, u * 0.1, z * u) * s3(0.03 * u, 0.26 * u, 0.26 * u), c((250, 200, 40)));
+                }
+            }
+            (Trait::WizardHat, Some((h, u)), _, _) => {
+                let hat = c((70, 40, 120));
+                cube(h * t(0.0, u * 0.54, 0.0) * s3(1.5 * u, 0.08 * u, 1.5 * u), hat);
+                for k in 0..4 {
+                    let f = k as f32;
+                    cube(h * t(-f * 0.06 * u, u * (0.72 + f * 0.24), 0.0) * rz(f * 0.12) * s3((0.8 - f * 0.18) * u, 0.26 * u, (0.8 - f * 0.18) * u), hat);
+                }
+                cube(h * t(u * 0.42, u * 0.75, 0.0) * s3(0.04 * u, 0.14 * u, 0.14 * u), gold);
+            }
+            (Trait::Crown, Some((h, u)), _, _) => {
+                cube(h * t(0.0, u * 0.58, 0.0) * s3(0.9 * u, 0.16 * u, 0.9 * u), gold);
+                for (x, z) in [(-0.38f32, -0.38f32), (0.38, -0.38), (-0.38, 0.38), (0.38, 0.38), (0.38, 0.0), (-0.38, 0.0), (0.0, 0.38), (0.0, -0.38)] {
+                    cube(h * t(x * u, u * 0.74, z * u) * s3(0.12 * u, 0.2 * u, 0.12 * u), gold);
+                }
+                cube(h * t(u * 0.46, u * 0.58, 0.0) * s3(0.04 * u, 0.1 * u, 0.1 * u), c((230, 30, 60)));
+            }
+            (Trait::Hood, Some((h, u)), _, _) => {
+                let hood = scale_c(col(def.c2), light * 0.7);
+                cube(h * t(-0.12 * u, 0.06 * u, 0.0) * s3(0.86 * u, 1.14 * u, 1.14 * u), hood);
+                cube(h * t(-0.5 * u, -0.1 * u, 0.0) * rz(0.5) * s3(0.3 * u, 0.5 * u, 0.6 * u), hood);
+            }
+            (Trait::Turban, Some((h, u)), _, _) => {
+                cube(h * t(0.0, u * 0.62, 0.0) * s3(1.1 * u, 0.36 * u, 1.1 * u), c((244, 240, 228)));
+                cube(h * t(u * 0.56, u * 0.62, 0.0) * s3(0.06 * u, 0.14 * u, 0.14 * u), c((220, 40, 60)));
+            }
+            (Trait::StrawHat, Some((h, u)), _, _) => {
+                let straw = c((222, 190, 100));
+                cube(h * t(0.0, u * 0.54, 0.0) * s3(1.9 * u, 0.06 * u, 1.9 * u), straw);
+                cube(h * t(0.0, u * 0.66, 0.0) * s3(0.9 * u, 0.24 * u, 0.9 * u), straw);
+                cube(h * t(0.0, u * 0.58, 0.0) * s3(0.94 * u, 0.06 * u, 0.94 * u), c((180, 50, 40)));
+            }
+            (Trait::MinerHelmet, Some((h, u)), _, _) => {
+                cube(h * t(0.0, u * 0.56, 0.0) * s3(1.1 * u, 0.2 * u, 1.1 * u), c((230, 190, 40)));
+                cube(h * t(u * 0.56, u * 0.5, 0.0) * s3(0.08 * u, 0.2 * u, 0.2 * u), scale_c(col((255, 250, 200)), 1.0));
+            }
+            (Trait::Plume, Some((h, u)), _, _) => {
+                let steel = c((170, 176, 190));
+                cube(h * t(0.0, u * 0.12, 0.0) * s3(1.1 * u, 1.04 * u, 1.1 * u), steel);
+                cube(h * t(u * 0.56, 0.0, 0.0) * s3(0.04 * u, 0.12 * u, 0.9 * u), c((20, 20, 24)));
+                for k in 0..4 {
+                    cube(h * t((0.3 - k as f32 * 0.2) * u, u * (0.78 + (k % 2) as f32 * 0.06), 0.0) * s3(0.2 * u, 0.32 * u, 0.1 * u), c((220, 40, 40)));
+                }
+            }
+            (Trait::Mask, Some((h, u)), _, _) => {
+                cube(h * t(u * 0.51, -u * 0.18, 0.0) * s3(0.04 * u, 0.3 * u, 1.04 * u), c((150, 30, 30)));
+                cube(h * t(-u * 0.55, -u * 0.1, 0.0) * s3(0.12 * u, 0.12 * u, 0.12 * u), c((150, 30, 30)));
+            }
+            (Trait::Halo, Some((h, u)), _, _) => {
+                let hy = u * 0.95 + (a.t * 2.0).sin() * 0.03;
+                for (x, z, sx, sz) in [(0.0f32, -0.4f32, 0.9f32, 0.1f32), (0.0, 0.4, 0.9, 0.1), (-0.4, 0.0, 0.1, 0.9), (0.4, 0.0, 0.1, 0.9)] {
+                    cube(h * t(x * u, hy, z * u) * s3(sx * u, 0.06 * u, sz * u), scale_c(col((255, 230, 120)), 1.0));
+                }
+            }
+            (Trait::PumpkinHead, Some((h, u)), _, _) => {
+                cube(h * s3(1.16 * u, 1.04 * u, 1.16 * u), c((236, 130, 30)));
+                for z in [-0.22f32, 0.22] {
+                    cube(h * t(u * 0.59, u * 0.12, z * u) * s3(0.02 * u, 0.18 * u, 0.16 * u), scale_c(col((255, 220, 80)), 1.0));
+                }
+                cube(h * t(u * 0.59, -u * 0.2, 0.0) * s3(0.02 * u, 0.12 * u, 0.6 * u), scale_c(col((255, 220, 80)), 1.0));
+                cube(h * t(0.0, u * 0.62, 0.0) * s3(0.12 * u, 0.2 * u, 0.12 * u), c((70, 120, 40)));
+            }
+            (Trait::Tusks, Some((h, u)), _, _) => {
+                for z in [-0.2f32, 0.2] {
+                    cube(h * t(u * 0.56, -u * 0.5, z * u) * s3(0.08 * u, 0.5 * u, 0.08 * u), bone);
+                }
+            }
+            (Trait::Snout, Some((h, u)), _, _) => {
+                cube(h * t(u * 0.58, -u * 0.12, 0.0) * s3(0.18 * u, 0.3 * u, 0.4 * u), c2);
+                for z in [-0.08f32, 0.08] {
+                    cube(h * t(u * 0.68, -u * 0.12, z * u) * s3(0.02 * u, 0.08 * u, 0.06 * u), c((60, 30, 30)));
+                }
+            }
+            (Trait::Beard, Some((h, u)), _, _) => {
+                cube(h * t(u * 0.42, -u * 0.5, 0.0) * s3(0.2 * u, 0.5 * u, 0.7 * u), c((210, 206, 200)));
+            }
+            (Trait::MushroomCap, Some((h, u)), _, _) => {
+                cube(h * t(0.0, u * 0.66, 0.0) * s3(1.7 * u, 0.36 * u, 1.7 * u), c((210, 50, 40)));
+                for (x, z) in [(0.4f32, 0.3f32), (-0.3, -0.5), (-0.5, 0.4), (0.2, -0.3)] {
+                    cube(h * t(x * u, u * 0.85, z * u) * s3(0.2 * u, 0.04 * u, 0.2 * u), c((250, 246, 236)));
+                }
+            }
+            (Trait::CarrotNose, Some((h, u)), _, _) => {
+                cube(h * t(u * 0.7, 0.0, 0.0) * s3(0.4 * u, 0.1 * u, 0.1 * u), c((240, 120, 30)));
+                cube(h * t(0.0, u * 0.66, 0.0) * s3(0.7 * u, 0.32 * u, 0.7 * u), c((40, 40, 50)));
+            }
+            (Trait::GlowEyes, Some((h, u)), _, _) => {
+                for z in [-0.18f32, 0.18] {
+                    cube(h * t(u * 0.505, u * 0.08, z * u) * s3(0.02 * u, 0.12 * u, 0.14 * u), scale_c(col((255, 60, 40)), 1.0));
+                }
+            }
+            (Trait::Spikes, _, Some((b, l, w)), _) => {
+                for k in 0..5 {
+                    let x = (k as f32 / 4.0 - 0.5) * l * 0.8;
+                    for z in [-0.25f32, 0.0, 0.25] {
+                        cube(b * t(x, 0.08 + (0.25 - z.abs()) * 0.3, z * w) * rz(-0.4) * s3(0.06, 0.24, 0.06), c2);
+                    }
+                }
+            }
+            (Trait::Shell, _, Some((b, l, w)), _) => {
+                cube(b * t(0.0, 0.08, 0.0) * s3(l * 1.08, 0.22, w * 1.16), c2);
+                cube(b * t(0.0, 0.22, 0.0) * s3(l * 0.8, 0.14, w * 0.86), scale_c(col(def.c2), light * 0.8));
+                for (x, z) in [(-0.2f32, -0.15f32), (0.2, 0.15), (0.0, 0.0), (-0.2, 0.15), (0.2, -0.15)] {
+                    cube(b * t(x * l, 0.3, z * w * 2.0) * s3(0.14, 0.04, 0.14), c((240, 220, 140)));
+                }
+            }
+            (Trait::Hump, _, Some((b, l, w)), _) => {
+                for x in [-0.2f32, 0.2] {
+                    body(b * t(x * l, 0.12, 0.0) * s3(0.3, 0.3, w * 0.7));
+                }
+            }
+            (Trait::Backpack, _, Some((b, _, w)), _) => {
+                cube(b * t(-0.12, 0.0, 0.0) * s3(0.22, 0.4, w * 0.8), c((140, 90, 50)));
+                cube(b * t(-0.2, 0.26, 0.0) * s3(0.3, 0.14, w * 0.9), c((100, 160, 210)));
+            }
+            (Trait::Cape, _, Some((b, l, w)), _) => {
+                cube(b * t(-0.04, -l * 0.35, 0.0) * rz(-0.08) * s3(0.04, l * 1.2, w * 1.05), c((140, 20, 30)));
+            }
+            (Trait::AngelWings, _, Some((b, _, w)), _) => {
+                let f = (a.t * 3.0).sin() * 0.25;
+                for z in [-1.0f32, 1.0] {
+                    cube(b * t(-0.1, 0.1, z * w * 0.4) * rx(z * (0.9 + f)) * t(0.0, 0.0, z * 0.35) * s3(0.05, 0.36, 0.7), scale_c(col((250, 250, 250)), light.max(0.8)));
+                }
+            }
+            (Trait::BushyTail, _, _, Some(tl)) => {
+                let wag = (a.t * 5.0).sin() * 0.3;
+                body(tl * ry(wag) * rz(1.1) * t(-0.2, 0.0, 0.0) * s3(0.5, 0.26, 0.26));
+                cube(tl * ry(wag) * rz(1.1) * t(-0.48, 0.0, 0.0) * s3(0.12, 0.2, 0.2), c((250, 250, 250)));
+            }
+            (Trait::FlatTail, _, _, Some(tl)) => {
+                cube(tl * rz(-0.2) * t(-0.25, -0.15, 0.0) * s3(0.5, 0.06, 0.3), c((80, 60, 50)));
+            }
+            (Trait::FanTail, _, _, Some(tl)) => {
+                for k in 0..7 {
+                    let ang = (k as f32 - 3.0) * 0.32;
+                    let cc = if k % 2 == 0 { c(def.c3) } else { c2 };
+                    cube(tl * rx(ang) * rz(0.9) * t(-0.3, 0.0, 0.0) * s3(0.6, 0.04, 0.1), cc);
+                }
+            }
+            (Trait::Stinger, _, _, Some(tl)) => {
+                cube(tl * t(-0.08, 0.0, 0.0) * s3(0.16, 0.06, 0.06), c((30, 30, 30)));
+            }
+            (Trait::ScorpionTail, _, _, Some(tl)) => {
+                let mut m = tl;
+                for k in 0..4 {
+                    m = m * rz(-0.55) * t(-0.12, 0.0, 0.0);
+                    cube(m * s3(0.18 - k as f32 * 0.02, 0.14, 0.14), c2);
+                }
+                cube(m * rz(-0.6) * t(-0.12, 0.0, 0.0) * s3(0.16, 0.08, 0.08), c((240, 60, 40)));
+            }
+            (Trait::Claws, Some((h, u)), _, _) => {
+                for z in [-1.0f32, 1.0] {
+                    let base = h * t(u * 0.5, -u * 0.3, z * u * 0.9);
+                    cube(base * t(0.15, 0.0, 0.0) * s3(0.3, 0.12, 0.12), c2);
+                    cube(base * t(0.36, 0.06, 0.0) * rz(-0.4 + atk) * s3(0.2, 0.06, 0.16), c2);
+                    cube(base * t(0.36, -0.06, 0.0) * rz(0.4 - atk) * s3(0.2, 0.06, 0.16), c2);
+                }
+            }
+            _ => {}
+        }
+    }
+    let _ = c1;
+}
+
+pub fn armor_color(item: Item) -> Option<Color> {
+    if let Item::Armor(_, m) = item {
+        let (c, _, _) = m.colors();
+        Some(Color::from_rgba(c[0], c[1], c[2], 255))
+    } else {
+        None
+    }
+}
+
+pub struct PlayerLook {
+    pub skin: Color,
+    pub shirt: Color,
+    pub pants: Color,
+    pub hair: Color,
+}
+
+pub const SHIRTS: [(u8, u8, u8); 8] = [(60, 120, 200), (200, 70, 60), (70, 160, 90), (230, 170, 40), (140, 80, 190), (40, 40, 50), (240, 240, 240), (240, 130, 170)];
+pub const PANTS: [(u8, u8, u8); 6] = [(50, 50, 90), (40, 40, 44), (110, 80, 50), (60, 100, 60), (150, 40, 40), (180, 180, 190)];
+pub const HAIRS: [(u8, u8, u8); 6] = [(70, 46, 30), (30, 26, 24), (200, 160, 80), (150, 60, 30), (230, 230, 230), (90, 60, 160)];
+pub const SKINS: [(u8, u8, u8); 5] = [(236, 190, 150), (200, 150, 110), (150, 100, 70), (250, 210, 180), (110, 70, 50)];
+
+/// Внешность из настроек (255 — выбрать по имени).
+pub fn look_with(choice: [u8; 4], seed: u32) -> PlayerLook {
+    let mut l = look_for(seed);
+    if choice[0] != 255 {
+        l.shirt = col(SHIRTS[choice[0] as usize % SHIRTS.len()]);
+    }
+    if choice[1] != 255 {
+        l.pants = col(PANTS[choice[1] as usize % PANTS.len()]);
+    }
+    if choice[2] != 255 {
+        l.hair = col(HAIRS[choice[2] as usize % HAIRS.len()]);
+    }
+    if choice[3] != 255 {
+        l.skin = col(SKINS[choice[3] as usize % SKINS.len()]);
+    }
+    l
+}
+
+pub fn look_for(seed: u32) -> PlayerLook {
+    let h = |k| crate::blocks::hash(seed as i32, k, 4242);
+    let shirts = [(60, 120, 200), (200, 70, 60), (70, 160, 90), (230, 170, 40), (140, 80, 190), (40, 40, 50)];
+    let sc = shirts[(h(1) * 6.0) as usize % 6];
+    let skin = [(236, 190, 150), (200, 150, 110), (150, 100, 70), (250, 210, 180)][(h(2) * 4.0) as usize % 4];
+    let hair = [(70, 46, 30), (30, 26, 24), (200, 160, 80), (150, 60, 30)][(h(3) * 4.0) as usize % 4];
+    PlayerLook { skin: col(skin), shirt: col(sc), pants: col((50, 50, 90)), hair: col(hair) }
+}
+
+/// Модель игрока (вид от третьего лица и другие игроки по сети).
+#[allow(clippy::too_many_arguments)]
+pub fn draw_player(atlas: &Texture2D, pos: Vec3, yaw: f32, pitch: f32, walk: f32, speed: f32, swing: f32, held: Item, armor: &[Item; 4], look: &PlayerLook, light: f32, hurt: bool) {
+    let lit = |c: Color| {
+        let c = if hurt { Color::new(c.r * 0.4 + 0.6, c.g * 0.5, c.b * 0.5, 1.0) } else { c };
+        scale_c(c, light)
+    };
+    shadow(pos, 0.45, 0.7);
+    let r = Mat4::from_translation(pos) * ry(-yaw);
+    let sw = walk.sin() * 0.7 * speed.min(1.0);
+    let atk = (swing * std::f32::consts::PI).sin();
+    let legs = lit(armor_color(armor[2]).unwrap_or(look.pants));
+    let boots = lit(armor_color(armor[3]).unwrap_or(Color::from_rgba(60, 40, 30, 255)));
+    let shirt = lit(armor_color(armor[1]).unwrap_or(look.shirt));
+    let skin = lit(look.skin);
+    for (z, s) in [(-0.13f32, sw), (0.13, -sw)] {
+        let leg = r * t(0.0, 0.75, z) * rz(s);
+        cube(leg * t(0.0, -0.3, 0.0) * s3(0.24, 0.6, 0.24), legs);
+        cube(leg * t(0.03, -0.66, 0.0) * s3(0.3, 0.18, 0.26), boots);
+    }
+    cube(r * t(0.0, 1.11, 0.0) * s3(0.28, 0.72, 0.5), shirt);
+    cube(r * t(0.0, 0.8, 0.0) * s3(0.3, 0.08, 0.52), lit(Color::from_rgba(60, 40, 30, 255)));
+    let la = r * t(0.0, 1.42, -0.36) * rz(-sw);
+    cube(la * t(0.0, -0.3, 0.0) * s3(0.2, 0.62, 0.2), shirt);
+    cube(la * t(0.0, -0.64, 0.0) * s3(0.2, 0.12, 0.2), skin);
+    let arm_rot = rz(sw * 0.5 - atk * 1.8 - if held != Item::Empty { 0.35 } else { 0.0 });
+    let ra = r * t(0.0, 1.42, 0.36) * arm_rot;
+    cube(ra * t(0.0, -0.3, 0.0) * s3(0.2, 0.62, 0.2), shirt);
+    cube(ra * t(0.0, -0.64, 0.0) * s3(0.21, 0.12, 0.21), skin);
+    held_item(atlas, ra * t(0.12, -0.66, 0.0), held, Color::new(light, light, light, 1.0));
+    let hm = r * t(0.0, 1.72, 0.0) * rz(pitch);
+    cube(hm * Mat4::from_scale(Vec3::splat(0.48)), skin);
+    cube(hm * t(-0.03, 0.17, 0.0) * s3(0.5, 0.16, 0.5), lit(look.hair));
+    cube(hm * t(-0.2, 0.0, 0.0) * s3(0.12, 0.4, 0.5), lit(look.hair));
+    for z in [-0.1f32, 0.1] {
+        cube(hm * t(0.245, 0.03, z) * s3(0.02, 0.07, 0.08), lit(Color::from_rgba(250, 250, 250, 255)));
+        cube(hm * t(0.25, 0.03, z + 0.02 * z.signum() * -1.0) * s3(0.02, 0.06, 0.04), lit(Color::from_rgba(30, 40, 80, 255)));
+    }
+    cube(hm * t(0.25, -0.12, 0.0) * s3(0.02, 0.03, 0.14), lit(Color::from_rgba(150, 80, 70, 255)));
+    if let Some(hc) = armor_color(armor[0]) {
+        cube(hm * t(-0.02, 0.12, 0.0) * s3(0.54, 0.3, 0.54), lit(hc));
+    }
+}
+
+/// Параметры анимации руки от первого лица.
+pub struct HandAnim {
+    /// Прогресс взмаха 0..1 (1 — покой).
+    pub swing: f32,
+    /// 1 — рука опущена (смена предмета), 0 — поднята.
+    pub equip: f32,
+    /// Сколько секунд уже едим (0 — не едим).
+    pub eat: f32,
+    /// Запаздывание руки за поворотом камеры (рад).
+    pub lag: Vec2,
+    /// Фаза ходьбы и сила покачивания.
+    pub walk: f32,
+    pub bob: f32,
+}
+
+thread_local! {
+    static EXTRUDED: RefCell<std::collections::HashMap<u16, Vec<([Vec3; 4], Vec2)>>> = RefCell::new(std::collections::HashMap::new());
+}
+
+/// «Объёмный» спрайт: каждый непрозрачный пиксель плитки получает боковые грани
+/// толщиной 1/16 — как вырезанный из картона предмет.
+fn extruded_sides(tile: u16) -> Vec<([Vec3; 4], Vec2)> {
+    let px = blocks::atlas_pixels();
+    let (tx, ty) = (tile as usize % blocks::ATLAS_TILES, tile as usize / blocks::ATLAS_TILES);
+    let alpha = |x: i32, y: i32| -> bool {
+        if !(0..16).contains(&x) || !(0..16).contains(&y) {
+            return false;
+        }
+        let i = ((ty * blocks::TILE + y as usize) * blocks::ATLAS + tx * blocks::TILE + x as usize) * 4;
+        px[i + 3] > 127
+    };
+    let (u0, v0, u1, v1) = tile_uv(tile);
+    let d = 0.5 / 16.0;
+    let mut out = Vec::new();
+    for y in 0..16 {
+        for x in 0..16 {
+            if !alpha(x, y) {
+                continue;
+            }
+            let uv = vec2(u0 + (u1 - u0) * (x as f32 + 0.5) / 16.0, v0 + (v1 - v0) * (y as f32 + 0.5) / 16.0);
+            // пиксель (x, y) в плоскости XY: x слева направо, y сверху вниз
+            let (xl, xr) = (x as f32 / 16.0 - 0.5, (x + 1) as f32 / 16.0 - 0.5);
+            let (yt, yb) = (0.5 - y as f32 / 16.0, 0.5 - (y + 1) as f32 / 16.0);
+            if !alpha(x - 1, y) {
+                out.push(([vec3(xl, yb, -d), vec3(xl, yb, d), vec3(xl, yt, d), vec3(xl, yt, -d)], uv));
+            }
+            if !alpha(x + 1, y) {
+                out.push(([vec3(xr, yb, d), vec3(xr, yb, -d), vec3(xr, yt, -d), vec3(xr, yt, d)], uv));
+            }
+            if !alpha(x, y - 1) {
+                out.push(([vec3(xl, yt, d), vec3(xr, yt, d), vec3(xr, yt, -d), vec3(xl, yt, -d)], uv));
+            }
+            if !alpha(x, y + 1) {
+                out.push(([vec3(xl, yb, -d), vec3(xr, yb, -d), vec3(xr, yb, d), vec3(xl, yb, d)], uv));
+            }
+        }
+    }
+    out
+}
+
+/// Объёмный предмет (спрайт с толщиной), центр в начале координат, размер 1.
+pub fn extruded(m: Mat4, tile: u16, tint: Color) {
+    let d = 0.5 / 16.0;
+    let (u0, v0, u1, v1) = tile_uv(tile);
+    let uv = [vec2(u0, v1), vec2(u1, v1), vec2(u1, v0), vec2(u0, v0)];
+    let front = [vec3(-0.5, -0.5, d), vec3(0.5, -0.5, d), vec3(0.5, 0.5, d), vec3(-0.5, 0.5, d)].map(|p| m.transform_point3(p));
+    quad(front, uv, tint, false);
+    let back = [vec3(0.5, -0.5, -d), vec3(-0.5, -0.5, -d), vec3(-0.5, 0.5, -d), vec3(0.5, 0.5, -d)].map(|p| m.transform_point3(p));
+    quad(back, [uv[1], uv[0], uv[3], uv[2]], scale_c(tint, 0.85), false);
+    EXTRUDED.with(|e| {
+        let mut e = e.borrow_mut();
+        let sides = e.entry(tile).or_insert_with(|| extruded_sides(tile));
+        let side_tint = scale_c(tint, 0.7);
+        for (p, uvp) in sides.iter() {
+            quad(p.map(|v| m.transform_point3(v)), [*uvp; 4], side_tint, false);
+        }
+    });
+}
+
+/// Рука и предмет от первого лица — классическая анимация взмаха блочных игр.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_first_person(_atlas: &Texture2D, eye: Vec3, fwd: Vec3, right: Vec3, up: Vec3, held: Item, a: &HandAnim, sleeve: Color, skin: Color, light: f32) {
+    use std::f32::consts::PI;
+    let deg = |d: f32| d.to_radians();
+    // пространство камеры: x — вправо, y — вверх, z — назад
+    let cam = Mat4::from_cols(right.extend(0.0), up.extend(0.0), (-fwd).extend(0.0), eye.extend(1.0));
+    // покачивание при ходьбе и запаздывание руки за поворотом
+    let bob = cam
+        * t((a.walk).sin() * 0.04 * a.bob, -(a.walk).cos().abs() * 0.05 * a.bob, 0.0)
+        * rz((a.walk).sin() * 0.03 * a.bob)
+        * rx(a.lag.y * 0.35)
+        * ry(-a.lag.x * 0.35);
+    let k = light;
+    let tint = Color::new(k, k, k, 1.0);
+    let sl = Color::new(sleeve.r * k, sleeve.g * k, sleeve.b * k, 1.0);
+    let sk = Color::new(skin.r * k, skin.g * k, skin.b * k, 1.0);
+    let p = a.swing.clamp(0.0, 1.0);
+    let p = if p >= 1.0 { 0.0 } else { p };
+    let sq = p.sqrt();
+    let f = (p * p * PI).sin();
+    let f1 = (sq * PI).sin();
+
+    if held == Item::Empty {
+        // пустая рука: выходит из правого нижнего угла, при ударе выбрасывается вперёд
+        let m = bob
+            * t(-0.3 * f1, 0.4 * (sq * 2.0 * PI).sin(), -0.4 * (p * PI).sin())
+            * t(0.64, -0.6 - a.equip * 0.6, -0.72)
+            * ry(deg(45.0 + f1 * 70.0))
+            * rz(deg(-f * 20.0))
+            * t(-1.0, 3.6, 3.5)
+            * rz(deg(120.0))
+            * rx(deg(200.0))
+            * ry(deg(-135.0))
+            * t(5.6, 0.0, 0.0);
+        // рука 4×12×4 пикселя, плечо в точке (-5, 2, 0)
+        let px = 1.0 / 16.0;
+        cube(m * t(-6.0 * px, 4.0 * px, 0.0) * s3(4.2 * px, 8.0 * px, 4.2 * px), sl);
+        cube(m * t(-6.0 * px, 10.0 * px, 0.0) * s3(4.0 * px, 4.0 * px, 4.0 * px), sk);
+        return;
+    }
+
+    // поедание: предмет у рта, покачивается
+    let m;
+    if a.eat > 0.0 {
+        let e = (a.eat / 1.2).min(1.0);
+        let shake = if e > 0.2 { (a.eat * 30.0).sin().abs() * 0.04 } else { 0.0 };
+        m = bob * t(0.56 - 0.5 * e.min(0.25) * 2.0, -0.52 + shake + e.min(0.25) * 0.4, -0.72) * ry(deg(-e.min(0.25) * 4.0 * 45.0)) * rx(deg(e.min(0.25) * 4.0 * 10.0));
+    } else {
+        // взмах: смещение по дуге + повороты (ease по квадрату и корню)
+        m = bob
+            * t(-0.4 * f1, 0.2 * (sq * 2.0 * PI).sin(), -0.2 * (p * PI).sin())
+            * t(0.56, -0.52 - a.equip * 0.6, -0.72)
+            * ry(deg(45.0))
+            * ry(deg(-f * 20.0))
+            * rz(deg(-f1 * 20.0))
+            * rx(deg(-f1 * 80.0))
+            * ry(deg(-45.0));
+    }
+    match held {
+        Item::Block(b) if blocks::def(b).shape != Shape::Cross => {
+            let d = blocks::def(b);
+            tex_box(m * ry(deg(45.0)) * Mat4::from_scale(Vec3::splat(0.4)), [d.tex[0], d.tex[1], d.tex[2], d.tex[1]], tint);
+        }
+        other => {
+            // плоский предмет толщиной в пиксель: рукоять в ладони, остриё вперёд к прицелу
+            let k = if matches!(other, Item::Tool(..)) { 0.36 } else { 0.3 };
+            let mm = m * Mat4::from_scale(Vec3::splat(k)) * t(0.0, 0.25, 0.125) * ry(deg(135.0)) * rz(deg(25.0)) * Mat4::from_scale(Vec3::splat(1.7));
+            extruded(mm, item_tile(other), tint);
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub fn mat_color(m: Mat) -> Color {
+    let (c, _, _) = m.colors();
+    Color::from_rgba(c[0], c[1], c[2], 255)
+}
+
+/// Отличительные черты существ.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Trait {
+    LongEars,
+    PointEars,
+    Antlers,
+    Horns,
+    UnicornHorn,
+    Crest,
+    EarTufts,
+    WizardHat,
+    Crown,
+    Hood,
+    Turban,
+    StrawHat,
+    MinerHelmet,
+    Plume,
+    Mask,
+    Halo,
+    PumpkinHead,
+    Tusks,
+    Snout,
+    Beard,
+    MushroomCap,
+    CarrotNose,
+    GlowEyes,
+    Spikes,
+    Shell,
+    Hump,
+    Backpack,
+    Cape,
+    AngelWings,
+    BushyTail,
+    FlatTail,
+    FanTail,
+    Stinger,
+    ScorpionTail,
+    Claws,
+}
+
+/// Черты существа: по смыслу имени, а у кого ничего не нашлось — одна по номеру.
+pub fn traits(mob: usize) -> &'static [Trait] {
+    static ALL: std::sync::OnceLock<Vec<Vec<Trait>>> = std::sync::OnceLock::new();
+    &ALL.get_or_init(|| (0..MOBS.len()).map(traits_for).collect())[mob]
+}
+
+fn traits_for(mob: usize) -> Vec<Trait> {
+    use Trait::*;
+    let d = &MOBS[mob];
+    let n = d.name.to_lowercase();
+    let has = |k: &str| n.contains(k);
+    let mut v = Vec::new();
+    let rules: &[(&[&str], &[Trait])] = &[
+        (&["ушаст", "кролик", "тушкан", "ослик"], &[LongEars]),
+        (&["фенек", "лис", "песец", "рысь", "кот", "тенепёс", "волк", "оборотень", "гиена"], &[PointEars, BushyTail]),
+        (&["олень", "вендиго"], &[Antlers]),
+        (&["бурёнка", "барашек", "альпака", "тролль", "бес"], &[Horns]),
+        (&["пони"], &[UnicornHorn]),
+        (&["кудахта", "глухарь", "дракон"], &[Crest]),
+        (&["сова"], &[EarTufts]),
+        (&["колдун", "ведьма", "гном"], &[WizardHat]),
+        (&["король", "королева", "фараон"], &[Crown]),
+        (&["культист", "отшельник", "лучник", "призрак", "упырь"], &[Hood]),
+        (&["караванщик", "жрица"], &[Turban]),
+        (&["пугало", "рыбак", "мельник"], &[StrawHat]),
+        (&["шахтёр", "рудокоп"], &[MinerHelmet]),
+        (&["рыцарь"], &[Plume]),
+        (&["разбойник"], &[Mask]),
+        (&["ангел", "херувим", "серафим"], &[Halo, AngelWings]),
+        (&["тыкв"], &[PumpkinHead]),
+        (&["морж", "кабан"], &[Tusks]),
+        (&["хрюн"], &[Snout]),
+        (&["кузнец", "лесник"], &[Beard]),
+        (&["гриболюд"], &[MushroomCap]),
+        (&["снеговик"], &[CarrotNose]),
+        (&["ёж", "ящер", "хамелеон", "дракон", "тритон", "крот"], &[Spikes]),
+        (&["черепаха", "улитка", "скарабей"], &[Shell]),
+        (&["верблюж"], &[Hump]),
+        (&["торговец"], &[Backpack]),
+        (&["вампир", "падший"], &[Cape]),
+        (&["белка"], &[BushyTail]),
+        (&["бобёр", "выдра"], &[FlatTail]),
+        (&["райская", "аист", "павлин"], &[FanTail]),
+        (&["пчёл"], &[Stinger]),
+        (&["скорпион"], &[ScorpionTail, Claws]),
+        (&["краб", "кракен"], &[Claws]),
+        (&["мракун", "костяк", "мумия", "вурдалак", "утопленник", "зомби"], &[GlowEyes]),
+    ];
+    for (keys, tr) in rules {
+        if keys.iter().any(|k| has(k)) {
+            for t in tr.iter() {
+                if !v.contains(t) {
+                    v.push(*t);
+                }
+            }
+        }
+    }
+    if v.is_empty() {
+        // по номеру — из подходящих к телу
+        let pick: &[Trait] = match d.plan {
+            Plan::Quad => &[Horns, BushyTail, Spikes, PointEars, LongEars, Hump],
+            Plan::Biped => if d.friendly { &[StrawHat, Beard, Backpack, Turban] } else { &[Hood, Cape, Mask, GlowEyes] },
+            Plan::Golem => &[Horns, Spikes, Crown, GlowEyes],
+            Plan::Bird => &[Crest, FanTail, EarTufts],
+            Plan::Spider => &[Claws, Spikes],
+            Plan::Fish => &[Spikes, Horns],
+            Plan::Slime | Plan::Wisp => &[GlowEyes, Crown],
+        };
+        v.push(pick[(mob * 7 + d.name.len()) % pick.len()]);
+    }
+    // злые — с горящими глазами (если на голове не шляпа на глаза)
+    if !d.friendly && !v.contains(&GlowEyes) && !v.contains(&PumpkinHead) && !v.contains(&Plume) {
+        v.push(GlowEyes);
+    }
+    v
+}
