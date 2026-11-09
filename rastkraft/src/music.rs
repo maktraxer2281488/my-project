@@ -41,14 +41,14 @@ impl Track {
             Track::Night => "Ночная тишина",
             Track::Caves => "Глубины — rtxx131",
             Track::Heaven => "Небесные сады — rtxx131",
-            Track::Boss => "Битва",
+            Track::Boss => "Битва — rtxx131",
             Track::Ocean => "Морской бриз",
             Track::Dawn => "Рассвет",
             Track::Dusk => "Закат над холмами",
             Track::Village => "Просторы — rtxx131",
             Track::Aurora => "Северное сияние",
             Track::Clouds => "Над облаками",
-            Track::Fury => "Отвага",
+            Track::Fury => "Отвага — rtxx131",
             Track::Workshop => "Мастерская",
         }
     }

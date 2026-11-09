@@ -41,6 +41,8 @@ build_targets = ["aarch64-linux-android", "armv7-linux-androideabi"]
 fullscreen = true
 # иконка приложения
 res = "android/res"
+# песни rtxx131 — одной копией (assets/music → music/*.ogg в APK)
+assets = "android/assets"
 icon = "@mipmap/ic_launcher"
 opengles_version_major = 2
 opengles_version_minor = 0

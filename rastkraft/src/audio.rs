@@ -35,19 +35,40 @@ fn cache_path(t: Track) -> Option<std::path::PathBuf> {
 }
 
 /// Песни rtxx131, вшитые как есть (OGG): (мелодия, запись).
-const SONGS: &[(Track, &[u8])] = &[
-    (Track::Menu, include_bytes!("../assets/music/menu_rtxx131.ogg")),
-    (Track::Heaven, include_bytes!("../assets/music/heaven_rtxx131.ogg")),
-    (Track::Meadow, include_bytes!("../assets/music/world_rtxx131.ogg")),
-    (Track::Village, include_bytes!("../assets/music/world2_rtxx131.ogg")),
-    (Track::Caves, include_bytes!("../assets/music/caves_rtxx131.ogg")),
+/// На ПК песни вшиты в exe; на Android лежат одной копией в assets APK
+/// (а не в каждой из двух библиотек под разные процессоры).
+macro_rules! song {
+    ($t:expr, $name:literal) => {
+        ($t, $name, if cfg!(target_os = "android") { &[] as &[u8] } else { include_bytes!(concat!("../assets/music/", $name, ".ogg")) as &[u8] })
+    };
+}
+const SONGS: &[(Track, &str, &[u8])] = &[
+    song!(Track::Menu, "menu_rtxx131"),
+    song!(Track::Heaven, "heaven_rtxx131"),
+    song!(Track::Meadow, "world_rtxx131"),
+    song!(Track::Village, "world2_rtxx131"),
+    song!(Track::Caves, "caves_rtxx131"),
+    song!(Track::Boss, "boss_rtxx131"),
+    song!(Track::Fury, "fury_rtxx131"),
 ];
+
+/// Сжатая запись песни: из exe или (на Android) из assets APK. Читать в главном потоке.
+fn song_packed(t: Track) -> Option<Vec<u8>> {
+    let (_, name, bytes) = SONGS.iter().find(|(st, _, _)| *st == t)?;
+    if !bytes.is_empty() {
+        return Some(bytes.to_vec());
+    }
+    let got = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let g = got.clone();
+    macroquad::miniquad::fs::load_file(&format!("music/{name}.ogg"), move |r| *g.borrow_mut() = r.ok());
+    got.take()
+}
 
 /// Готовая запись мелодии в WAV: вшитая, сохранённая ранее или сочинённая заново.
 /// Сочинённая в игре мелодия совпадает с записью байт в байт — качество то же.
 fn track_wav(t: Track) -> Vec<u8> {
-    // настоящая песня вместо сочинённой
-    if let Some(w) = SONGS.iter().find(|(st, _)| *st == t).and_then(|(_, b)| ogg_to_wav(b)) {
+    // настоящая песня вместо сочинённой (вшитая в exe)
+    if let Some(w) = SONGS.iter().find(|(st, _, b)| *st == t && !b.is_empty()).and_then(|(_, _, b)| ogg_to_wav(b)) {
         return w;
     }
     match embedded(t) {
@@ -74,8 +95,11 @@ fn track_wav(t: Track) -> Vec<u8> {
 /// Подготовить мелодию в фоновом потоке.
 fn spawn_track(t: Track) -> Receiver<Vec<u8>> {
     let (tx, rx) = channel();
+    // песню читаем здесь (на Android — из assets, только в главном потоке), распаковываем в фоне
+    let packed = song_packed(t);
     std::thread::spawn(move || {
-        let _ = tx.send(track_wav(t));
+        let wav = packed.as_deref().and_then(ogg_to_wav).unwrap_or_else(|| track_wav(t));
+        let _ = tx.send(wav);
     });
     rx
 }
@@ -215,7 +239,7 @@ impl Audio {
             }
         } else if cur.is_none() {
             if let Some(w) = want {
-                if let Some(bytes) = embedded(w).filter(|_| !EMBED_OGG && !SONGS.iter().any(|(st, _)| *st == w)) {
+                if let Some(bytes) = embedded(w).filter(|_| !EMBED_OGG && !SONGS.iter().any(|(st, _, _)| *st == w)) {
                     self.start(w, bytes);
                     return;
                 }
@@ -329,7 +353,7 @@ mod tests {
         if !EMBEDDED.is_empty() {
             return;
         }
-        let t = Track::Fury;
+        let t = Track::Desert;
         if let Some(p) = cache_path(t) {
             let _ = std::fs::remove_file(&p);
         }
@@ -355,5 +379,9 @@ mod tests {
         assert!((secs - 191.8).abs() < 0.5, "{secs}");
         let secs = wav_secs(&track_wav(Track::Caves));
         assert!((secs - 213.1).abs() < 0.5, "{secs}");
+        let secs = wav_secs(&track_wav(Track::Boss));
+        assert!((secs - 207.7).abs() < 0.5, "{secs}");
+        let secs = wav_secs(&track_wav(Track::Fury));
+        assert!((secs - 128.8).abs() < 0.5, "{secs}");
     }
 }
